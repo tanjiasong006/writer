@@ -2,7 +2,7 @@
 
 ## 职责
 
-定义章节树的数据结构，并校验一棵树是否合法。纯逻辑，不涉及 UI、存储、导入导出。
+定义章节树的数据结构，校验一棵树是否合法，并提供移动章节的操作。纯逻辑，不涉及 UI、存储、导入导出。
 
 ## 数据结构
 
@@ -36,6 +36,31 @@ type ValidateTreeResult =
 成功时返回 `ok: true` 和可信的 `ChapterTree`；失败时返回 `ok: false` 和全部 `issues`。
 输入为 `unknown`，因为树常来自外部数据（文件、导入、粘贴），需在信任边界上做运行时检查。
 
+### moveChapter
+
+```ts
+moveChapter(
+  tree: ChapterTree,          // 已通过 validateTree 的可信树
+  chapterId: ChapterId,       // 要移动的章节
+  targetParentId: ChapterId | null,  // null 表示根层级
+  index: number,              // 移除该章节后，目标父节点 children 中的下标
+): MoveResult
+
+type MoveReason =
+  | 'chapter-not-found'
+  | 'target-not-found'
+  | 'target-is-descendant'   // 目标是自己或自己的子孙，会成环/丢子树
+  | 'index-out-of-range'     // 非整数，或不在 0..长度 内
+
+type MoveResult =
+  | { ok: true; tree: ChapterTree }
+  | { ok: false; reason: MoveReason }
+```
+
+纯函数：不修改传入的 `tree`，返回新树。移动即“摘下来再插回去”，因此同层移动的 `index` 按移除后的位置理解，不受原位置影响。
+
+这是移动的最小原语；上移/下移/拖放到某节点前后等行为由上层根据它组合。
+
 ## 不变量
 
 - `ChapterId` 全局唯一且为非空字符串。
@@ -44,4 +69,4 @@ type ValidateTreeResult =
 
 ## 非目标
 
-移动、新增、删除、编号、UI、持久化均不在此模块。
+新增、删除、编号、UI、持久化均不在此模块。
