@@ -1,6 +1,13 @@
-# Tauri + Vue 3
+# Writer
 
-This template should help get you started developing with Tauri + Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+结构化写作工具，让用户专注写作。
+
+技术栈：Tauri 2 + Vue 3 + Vite，Rust 侧代码在 `src-tauri/`。
+
+```
+npm install
+npm run tauri dev
+```
 
 ## Recommended IDE Setup
 
