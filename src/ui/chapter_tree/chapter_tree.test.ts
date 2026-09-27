@@ -67,3 +67,54 @@ test('渲染不修改传入的章节树', async () => {
   await wrapper.findAll('.chapter-tree__row')[0].trigger('click')
   expect(JSON.stringify(outline)).toBe(snapshot)
 })
+
+test('有子章节的章节可以折叠，折叠后隐藏所有后代章节', async () => {
+  const wrapper = mountTree(outline)
+  const toggles = wrapper.findAll('button.chapter-tree__toggle')
+  expect(toggles).toHaveLength(2) // a 与 b
+
+  await toggles[0].trigger('click')
+
+  expect(texts(wrapper)).toEqual(['1A', '2E'])
+  expect(toggles[0].attributes('aria-expanded')).toBe('false')
+})
+
+test('再次展开后恢复显示后代章节', async () => {
+  const wrapper = mountTree(outline)
+  const toggleA = wrapper.findAll('button.chapter-tree__toggle')[0]
+
+  await toggleA.trigger('click')
+  await toggleA.trigger('click')
+
+  expect(texts(wrapper)).toEqual(['1A', '1.1B', '1.1.1C', '1.2D', '2E'])
+  expect(toggleA.attributes('aria-expanded')).toBe('true')
+})
+
+test('折叠中间章节只隐藏其子树，不影响兄弟章节', async () => {
+  const wrapper = mountTree(outline)
+  const toggleB = wrapper.findAll('button.chapter-tree__toggle')[1]
+
+  await toggleB.trigger('click')
+
+  expect(texts(wrapper)).toEqual(['1A', '1.1B', '1.2D', '2E'])
+})
+
+test('叶子章节不提供折叠按钮，只有占位符', () => {
+  const wrapper = mountTree(outline)
+  const rows = wrapper.findAll('.chapter-tree__row')
+
+  const togglesByRow = rows.map((row) => row.find('button.chapter-tree__toggle').exists())
+  // 行顺序：a, b, c, d, e，其中 a、b 有子章节。
+  expect(togglesByRow).toEqual([true, true, false, false, false])
+})
+
+test('折叠不影响选中状态', async () => {
+  const wrapper = mountTree(outline, 'c')
+
+  await wrapper.findAll('button.chapter-tree__toggle')[1].trigger('click')
+  // c 被隐藏，选中态由 selectedId 决定，展开后仍然是它。
+  await wrapper.findAll('button.chapter-tree__toggle')[1].trigger('click')
+
+  const selected = wrapper.findAll('.chapter-tree__row--selected')
+  expect(selected.map((row) => row.text())).toEqual(['1.1.1C'])
+})
