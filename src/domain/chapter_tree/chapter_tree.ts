@@ -1,12 +1,12 @@
 export type ChapterId = string
 
 export interface ChapterNode {
-  id: ChapterId
-  title: string
-  children: ChapterNode[]
+  readonly id: ChapterId
+  readonly title: string
+  readonly children: readonly ChapterNode[]
 }
 
-export type ChapterTree = ChapterNode[]
+export type ChapterTree = readonly ChapterNode[]
 
 /** 校验问题的机器可读代码。面向用户的文案由 UI 层根据 code 生成。 */
 export type TreeIssueCode =
@@ -20,8 +20,8 @@ export type TreeIssueCode =
 
 /** 一条校验问题。path 指向出问题的位置，code 说明原因。 */
 export interface TreeIssue {
-  path: string
-  code: TreeIssueCode
+  readonly path: string
+  readonly code: TreeIssueCode
 }
 
 /**
@@ -29,8 +29,8 @@ export interface TreeIssue {
  * 判别字段是 ok。
  */
 export type ValidateTreeResult =
-  | { ok: true; tree: ChapterTree }
-  | { ok: false; issues: TreeIssue[] }
+  | { readonly ok: true; readonly tree: ChapterTree }
+  | { readonly ok: false; readonly issues: readonly TreeIssue[] }
 
 /**
  * 校验一棵章节树。
@@ -99,8 +99,8 @@ export type MoveReason =
 
 /** 移动结果：成功时给出新的可信树，失败时给出原因。 */
 export type MoveResult =
-  | { ok: true; tree: ChapterTree }
-  | { ok: false; reason: MoveReason }
+  | { readonly ok: true; readonly tree: ChapterTree }
+  | { readonly ok: false; readonly reason: MoveReason }
 
 /**
  * 把一个章节（连同其子树）移动到 targetParentId 下的第 index 个位置。
@@ -154,12 +154,11 @@ export type InsertReason =
   | 'parent-not-found'
   | 'index-out-of-range'
   | 'id-duplicate'
-  | 'invalid-node'
 
 /** 新增结果：成功时给出新的可信树，失败时给出原因。 */
 export type InsertResult =
-  | { ok: true; tree: ChapterTree }
-  | { ok: false; reason: InsertReason }
+  | { readonly ok: true; readonly tree: ChapterTree }
+  | { readonly ok: false; readonly reason: InsertReason }
 
 /**
  * 在 targetParentId 下的第 index 个位置插入一个新章节（node 及其子树）。
@@ -167,6 +166,7 @@ export type InsertResult =
  * - targetParentId 为 null 表示插入到根层级。
  * - index 是插入位置，范围 0..目标 children 当前长度（等于长度即追加）。
  * - node 必须是完整的 ChapterNode；它的 id 不能与树中已有 id 重复。
+ *   进入 Domain 后信任类型，不再重复做结构校验；node 的合法性由边界上的 validateTree 保证。
  * - 纯函数：不修改传入的 tree。
  *
  * 前置条件：tree 是一棵已通过 validateTree 的可信树。
@@ -177,8 +177,6 @@ export function insertChapter(
   index: number,
   node: ChapterNode,
 ): InsertResult {
-  if (!validateTree([node]).ok) return { ok: false, reason: 'invalid-node' }
-
   if (parentId !== null && !findNode(tree, parentId)) {
     return { ok: false, reason: 'parent-not-found' }
   }
@@ -208,8 +206,8 @@ export type RemoveReason = 'chapter-not-found'
 
 /** 删除结果：成功时给出新的可信树，失败时给出原因。 */
 export type RemoveResult =
-  | { ok: true; tree: ChapterTree }
-  | { ok: false; reason: RemoveReason }
+  | { readonly ok: true; readonly tree: ChapterTree }
+  | { readonly ok: false; readonly reason: RemoveReason }
 
 /**
  * 删除 chapterId 对应的章节（连同子树），返回新树。
@@ -227,8 +225,8 @@ export type RenameReason = 'chapter-not-found' | 'title-invalid'
 
 /** 重命名结果：成功时给出新的可信树，失败时给出原因。 */
 export type RenameResult =
-  | { ok: true; tree: ChapterTree }
-  | { ok: false; reason: RenameReason }
+  | { readonly ok: true; readonly tree: ChapterTree }
+  | { readonly ok: false; readonly reason: RenameReason }
 
 /**
  * 修改 chapterId 对应章节的 title，返回新树。
@@ -246,7 +244,7 @@ export function renameChapter(
   return { ok: true, tree: replaceTitle(tree, chapterId, title) }
 }
 
-function findNode(list: ChapterNode[], id: ChapterId): ChapterNode | null {
+function findNode(list: readonly ChapterNode[], id: ChapterId): ChapterNode | null {
   for (const node of list) {
     if (node.id === id) return node
     const found = findNode(node.children, id)
@@ -259,7 +257,11 @@ function containsId(node: ChapterNode, id: ChapterId): boolean {
   return node.id === id || node.children.some((child) => containsId(child, id))
 }
 
-function spliceAt(list: ChapterNode[], index: number, node: ChapterNode): ChapterNode[] {
+function spliceAt(
+  list: readonly ChapterNode[],
+  index: number,
+  node: ChapterNode,
+): readonly ChapterNode[] {
   const next = list.slice()
   next.splice(index, 0, node)
   return next
@@ -267,9 +269,9 @@ function spliceAt(list: ChapterNode[], index: number, node: ChapterNode): Chapte
 
 /** 摘掉 id 对应的节点，返回新树和摘掉的节点；沿途节点重建，不修改原树。 */
 function removeNode(
-  list: ChapterNode[],
+  list: readonly ChapterNode[],
   id: ChapterId,
-): [ChapterNode[], ChapterNode | null] {
+): [readonly ChapterNode[], ChapterNode | null] {
   let removed: ChapterNode | null = null
   const next: ChapterNode[] = []
   for (const node of list) {
@@ -285,11 +287,11 @@ function removeNode(
 }
 
 function insertNode(
-  list: ChapterNode[],
+  list: readonly ChapterNode[],
   parentId: ChapterId,
   index: number,
   node: ChapterNode,
-): ChapterNode[] {
+): readonly ChapterNode[] {
   return list.map((current) =>
     current.id === parentId
       ? { ...current, children: spliceAt(current.children, index, node) }
@@ -302,7 +304,11 @@ function collectIds(node: ChapterNode, acc: Set<ChapterId>): void {
   for (const child of node.children) collectIds(child, acc)
 }
 
-function replaceTitle(list: ChapterNode[], id: ChapterId, title: string): ChapterNode[] {
+function replaceTitle(
+  list: readonly ChapterNode[],
+  id: ChapterId,
+  title: string,
+): readonly ChapterNode[] {
   return list.map((node) =>
     node.id === id
       ? { ...node, title }

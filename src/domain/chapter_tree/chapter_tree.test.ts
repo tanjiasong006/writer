@@ -16,7 +16,7 @@ const valid: ChapterTree = [
 ]
 
 /** 断言校验失败并取出问题列表。 */
-function issuesOf(tree: unknown): TreeIssue[] {
+function issuesOf(tree: unknown): readonly TreeIssue[] {
   const result = validateTree(tree)
   assert.equal(result.ok, false)
   return result.ok ? [] : result.issues
@@ -255,12 +255,6 @@ test('插入失败的原因', () => {
   assert.equal(
     insertReason(outline, null, 0, chapter('c', 'C', [chapter('a')])),
     'id-duplicate',
-  )
-  assert.equal(insertReason(outline, null, 0, chapter('')), 'invalid-node')
-  assert.equal(insertReason(outline, null, 0, chapter('c', 1 as any)), 'invalid-node')
-  assert.equal(
-    insertReason(outline, null, 0, { id: 'c', title: 'C', children: null } as any),
-    'invalid-node',
   )
 })
 
