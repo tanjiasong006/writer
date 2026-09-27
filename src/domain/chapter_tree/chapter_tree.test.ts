@@ -1,7 +1,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { insertChapter, moveChapter, removeChapter, renameChapter, validateTree } from './chapter_tree.ts'
-import type { ChapterNode, ChapterTree, MoveReason, TreeIssue } from './chapter_tree.ts'
+import { insertChapter, moveChapter, removeChapter, renameChapter, validateMove, validateTree } from './chapter_tree.ts'
+import type { ChapterNode, ChapterTree, InsertReason, MoveReason, TreeIssue } from './chapter_tree.ts'
 
 const valid: ChapterTree = [
   {
@@ -187,6 +187,38 @@ test('移动失败的原因', () => {
   assert.equal(moveReason(outline, 'a1', 'a', 1.5), 'index-out-of-range')
 })
 
+// --- validateMove：移动规则的唯一实现 ---
+
+test('validateMove：合法移动返回 null', () => {
+  assert.equal(validateMove(outline, 'a1', 'a', 1), null)
+  assert.equal(validateMove(outline, 'a1', null, 0), null)
+  assert.equal(validateMove(outline, 'b', 'a2', 0), null)
+})
+
+test('validateMove：原因与 moveChapter 一致', () => {
+  assert.equal(validateMove(outline, 'zzz', null, 0), 'chapter-not-found')
+  assert.equal(validateMove(outline, 'a1', 'zzz', 0), 'target-not-found')
+  assert.equal(validateMove(outline, 'a', 'a2', 0), 'target-is-descendant')
+  assert.equal(validateMove(outline, 'a', 'a', 0), 'target-is-descendant')
+  assert.equal(validateMove(outline, 'a1', 'a', 3), 'index-out-of-range')
+  assert.equal(validateMove(outline, 'a1', 'a', -1), 'index-out-of-range')
+  assert.equal(validateMove(outline, 'a1', 'a', 1.5), 'index-out-of-range')
+})
+
+test('validateMove：同父移动按移除后的长度判定', () => {
+  // a 下有 a1、a2，移除 a1 后长度为 1，index 1 合法（追加到 a2 之后）。
+  assert.equal(validateMove(outline, 'a1', 'a', 1), null)
+  // index 2 超出移除后的范围。
+  assert.equal(validateMove(outline, 'a1', 'a', 2), 'index-out-of-range')
+})
+
+test('validateMove：只读，不修改输入树', () => {
+  const snapshot = JSON.stringify(outline)
+  validateMove(outline, 'a1', 'a', 1)
+  validateMove(outline, 'a', 'a2', 0)
+  assert.equal(JSON.stringify(outline), snapshot)
+})
+
 // --- insertChapter / removeChapter / renameChapter ---
 
 function chapter(id: string, title = id, children: ChapterNode[] = []): ChapterNode {
@@ -265,6 +297,41 @@ test('插入失败的原因', () => {
     insertReason(outline, null, 0, chapter('c', 'C', [chapter('c1', 'C1', [chapter('c1')])])),
     'id-duplicate',
   )
+})
+
+test('插入拒绝空字符串 id', () => {
+  assert.equal(insertReason(outline, null, 0, chapter('')), 'id-invalid')
+})
+
+test('插入拒绝子树内部的循环引用', () => {
+  const cyclic: any = chapter('cyc')
+  cyclic.children.push(cyclic)
+  assert.equal(insertReason(outline, null, 0, cyclic), 'node-reused')
+})
+
+test('插入拒绝共享节点', () => {
+  const shared = chapter('shared')
+  const subtree = chapter('c', 'C', [shared, shared])
+  assert.equal(insertReason(outline, null, 0, subtree), 'node-reused')
+})
+
+test('插入失败时原树保持不变', () => {
+  const cyclic: any = chapter('cyc')
+  cyclic.children.push(cyclic)
+  const snapshot = JSON.stringify(outline)
+
+  assert.equal(insertChapter(outline, null, 0, cyclic).ok, false)
+  assert.equal(insertChapter(outline, null, 0, chapter('')).ok, false)
+  assert.equal(insertChapter(outline, null, 0, chapter('a1')).ok, false)
+
+  assert.equal(JSON.stringify(outline), snapshot)
+})
+
+test('InsertReason 不含 not-an-array：子树以 [node] 数组校验', () => {
+  // 类型层断言：若 InsertReason 又收进 not-an-array，@ts-expect-error 会因未使用而报错。
+  // @ts-expect-error insertChapter 的子树以数组校验，不会返回 not-an-array
+  const impossible: InsertReason = 'not-an-array'
+  void impossible
 })
 
 test('删除根层节点', () => {

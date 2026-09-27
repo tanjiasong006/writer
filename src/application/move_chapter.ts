@@ -1,5 +1,6 @@
 import {
   moveChapter,
+  validateMove,
   type ChapterId,
   type ChapterNode,
   type ChapterTree,
@@ -40,9 +41,11 @@ export function moveChapterTo(tree: ChapterTree, intent: MoveIntent): MoveChapte
 /**
  * 判断一次拖拽意图是否会真正改变章节树，供 UI 决定是否显示可放置反馈。
  *
+ * 纯校验：只读入参 tree，不构造也不修改任何新树；真正的树修改由 drop 后的 moveChapterTo 执行。
+ *
  * 以下情况返回 false：
  * - 被移动章节或目标章节不存在；
- * - 目标是自身或自身后代（成环，由 Domain 判定）；
+ * - 目标是自身或自身后代（成环）；
  * - 落点换算后的位置与当前位置相同（no-op）。
  *
  * 前置条件：tree 是一棵已通过 validateTree 的可信树。
@@ -50,11 +53,10 @@ export function moveChapterTo(tree: ChapterTree, intent: MoveIntent): MoveChapte
 export function canMoveChapter(tree: ChapterTree, intent: MoveIntent): boolean {
   const plan = resolveTarget(tree, intent)
   if ('reason' in plan) return false
-  // 摘下来再插回同一位置：没有实际位移。
+  // 摘下来再插回同一位置：没有实际位移，不显示放置反馈。
   if (plan.targetParentId === plan.moving.parentId && plan.index === plan.moving.index) return false
-  // 成环等剩余规则交给 Domain 判定，不在 Application 重复实现。
-  // ponytail: 每次悬停都让 Domain 算一棵新树来验合法性；章节树大到卡顿再换成纯校验函数。
-  return moveChapter(tree, intent.chapterId, plan.targetParentId, plan.index).ok
+  // 存在性、成环、越界等移动规则只有 Domain 一份，这里只做无副作用的只读校验。
+  return validateMove(tree, intent.chapterId, plan.targetParentId, plan.index) === null
 }
 
 type TargetPlan = {
@@ -76,7 +78,7 @@ function resolveTarget(tree: ChapterTree, intent: MoveIntent): TargetPlan | { re
 
   if (intent.position === 'inside') {
     targetParentId = intent.targetChapterId
-    index = findNode(tree, targetParentId)?.children.length ?? 0
+    index = target.node.children.length
   } else {
     targetParentId = target.parentId
     index = target.index + (intent.position === 'after' ? 1 : 0)
@@ -91,25 +93,17 @@ function resolveTarget(tree: ChapterTree, intent: MoveIntent): TargetPlan | { re
 interface Location {
   readonly parentId: ChapterId | null
   readonly index: number
+  readonly node: ChapterNode
 }
 
 function locate(tree: ChapterTree, id: ChapterId): Location | null {
   const visit = (list: ChapterTree, parentId: ChapterId | null): Location | null => {
     for (let i = 0; i < list.length; i++) {
-      if (list[i].id === id) return { parentId, index: i }
+      if (list[i].id === id) return { parentId, index: i, node: list[i] }
       const hit = visit(list[i].children, list[i].id)
       if (hit) return hit
     }
     return null
   }
   return visit(tree, null)
-}
-
-function findNode(list: ChapterTree, id: ChapterId): ChapterNode | null {
-  for (const node of list) {
-    if (node.id === id) return node
-    const hit = findNode(node.children, id)
-    if (hit) return hit
-  }
-  return null
 }

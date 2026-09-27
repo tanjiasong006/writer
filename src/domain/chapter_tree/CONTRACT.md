@@ -8,7 +8,7 @@
 
 数据默认 readonly，状态变化一律通过生成新数据表达，不原地修改。
 
-外部数据在进入 Domain 前用 `validateTree` 校验；进入 Domain 后信任 TypeScript 类型，不再重复做结构校验，只在类型表达不了的语义约束上返回错误（如 id 唯一、target 存在、index 范围）。
+外部数据在进入 Domain 前用 `validateTree` 校验；进入 Domain 后信任 TypeScript 类型，不再重复做结构校验。唯一的例外是 `insertChapter`：待插入子树是可能被上层组装出来的新数据，它会先经过与 `validateTree` 相同的结构检查，确保返回的树仍满足全部不变量。其余操作只在类型表达不了的语义约束上返回错误（如 id 唯一、target 存在、index 范围）。
 
 ## 数据结构
 
@@ -53,6 +53,27 @@ type ValidateTreeResult =
 
 `issues` 只给机器可读的 `code` 和 `path`，不含面向用户的文案；文案由 UI 层根据 `code` 生成。
 
+### validateMove
+
+```ts
+type MoveReason =
+  | 'chapter-not-found'
+  | 'target-not-found'
+  | 'target-is-descendant'   // 目标是自己或自己的子孙，会成环/丢子树
+  | 'index-out-of-range'     // 非整数，或不在 0..长度 内
+
+validateMove(
+  tree: ChapterTree,          // 已通过 validateTree 的可信树
+  chapterId: ChapterId,
+  targetParentId: ChapterId | null,
+  index: number,              // 移除该章节后，目标父节点 children 中的下标
+): MoveReason | null
+```
+
+只读校验：返回 `null` 表示合法，否则给出失败原因。不构造也不修改任何树。
+`index` 的基准与 `moveChapter` 一致。这是移动规则的唯一实现，`moveChapter` 与
+Application 的落点校验（`canMoveChapter`）都复用它，避免两层各写一份规则。
+
 ### moveChapter
 
 ```ts
@@ -63,18 +84,13 @@ moveChapter(
   index: number,              // 移除该章节后，目标父节点 children 中的下标
 ): MoveResult
 
-type MoveReason =
-  | 'chapter-not-found'
-  | 'target-not-found'
-  | 'target-is-descendant'   // 目标是自己或自己的子孙，会成环/丢子树
-  | 'index-out-of-range'     // 非整数，或不在 0..长度 内
-
 type MoveResult =
   | { readonly ok: true; readonly tree: ChapterTree }
   | { readonly ok: false; readonly reason: MoveReason }
 ```
 
-纯函数：不修改传入的 `tree`，返回新树。移动即“摘下来再插回去”，因此同层移动的 `index` 按移除后的位置理解，不受原位置影响。
+纯函数：先调用 `validateMove` 判定合法性，再执行“摘下来再插回去”。
+不修改传入的 `tree`，返回新树。同层移动的 `index` 按移除后的位置理解，不受原位置影响。
 
 这是移动的最小原语；上移/下移/拖放到某节点前后等行为由上层根据它组合。
 
@@ -91,14 +107,18 @@ insertChapter(
 type InsertReason =
   | 'parent-not-found'
   | 'index-out-of-range'
-  | 'id-duplicate'    // node 或其子树的 id 与树中已有 id 冲突，或待插入子树内部自身重复
+  // 子树结构问题：空 id、循环引用、共享节点、内部重复 id 等。
+  // 子树以 [node] 数组校验，不会出现 not-an-array，故从 TreeIssueCode 中排除。
+  | Exclude<TreeIssueCode, 'not-an-array'>
 
 type InsertResult =
   | { readonly ok: true; readonly tree: ChapterTree }
   | { readonly ok: false; readonly reason: InsertReason }
 ```
 
-纯函数：不修改传入的 `tree`。`node` 按 `ChapterNode` 类型信任，不再做结构校验；其 id 不能与树中已有 id 重复（该语义约束类型表达不了，仍要检查）。
+纯函数：不修改传入的 `tree`。`node` 先作为一棵单节点子树通过 `validateTree`，
+确认没有空 id、循环引用、共享节点、子树内部重复 id；其 id 还不能与树中已有 id 重复。
+因此成功时返回的树一定满足全部不变量。
 
 ### removeChapter
 

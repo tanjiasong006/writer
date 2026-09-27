@@ -1,51 +1,83 @@
-<script setup>
-import { ref } from "vue";
-import { invoke } from "@tauri-apps/api/core";
+<script setup lang="ts">
+import { ref } from 'vue'
+import ChapterTree from './ui/chapter_tree/ChapterTree.vue'
+import type { ChapterId, ChapterTree as ChapterTreeModel } from './domain/chapter_tree/chapter_tree.ts'
+import type { MoveReason } from './domain/chapter_tree/chapter_tree.ts'
+import { moveChapterTo, type MoveIntent } from './application/move_chapter.ts'
 
-const greetMsg = ref("");
-const name = ref("");
+/**
+ * 应用入口的最小组合层：持有当前章节树和选中章节，渲染 ChapterTree，
+ * 并把 select / move 事件接到 Application 用例上。
+ * 这里不实现任何章节树规则，规则全部由 Domain 负责。
+ * 尚未接入持久化与编辑器，初始树只是最小示例数据。
+ */
+const tree = ref<ChapterTreeModel>([
+  {
+    id: 'chapter-1',
+    title: '第一章',
+    children: [{ id: 'chapter-1-1', title: '第一节', children: [] }],
+  },
+  { id: 'chapter-2', title: '第二章', children: [] },
+])
 
-async function greet() {
-  // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-  greetMsg.value = await invoke("greet", { name: name.value });
+const selectedId = ref<ChapterId | null>(null)
+const moveError = ref<string | null>(null)
+
+function select(chapterId: ChapterId): void {
+  selectedId.value = chapterId
+}
+
+function move(intent: MoveIntent): void {
+  const result = moveChapterTo(tree.value, intent)
+  if (result.ok) {
+    tree.value = result.tree
+    moveError.value = null
+    return
+  }
+  moveError.value = messageForMoveReason(result.reason)
+}
+
+/** Domain 只给机器可读 reason，面向用户的文案由 UI 层负责。 */
+function messageForMoveReason(reason: MoveReason): string {
+  switch (reason) {
+    case 'chapter-not-found':
+      return '要移动的章节不存在。'
+    case 'target-not-found':
+      return '目标章节不存在。'
+    case 'target-is-descendant':
+      return '不能把章节移动到它自己的子章节里。'
+    case 'index-out-of-range':
+      return '目标位置无效。'
+  }
 }
 </script>
 
 <template>
-  <main class="container">
-    <h1>Welcome to Tauri + Vue</h1>
-
-    <div class="row">
-      <a href="https://vite.dev" target="_blank">
-        <img src="/vite.svg" class="logo vite" alt="Vite logo" />
-      </a>
-      <a href="https://tauri.app" target="_blank">
-        <img src="/tauri.svg" class="logo tauri" alt="Tauri logo" />
-      </a>
-      <a href="https://vuejs.org/" target="_blank">
-        <img src="./assets/vue.svg" class="logo vue" alt="Vue logo" />
-      </a>
-    </div>
-    <p>Click on the Tauri, Vite, and Vue logos to learn more.</p>
-
-    <form class="row" @submit.prevent="greet">
-      <input id="greet-input" v-model="name" placeholder="Enter a name..." />
-      <button type="submit">Greet</button>
-    </form>
-    <p>{{ greetMsg }}</p>
+  <main class="app">
+    <h1 class="app__title">Writer</h1>
+    <ChapterTree :tree="tree" :selected-id="selectedId" @select="select" @move="move" />
+    <p v-if="moveError" class="app__error" role="alert">{{ moveError }}</p>
   </main>
 </template>
 
 <style scoped>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
+.app {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  text-align: left;
 }
 
-.logo.vue:hover {
-  filter: drop-shadow(0 0 2em #249b73);
+.app__title {
+  font-size: 1.25rem;
 }
 
+.app__error {
+  margin-top: 1rem;
+  color: #b91c1c;
+}
 </style>
+
 <style>
 :root {
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
@@ -63,98 +95,10 @@ async function greet() {
   -webkit-text-size-adjust: 100%;
 }
 
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;
     background-color: #2f2f2f;
   }
-
-  a:hover {
-    color: #24c8db;
-  }
-
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
 }
-
 </style>

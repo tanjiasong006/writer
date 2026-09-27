@@ -97,6 +97,40 @@ export type MoveReason =
   | 'target-is-descendant'
   | 'index-out-of-range'
 
+/**
+ * 校验一次移动是否合法，不构造新树。
+ *
+ * - 返回 null 表示合法，否则返回失败原因。
+ * - index 以“移除被移动章节之后”的目标 children 为准，与 moveChapter 一致。
+ * - 这是移动规则的唯一实现：moveChapter 与上层落点校验都复用它。
+ *
+ * 前置条件：tree 是一棵已通过 validateTree 的可信树。
+ */
+export function validateMove(
+  tree: ChapterTree,
+  chapterId: ChapterId,
+  targetParentId: ChapterId | null,
+  index: number,
+): MoveReason | null {
+  const moving = locateNode(tree, chapterId, null)
+  if (!moving) return 'chapter-not-found'
+
+  let baseLength = tree.length
+  if (targetParentId !== null) {
+    const target = locateNode(tree, targetParentId, null)
+    if (!target) return 'target-not-found'
+    // 移到自身或自己的子树里会形成环，也会把整棵子树从树上摘下来。
+    if (containsId(moving.node, targetParentId)) return 'target-is-descendant'
+    baseLength = target.node.children.length
+  }
+
+  // 移动即“先摘除再插入”，同父移动时目标 children 少一个。
+  const length = moving.parentId === targetParentId ? baseLength - 1 : baseLength
+  if (!Number.isInteger(index) || index < 0 || index > length) return 'index-out-of-range'
+
+  return null
+}
+
 /** 移动结果：成功时给出新的可信树，失败时给出原因。 */
 export type MoveResult =
   | { readonly ok: true; readonly tree: ChapterTree }
@@ -118,29 +152,11 @@ export function moveChapter(
   targetParentId: ChapterId | null,
   index: number,
 ): MoveResult {
-  const chapter = findNode(tree, chapterId)
-  if (!chapter) return { ok: false, reason: 'chapter-not-found' }
-
-  if (targetParentId !== null && !findNode(tree, targetParentId)) {
-    return { ok: false, reason: 'target-not-found' }
-  }
-
-  // 移到自身或自己的子树里会形成环，也会把整棵子树从树上摘下来。
-  if (targetParentId !== null && containsId(chapter, targetParentId)) {
-    return { ok: false, reason: 'target-is-descendant' }
-  }
+  const reason = validateMove(tree, chapterId, targetParentId, index)
+  if (reason) return { ok: false, reason }
 
   const [without, removed] = removeNode(tree, chapterId)
   if (!removed) return { ok: false, reason: 'chapter-not-found' }
-
-  const targetLength =
-    targetParentId === null
-      ? without.length
-      : (findNode(without, targetParentId)?.children.length ?? 0)
-
-  if (!Number.isInteger(index) || index < 0 || index > targetLength) {
-    return { ok: false, reason: 'index-out-of-range' }
-  }
 
   const next =
     targetParentId === null
@@ -150,10 +166,20 @@ export function moveChapter(
   return { ok: true, tree: next }
 }
 
+/**
+ * 待插入子树可能出现的结构问题码。
+ * 子树以 [node] 数组交给 validateTree，数组输入不会产生 not-an-array，因此排除它。
+ */
+type SubtreeIssueCode = Exclude<TreeIssueCode, 'not-an-array'>
+
+/**
+ * 插入失败的原因。待插入子树的结构问题复用 validateTree 的问题码，
+ * 这样“空 id、循环引用、共享节点、内部重复 id”都有精确且机器可读的原因。
+ */
 export type InsertReason =
   | 'parent-not-found'
   | 'index-out-of-range'
-  | 'id-duplicate'
+  | SubtreeIssueCode
 
 /** 新增结果：成功时给出新的可信树，失败时给出原因。 */
 export type InsertResult =
@@ -165,8 +191,9 @@ export type InsertResult =
  *
  * - targetParentId 为 null 表示插入到根层级。
  * - index 是插入位置，范围 0..目标 children 当前长度（等于长度即追加）。
- * - node 必须是完整的 ChapterNode；它的 id 不能与树中已有 id 重复。
- *   进入 Domain 后信任类型，不再重复做结构校验；node 的合法性由边界上的 validateTree 保证。
+ * - node 会先作为一棵单节点子树通过 validateTree，确保空 id、循环引用、
+ *   共享节点、子树内部重复 id 都进不来；其 id 还必须与树中已有 id 不重复。
+ *   因此成功时返回的树一定满足 ChapterTree 的全部不变量。
  * - 纯函数：不修改传入的 tree。
  *
  * 前置条件：tree 是一棵已通过 validateTree 的可信树。
@@ -188,9 +215,15 @@ export function insertChapter(
     return { ok: false, reason: 'index-out-of-range' }
   }
 
+  // 复用整棵树的校验逻辑检查待插入子树；[node] 是数组，不会触发 not-an-array。
+  const subtree = validateTree([node])
+  if (!subtree.ok) {
+    // 上一条注释保证 code 不可能是 not-an-array，断言仅用于收窄类型。
+    return { ok: false, reason: subtree.issues[0].code as SubtreeIssueCode }
+  }
+
   const ids = new Set<ChapterId>()
-  // 子树内部也不能有重复 id；Set 会静默去重，所以在收集时就要发现。
-  if (collectIds(node, ids)) return { ok: false, reason: 'id-duplicate' }
+  collectIds(subtree.tree[0], ids)
   for (const id of ids) {
     if (findNode(tree, id)) return { ok: false, reason: 'id-duplicate' }
   }
@@ -253,6 +286,25 @@ function findNode(list: readonly ChapterNode[], id: ChapterId): ChapterNode | nu
   return null
 }
 
+interface NodeLocation {
+  readonly parentId: ChapterId | null
+  readonly node: ChapterNode
+}
+
+/** 定位节点及其直接父节点；根层级节点 parentId 为 null。 */
+function locateNode(
+  list: readonly ChapterNode[],
+  id: ChapterId,
+  parentId: ChapterId | null,
+): NodeLocation | null {
+  for (const node of list) {
+    if (node.id === id) return { parentId, node }
+    const found = locateNode(node.children, id, node.id)
+    if (found) return found
+  }
+  return null
+}
+
 function containsId(node: ChapterNode, id: ChapterId): boolean {
   return node.id === id || node.children.some((child) => containsId(child, id))
 }
@@ -299,13 +351,10 @@ function insertNode(
   )
 }
 
-function collectIds(node: ChapterNode, acc: Set<ChapterId>): boolean {
-  if (acc.has(node.id)) return true
+/** 收集子树中所有 id；结构问题（含内部重复 id）已由 validateTree 排除。 */
+function collectIds(node: ChapterNode, acc: Set<ChapterId>): void {
   acc.add(node.id)
-  for (const child of node.children) {
-    if (collectIds(child, acc)) return true
-  }
-  return false
+  for (const child of node.children) collectIds(child, acc)
 }
 
 function replaceTitle(

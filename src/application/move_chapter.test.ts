@@ -150,3 +150,25 @@ test('canMoveChapter：inside 到原父章节不是最后一个时有效', () =>
   // a1 不是 a 的最后一个子章节，inside 到 a 会移到末尾。
   assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'a', position: 'inside' }), true)
 })
+
+/** 递归冻结，能在校验尝试原地修改树时立即报错。 */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value)) deepFreeze(child)
+    Object.freeze(value)
+  }
+  return value
+}
+
+test('canMoveChapter：只读校验，不修改也不重建输入树', () => {
+  const snapshot = JSON.stringify(outline)
+  const frozen = deepFreeze(structuredClone(outline))
+
+  // 冻结输入下仍能得出正确结论，说明没有原地写入。
+  assert.equal(canMoveChapter(frozen, { chapterId: 'a1', targetChapterId: 'a2', position: 'after' }), true)
+  assert.equal(canMoveChapter(frozen, { chapterId: 'a', targetChapterId: 'a2', position: 'before' }), false)
+
+  // 返回布尔值而非新树，原树内容与引用都不变。
+  assert.equal(JSON.stringify(frozen), snapshot)
+  assert.equal(JSON.stringify(outline), snapshot)
+})
