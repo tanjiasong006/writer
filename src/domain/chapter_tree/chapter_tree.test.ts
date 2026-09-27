@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { insertChapter, moveChapter, removeChapter, renameChapter, validateTree } from './chapter_tree.ts'
 import type { ChapterNode, ChapterTree, MoveReason, TreeIssue } from './chapter_tree.ts'

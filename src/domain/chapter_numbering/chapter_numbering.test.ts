@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { computeChapterNumbers } from './chapter_numbering.ts'
 import { validateTree } from '../chapter_tree/chapter_tree.ts'

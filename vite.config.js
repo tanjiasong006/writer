@@ -7,6 +7,11 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [vue()],
 
+  // Vitest 用最小的 DOM 环境跑 Vue 组件测试。
+  test: {
+    environment: "happy-dom",
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
