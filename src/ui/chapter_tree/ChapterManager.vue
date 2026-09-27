@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import ChapterTree from './ChapterTree.vue'
-import { appendChapter } from '../../application/create_chapter.ts'
+import {
+  appendChapter,
+  createChapterAfter,
+  type CreateChapterResult,
+} from '../../application/create_chapter.ts'
 import { moveChapterTo, type MoveIntent } from '../../application/move_chapter.ts'
 import { renameChapter } from '../../application/rename_chapter.ts'
 import { removeChapter } from '../../application/remove_chapter.ts'
@@ -18,10 +22,14 @@ import {
 /**
  * 章节管理组合组件。
  *
- * 持有章节树与选中态，把新增/重命名/删除/移动都交给 Application 用例执行，
- * 失败原因在这里映射成用户文案。ChapterTree 仍只负责树的展示与树内交互
- * （选择、折叠、拖拽），Domain 规则不在这层重写。
+ * 持有章节树、选中态与编辑态，把 ChapterTree 发出的意图交给 Application 用例执行，
+ * 失败原因在这里映射成用户文案。章节结构规则不在这一层重写。
+ * 新建后会自动选中新章节并进入内联重命名。
  */
+
+/** 新建章节的默认标题；创建后立即进入内联编辑，用户直接输入即可。 */
+const DEFAULT_TITLE = '未命名章节'
+
 const props = withDefaults(
   defineProps<{
     /** 初始章节树；调用方保证是已校验的可信树。 */
@@ -35,123 +43,100 @@ const props = withDefaults(
   },
 )
 
-type EditKind = 'create-root' | 'create-child' | 'rename'
-
 const tree = ref<ChapterTreeModel>(props.initialTree)
 const selectedId = ref<ChapterId | null>(props.initialSelectedId)
+const editingId = ref<ChapterId | null>(null)
+const deletingId = ref<ChapterId | null>(null)
 const errorMessage = ref<string | null>(null)
-
-const editKind = ref<EditKind | null>(null)
-const editTitle = ref('')
-const confirmingDelete = ref(false)
-const titleInput = ref<HTMLInputElement | null>(null)
 const confirmCancelButton = ref<HTMLButtonElement | null>(null)
-const deleteButton = ref<HTMLButtonElement | null>(null)
 
-const selectedTitle = computed(() =>
-  selectedId.value === null ? '' : (findChapter(tree.value, selectedId.value)?.title ?? ''),
+const deleting = computed(() =>
+  deletingId.value === null ? null : findChapter(tree.value, deletingId.value),
 )
-
-const editLabel = computed(() => (editKind.value === 'rename' ? '新标题' : '章节标题'))
-const canSubmitEdit = computed(() => editTitle.value.trim().length > 0)
-
-/** 打开表单后把焦点移到唯一的输入框，保证键盘可继续操作。 */
-async function focusTitleInput(): Promise<void> {
-  await nextTick()
-  titleInput.value?.focus()
-  titleInput.value?.select()
-}
+const deletingTitle = computed(() => deleting.value?.title ?? '')
+const deletingChildCount = computed(() => deleting.value?.children.length ?? 0)
 
 function clearError(): void {
   errorMessage.value = null
 }
 
-function startCreateRoot(): void {
+/**
+ * Tree Header 的 +：有选中章节时在其后新建同级，否则追加到根末尾（spec §21）。
+ * 位置换算交给 Application，UI 不自己定位父节点或算下标。
+ */
+function createRoot(): void {
   clearError()
-  confirmingDelete.value = false
-  editKind.value = 'create-root'
-  editTitle.value = ''
-  void focusTitleInput()
+  editingId.value = null
+  deletingId.value = null
+  const result =
+    selectedId.value === null
+      ? appendChapter(tree.value, null, DEFAULT_TITLE)
+      : createChapterAfter(tree.value, selectedId.value, DEFAULT_TITLE)
+  applyCreate(result)
 }
 
-function startCreateChild(): void {
-  if (selectedId.value === null) return
+function createSibling(chapterId: ChapterId): void {
   clearError()
-  confirmingDelete.value = false
-  editKind.value = 'create-child'
-  editTitle.value = ''
-  void focusTitleInput()
+  editingId.value = null
+  deletingId.value = null
+  applyCreate(createChapterAfter(tree.value, chapterId, DEFAULT_TITLE))
 }
 
-function startRename(): void {
-  if (selectedId.value === null) return
+function createChild(chapterId: ChapterId): void {
   clearError()
-  confirmingDelete.value = false
-  editKind.value = 'rename'
-  editTitle.value = selectedTitle.value
-  void focusTitleInput()
+  editingId.value = null
+  deletingId.value = null
+  applyCreate(appendChapter(tree.value, chapterId, DEFAULT_TITLE))
 }
 
-function cancelEdit(): void {
-  editKind.value = null
-  editTitle.value = ''
-}
-
-function startDelete(): void {
-  if (selectedId.value === null) return
-  clearError()
-  editKind.value = null
-  confirmingDelete.value = true
-  void focusConfirmCancel()
-}
-
-async function focusConfirmCancel(): Promise<void> {
-  await nextTick()
-  confirmCancelButton.value?.focus()
-}
-
-async function cancelDelete(): Promise<void> {
-  if (!confirmingDelete.value) return
-  confirmingDelete.value = false
-  // 取消后把焦点还给触发删除的按钮，键盘用户不迷路。
-  await nextTick()
-  deleteButton.value?.focus()
-}
-
-/** 新增 / 重命名共用一个内联表单，提交后按 kind 分派到对应 Application 用例。 */
-function submitEdit(): void {
-  const kind = editKind.value
-  if (kind === null) return
-  const title = editTitle.value.trim()
-  if (title.length === 0) return
-
-  if (kind === 'rename') {
-    const id = selectedId.value
-    if (id === null) return
-    const result = renameChapter(tree.value, id, title)
-    if (!result.ok) {
-      errorMessage.value = messageForRename(result.reason)
-      return
-    }
-    tree.value = result.tree
-    finishSuccess()
-    return
-  }
-
-  const parentId = kind === 'create-root' ? null : selectedId.value
-  const result = appendChapter(tree.value, parentId, title)
+/** 新建成功后选中新章节并立即进入内联重命名。 */
+function applyCreate(result: CreateChapterResult): void {
   if (!result.ok) {
     errorMessage.value = messageForInsert(result.reason)
     return
   }
   tree.value = result.tree
-  // 新增成功后选中新章节。
   selectedId.value = result.chapterId
-  finishSuccess()
+  editingId.value = result.chapterId
+  errorMessage.value = null
+}
+
+function startRename(chapterId: ChapterId): void {
+  clearError()
+  deletingId.value = null
+  editingId.value = chapterId
+}
+
+function commitRename(chapterId: ChapterId, title: string): void {
+  editingId.value = null
+  const result = renameChapter(tree.value, chapterId, title)
+  if (!result.ok) {
+    errorMessage.value = messageForRename(result.reason)
+    return
+  }
+  tree.value = result.tree
+  errorMessage.value = null
+}
+
+function cancelRename(): void {
+  editingId.value = null
+}
+
+function requestDelete(chapterId: ChapterId): void {
+  clearError()
+  editingId.value = null
+  deletingId.value = chapterId
+  void focusConfirmCancel()
+}
+
+/** 打开删除确认后把焦点移到取消按钮，键盘用户不迷路。 */
+async function focusConfirmCancel(): Promise<void> {
+  await nextTick()
+  confirmCancelButton.value?.focus()
 }
 
 function confirmDelete(): void {
-  const id = selectedId.value
+  const id = deletingId.value
   if (id === null) return
   const result = removeChapter(tree.value, id)
   if (!result.ok) {
@@ -159,29 +144,29 @@ function confirmDelete(): void {
     return
   }
   tree.value = result.tree
-  // 被删章节已不存在，选择必须清空，不能指向不存在的章节。
-  selectedId.value = null
-  finishSuccess()
+  // 选中章节被删除（或被删章节的子树包含选中章节）时，选择必须清空。
+  if (selectedId.value !== null && findChapter(tree.value, selectedId.value) === null) {
+    selectedId.value = null
+  }
+  editingId.value = null
+  deletingId.value = null
+  errorMessage.value = null
 }
 
-function finishSuccess(): void {
-  errorMessage.value = null
-  editKind.value = null
-  editTitle.value = ''
-  confirmingDelete.value = false
+function cancelDelete(): void {
+  deletingId.value = null
 }
 
 function select(chapterId: ChapterId): void {
-  // 重复点击当前章节不算切换上下文，保留未完成的新增/重命名/删除确认。
+  // 重复点击当前章节不算切换上下文，保留未完成的编辑与删除确认。
   if (chapterId === selectedId.value) return
   selectedId.value = chapterId
-  // 选择变化即放弃未完成的新增/重命名/删除确认，避免操作落到新的选中章节。
-  editKind.value = null
-  editTitle.value = ''
-  confirmingDelete.value = false
+  editingId.value = null
+  deletingId.value = null
 }
 
 function move(intent: MoveIntent): void {
+  editingId.value = null
   const result = moveChapterTo(tree.value, intent)
   if (!result.ok) {
     errorMessage.value = messageForMove(result.reason)
@@ -239,44 +224,18 @@ function messageForMove(reason: MoveReason): string {
 
 <template>
   <section class="chapter-manager">
-    <div class="chapter-manager__toolbar" role="toolbar" aria-label="章节操作">
-      <button type="button" @click="startCreateRoot">新建根章节</button>
-      <button type="button" :disabled="selectedId === null" @click="startCreateChild">
-        新建子章节
-      </button>
-      <button type="button" :disabled="selectedId === null" @click="startRename">重命名</button>
-      <button type="button" ref="deleteButton" :disabled="selectedId === null" @click="startDelete">
-        删除
-      </button>
-    </div>
-
-    <form
-      v-if="editKind !== null"
-      class="chapter-manager__form"
-      @submit.prevent="submitEdit"
-      @keydown.esc="cancelEdit"
-    >
-      <label class="chapter-manager__label" for="chapter-manager-title">{{ editLabel }}</label>
-      <input
-        id="chapter-manager-title"
-        ref="titleInput"
-        v-model="editTitle"
-        type="text"
-        autocomplete="off"
-      />
-      <button type="submit" :disabled="!canSubmitEdit">确定</button>
-      <button type="button" @click="cancelEdit">取消</button>
-    </form>
-
     <div
-      v-if="confirmingDelete"
+      v-if="deletingId !== null"
       class="chapter-manager__confirm"
-      role="group"
+      role="alertdialog"
       aria-label="确认删除章节"
       @keydown.esc="cancelDelete"
     >
       <p class="chapter-manager__confirm-text">
-        确定删除「{{ selectedTitle || '选中的章节' }}」吗？它的所有子章节也会一起删除。
+        确定删除「{{ deletingTitle || '选中的章节' }}」吗？
+        <template v-if="deletingChildCount > 0">
+          该章节包含 {{ deletingChildCount }} 个子章节，删除后会一并移除。
+        </template>
       </p>
       <button type="button" @click="confirmDelete">确认删除</button>
       <button type="button" ref="confirmCancelButton" @click="cancelDelete">取消</button>
@@ -286,25 +245,34 @@ function messageForMove(reason: MoveReason): string {
       {{ errorMessage }}
     </p>
 
-    <ChapterTree :tree="tree" :selected-id="selectedId" @select="select" @move="move" />
+    <ChapterTree
+      :tree="tree"
+      :selected-id="selectedId"
+      :editing-id="editingId"
+      @select="select"
+      @move="move"
+      @create-root="createRoot"
+      @create-sibling="createSibling"
+      @create-child="createChild"
+      @start-rename="startRename"
+      @rename="commitRename"
+      @cancel-rename="cancelRename"
+      @delete="requestDelete"
+    />
   </section>
 </template>
 
 <style scoped>
-.chapter-manager__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-}
-
-.chapter-manager__form,
 .chapter-manager__confirm {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   margin-bottom: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fef2f2;
 }
 
 .chapter-manager__confirm-text {

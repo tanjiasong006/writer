@@ -51,3 +51,41 @@ export function appendChapter(
     parentId === null ? tree.length : (findChapter(tree, parentId)?.children.length ?? 0)
   return createChapter(tree, parentId, index, title)
 }
+
+/**
+ * 在 siblingId 之后插入一个新章节（同父、紧邻其后）。
+ *
+ * “在某个章节之后”到 (parentId, index) 的换算属于 Application 的落点职责，
+ * UI 只表达“在当前章节之后新建”，不自己定位父节点或算下标。
+ * siblingId 不存在时复用 'parent-not-found'（其父也不存在）。
+ *
+ * 前置条件：tree 是一棵已通过 validateTree 的可信树。
+ */
+export function createChapterAfter(
+  tree: ChapterTree,
+  siblingId: ChapterId,
+  title: string,
+): CreateChapterResult {
+  const location = locateSibling(tree, siblingId, null)
+  if (!location) return { ok: false, reason: 'parent-not-found' }
+  return createChapter(tree, location.parentId, location.index + 1, title)
+}
+
+interface SiblingLocation {
+  readonly parentId: ChapterId | null
+  readonly index: number
+}
+
+/** 只读定位一个章节的相对位置（父节点与兄弟下标），不修改树。 */
+function locateSibling(
+  list: ChapterTree,
+  id: ChapterId,
+  parentId: ChapterId | null,
+): SiblingLocation | null {
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].id === id) return { parentId, index: i }
+    const hit = locateSibling(list[i].children, id, list[i].id)
+    if (hit) return hit
+  }
+  return null
+}

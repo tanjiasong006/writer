@@ -240,3 +240,43 @@ test('拖拽与落点反馈不修改章节树', async () => {
   await rows[2].trigger('drop')
   expect(JSON.stringify(outline)).toBe(snapshot)
 })
+
+// --- 插入线按最终层级缩进 ---
+
+test('before 插入线按目标层级缩进，显示最终落点层级', async () => {
+  const { rows } = mountWithRows()
+  await rows[2].trigger('dragstart') // c（根层）
+  await rows[1].trigger('dragover', { clientY: 35 }) // b（第 1 层）上 1/4 → before
+
+  const line = rows[1].find('.chapter-tree__drop-line')
+  expect(line.classes()).toContain('chapter-tree__drop-line--before')
+  expect(line.attributes('style')).toContain('left: 16px')
+})
+
+test('after 插入线与目标层级对齐', async () => {
+  const { rows } = mountWithRows()
+  await rows[2].trigger('dragstart') // c
+  await rows[1].trigger('dragover', { clientY: 55 }) // b 下 1/4 → after
+
+  const line = rows[1].find('.chapter-tree__drop-line')
+  expect(line.classes()).toContain('chapter-tree__drop-line--after')
+  expect(line.attributes('style')).toContain('left: 16px')
+})
+
+test('inside 不显示插入线，只高亮整行', async () => {
+  const { rows } = mountWithRows()
+  await rows[0].trigger('dragstart')
+  await rows[2].trigger('dragover', { clientY: 75 }) // c 中间 → inside
+
+  expect(rows[2].find('.chapter-tree__drop-line').exists()).toBe(false)
+  expect(dropClasses(rows[2])).toEqual(['chapter-tree__row--drop-inside'])
+})
+
+test('根层插入线从行首开始，不缩进', async () => {
+  const { rows } = mountWithRows()
+  await rows[1].trigger('dragstart') // b（第 1 层）
+  await rows[2].trigger('dragover', { clientY: 65 }) // c（根层）上 1/4 → before
+
+  const line = rows[2].find('.chapter-tree__drop-line')
+  expect(line.attributes('style')).toContain('left: 0px')
+})

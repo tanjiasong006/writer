@@ -34,259 +34,240 @@ afterEach(() => {
   for (const wrapper of mounted.splice(0)) wrapper.unmount()
 })
 
+function rowText(row: ReturnType<VueWrapper['find']>): string {
+  const number = row.find('.chapter-tree__number').text()
+  const input = row.find<HTMLInputElement>('.chapter-tree__rename-input')
+  if (input.exists()) return number + input.element.value
+  return number + row.find('.chapter-tree__title').text()
+}
+
+function rowTexts(wrapper: VueWrapper): string[] {
+  return wrapper.findAll('.chapter-tree__row').map((row) => rowText(row))
+}
+
+function rows(wrapper: VueWrapper) {
+  return wrapper.findAll('.chapter-tree__row')
+}
+
 function button(wrapper: VueWrapper, label: string) {
   const found = wrapper.findAll('button').find((candidate) => candidate.text() === label)
   if (!found) throw new Error(`找不到按钮：${label}`)
   return found
 }
 
-function rowTexts(wrapper: VueWrapper): string[] {
-  return wrapper.findAll('.chapter-tree__row').map((row) => row.text())
+async function openMenu(wrapper: VueWrapper, rowIndex: number): Promise<void> {
+  await rows(wrapper)[rowIndex].find('.chapter-tree__more').trigger('click')
 }
 
-test('渲染章节操作工具栏与章节树', () => {
+async function menuItem(wrapper: VueWrapper, label: string): Promise<void> {
+  await button(wrapper, label).trigger('click')
+}
+
+function renameInput(wrapper: VueWrapper) {
+  return wrapper.find<HTMLInputElement>('.chapter-tree__rename-input')
+}
+
+// --- 渲染与空状态 ---
+
+test('渲染章节树与 Tree Header', () => {
   const wrapper = mountManager()
   expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
-  expect(button(wrapper, '新建根章节').attributes('disabled')).toBeUndefined()
-  expect(button(wrapper, '新建子章节').attributes('disabled')).toBeDefined()
+  expect(wrapper.find('.chapter-tree__header').text()).toContain('章节')
+  expect(wrapper.find('.chapter-tree__add').exists()).toBe(true)
 })
 
-test('空树：只显示工具栏，依赖选择的按钮禁用', () => {
+test('空树显示空状态与新建入口', () => {
   const wrapper = mountManager([])
   expect(rowTexts(wrapper)).toEqual([])
-  expect(button(wrapper, '新建根章节').attributes('disabled')).toBeUndefined()
-  expect(button(wrapper, '新建子章节').attributes('disabled')).toBeDefined()
-  expect(button(wrapper, '重命名').attributes('disabled')).toBeDefined()
-  expect(button(wrapper, '删除').attributes('disabled')).toBeDefined()
+  expect(wrapper.find('.chapter-tree__empty').text()).toContain('暂无章节')
+  expect(button(wrapper, '+ 新建第一个章节').exists()).toBeTruthy()
 })
 
-test('选择章节后启用子章节/重命名/删除', async () => {
+// --- 新建 ---
+
+test('Header + 无选中：追加根章节为未命名章节，选中并进入编辑', async () => {
   const wrapper = mountManager()
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
 
-  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1A')
-  expect(button(wrapper, '新建子章节').attributes('disabled')).toBeUndefined()
-  expect(button(wrapper, '重命名').attributes('disabled')).toBeUndefined()
-  expect(button(wrapper, '删除').attributes('disabled')).toBeUndefined()
+  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B', '3未命名章节'])
+  expect(rowText(wrapper.find('.chapter-tree__row--selected'))).toBe('3未命名章节')
+  expect(renameInput(wrapper).element.value).toBe('未命名章节')
 })
 
-test('新增根章节：追加到末尾并选中新章节', async () => {
+test('Header + 有选中：在选中章节之后新建同级', async () => {
   const wrapper = mountManager()
+  await rows(wrapper)[0].trigger('click') // a
+  await wrapper.find('.chapter-tree__add').trigger('click')
 
-  await button(wrapper, '新建根章节').trigger('click')
-  await wrapper.find('#chapter-manager-title').setValue('新根')
-  await wrapper.find('form').trigger('submit')
-
-  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B', '3新根'])
-  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('3新根')
-  expect(wrapper.find('form').exists()).toBe(false)
-  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  expect(rowTexts(wrapper)).toEqual([
+    '1A',
+    '1.1A1',
+    '1.2A2',
+    '1.2.1A2X',
+    '2未命名章节',
+    '3B',
+  ])
 })
 
-test('新增子章节：追加到选中章节下并选中新章节', async () => {
+test('节点菜单：新建同级章节', async () => {
   const wrapper = mountManager()
+  await openMenu(wrapper, 0) // a
+  await menuItem(wrapper, '新建同级章节')
 
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  await button(wrapper, '新建子章节').trigger('click')
-  await wrapper.find('#chapter-manager-title').setValue('新子')
-  await wrapper.find('form').trigger('submit')
-
-  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '1.3新子', '2B'])
-  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1.3新子')
+  expect(rowTexts(wrapper)).toEqual([
+    '1A',
+    '1.1A1',
+    '1.2A2',
+    '1.2.1A2X',
+    '2未命名章节',
+    '3B',
+  ])
+  expect(wrapper.find('.chapter-tree__menu').exists()).toBe(false)
 })
 
-test('新增表单：标题为空或全空白时确定禁用，有内容后启用', async () => {
+test('节点菜单：新建子章节追加到末尾', async () => {
   const wrapper = mountManager()
-  await button(wrapper, '新建根章节').trigger('click')
+  await openMenu(wrapper, 0) // a
+  await menuItem(wrapper, '新建子章节')
 
-  expect(button(wrapper, '确定').attributes('disabled')).toBeDefined()
-  await wrapper.find('#chapter-manager-title').setValue('   ')
-  expect(button(wrapper, '确定').attributes('disabled')).toBeDefined()
-  await wrapper.find('#chapter-manager-title').setValue('有内容')
-  expect(button(wrapper, '确定').attributes('disabled')).toBeUndefined()
+  expect(rowTexts(wrapper)).toEqual([
+    '1A',
+    '1.1A1',
+    '1.2A2',
+    '1.2.1A2X',
+    '1.3未命名章节',
+    '2B',
+  ])
 })
 
-test('重命名：预填当前标题并只改标题', async () => {
+test('新建后自动聚焦标题输入框', async () => {
   const wrapper = mountManager()
+  await wrapper.find('.chapter-tree__add').trigger('click')
+  await nextTick()
 
-  await wrapper.findAll('.chapter-tree__row')[2].trigger('click') // a2
-  await button(wrapper, '重命名').trigger('click')
-  const input = wrapper.find<HTMLInputElement>('#chapter-manager-title')
-  expect(input.element.value).toBe('A2')
-
-  await input.setValue('新 A2')
-  await wrapper.find('form').trigger('submit')
-
-  expect(rowTexts(wrapper)).toContain('1.2新 A2')
-  expect(rowTexts(wrapper)).not.toContain('1.2A2')
-  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1.2新 A2')
+  expect(document.activeElement).toBe(renameInput(wrapper).element)
 })
 
-test('重命名取消：关闭表单且不改树', async () => {
+// --- 内联重命名 ---
+
+test('Enter 保存新标题', async () => {
   const wrapper = mountManager()
+  await wrapper.find('.chapter-tree__add').trigger('click')
+  await renameInput(wrapper).setValue('新章')
+  await renameInput(wrapper).trigger('keydown.enter')
 
-  await wrapper.findAll('.chapter-tree__row')[2].trigger('click')
-  await button(wrapper, '重命名').trigger('click')
-  await wrapper.find('#chapter-manager-title').setValue('X')
-  await button(wrapper, '取消').trigger('click')
-
-  expect(wrapper.find('form').exists()).toBe(false)
-  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
+  expect(rowTexts(wrapper)).toContain('3新章')
+  expect(renameInput(wrapper).exists()).toBe(false)
 })
+
+test('失焦保存新标题', async () => {
+  const wrapper = mountManager()
+  await wrapper.find('.chapter-tree__add').trigger('click')
+  await renameInput(wrapper).setValue('失焦保存')
+  await renameInput(wrapper).trigger('blur')
+
+  expect(rowTexts(wrapper)).toContain('3失焦保存')
+})
+
+test('Esc 取消编辑，保留默认标题', async () => {
+  const wrapper = mountManager()
+  await wrapper.find('.chapter-tree__add').trigger('click')
+  await renameInput(wrapper).setValue('不要保存')
+  await renameInput(wrapper).trigger('keydown.esc')
+
+  expect(rowTexts(wrapper)).toContain('3未命名章节')
+  expect(rowTexts(wrapper)).not.toContain('3不要保存')
+  expect(renameInput(wrapper).exists()).toBe(false)
+})
+
+test('双击标题进入内联重命名并预填当前标题', async () => {
+  const wrapper = mountManager()
+  await rows(wrapper)[0].trigger('dblclick')
+
+  expect(renameInput(wrapper).element.value).toBe('A')
+  await renameInput(wrapper).setValue('A 改')
+  await renameInput(wrapper).trigger('keydown.enter')
+  expect(rowTexts(wrapper)[0]).toBe('1A 改')
+})
+
+test('F2 进入内联重命名', async () => {
+  const wrapper = mountManager()
+  await rows(wrapper)[0].find('.chapter-tree__label').trigger('keydown', { key: 'F2' })
+  expect(renameInput(wrapper).element.value).toBe('A')
+})
+
+test('菜单重命名进入内联编辑', async () => {
+  const wrapper = mountManager()
+  await openMenu(wrapper, 1) // a1
+  await menuItem(wrapper, '重命名')
+  expect(renameInput(wrapper).element.value).toBe('A1')
+})
+
+test('选择其他章节会取消正在进行的重命名', async () => {
+  const wrapper = mountManager()
+  await rows(wrapper)[0].trigger('dblclick')
+  expect(renameInput(wrapper).exists()).toBe(true)
+
+  await rows(wrapper)[4].trigger('click') // b
+  expect(renameInput(wrapper).exists()).toBe(false)
+})
+
+// --- 删除 ---
 
 test('删除：先显示确认，确认前不改树', async () => {
   const wrapper = mountManager()
-
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  await button(wrapper, '删除').trigger('click')
+  await openMenu(wrapper, 0) // a
+  await menuItem(wrapper, '删除')
 
   expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(true)
+  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('A')
   expect(wrapper.find('.chapter-manager__confirm').text()).toContain('子章节')
   expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
 })
 
-test('删除取消：保留章节与选择', async () => {
-  const wrapper = mountManager()
-
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click')
-  await button(wrapper, '删除').trigger('click')
-  await button(wrapper, '取消').trigger('click')
-
-  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
-  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
-  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1A')
-})
-
 test('删除确认：整棵子树被删除，选择清空', async () => {
   const wrapper = mountManager()
-
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  await button(wrapper, '删除').trigger('click')
+  await rows(wrapper)[0].trigger('click') // a
+  await openMenu(wrapper, 0)
+  await menuItem(wrapper, '删除')
   await button(wrapper, '确认删除').trigger('click')
 
   expect(rowTexts(wrapper)).toEqual(['1B'])
   expect(wrapper.find('.chapter-tree__row--selected').exists()).toBe(false)
-  expect(button(wrapper, '新建子章节').attributes('disabled')).toBeDefined()
 })
 
-test('失败：选中的章节不存在时给出中文提示且树不变', async () => {
-  const wrapper = mountManager(nested, 'missing')
-
-  await button(wrapper, '删除').trigger('click')
+test('删除子节点所在子树时，指向被删节点的选择会被清空', async () => {
+  const wrapper = mountManager()
+  await rows(wrapper)[1].trigger('click') // a1
+  await openMenu(wrapper, 0) // a
+  await menuItem(wrapper, '删除')
   await button(wrapper, '确认删除').trigger('click')
 
-  expect(wrapper.find('[role="alert"]').text()).toContain('不存在')
-  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
+  expect(rowTexts(wrapper)).toEqual(['1B'])
+  expect(wrapper.find('.chapter-tree__row--selected').exists()).toBe(false)
 })
 
-test('成功操作清除已有错误', async () => {
-  const wrapper = mountManager(nested, 'missing')
-
-  await button(wrapper, '删除').trigger('click')
-  await button(wrapper, '确认删除').trigger('click')
-  expect(wrapper.find('[role="alert"]').exists()).toBe(true)
-
-  await button(wrapper, '新建根章节').trigger('click')
-  await wrapper.find('#chapter-manager-title').setValue('新根')
-  await wrapper.find('form').trigger('submit')
-
-  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-  expect(rowTexts(wrapper)).toContain('3新根')
-})
-
-// --- 操作目标稳定：选择变化时放弃未完成的操作 ---
-
-test('选择其他章节会取消未完成的新增子章节', async () => {
+test('删除取消：保留章节与选择', async () => {
   const wrapper = mountManager()
+  await rows(wrapper)[0].trigger('click')
+  await openMenu(wrapper, 0)
+  await menuItem(wrapper, '删除')
+  await button(wrapper, '取消').trigger('click')
 
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  await button(wrapper, '新建子章节').trigger('click')
-  await wrapper.find('#chapter-manager-title').setValue('误用')
-
-  await wrapper.findAll('.chapter-tree__row')[4].trigger('click') // b
-
-  expect(wrapper.find('form').exists()).toBe(false)
-  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
-})
-
-test('选择其他章节会取消重命名，重新打开时针对新章节', async () => {
-  const wrapper = mountManager()
-
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  await button(wrapper, '重命名').trigger('click')
-  await wrapper.find('#chapter-manager-title').setValue('改了')
-
-  await wrapper.findAll('.chapter-tree__row')[4].trigger('click') // b
-  expect(wrapper.find('form').exists()).toBe(false)
-  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
-
-  await button(wrapper, '重命名').trigger('click')
-  expect(wrapper.find<HTMLInputElement>('#chapter-manager-title').element.value).toBe('B')
-})
-
-test('选择其他章节会取消删除确认，重新打开时针对新章节', async () => {
-  const wrapper = mountManager()
-
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  await button(wrapper, '删除').trigger('click')
-
-  await wrapper.findAll('.chapter-tree__row')[4].trigger('click') // b
   expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
   expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
-
-  await button(wrapper, '删除').trigger('click')
-  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('B')
+  expect(rowText(wrapper.find('.chapter-tree__row--selected'))).toBe('1A')
 })
 
-test('重复点击当前已选中的章节不取消未完成的重命名', async () => {
+test('删除确认打开后焦点进入取消按钮，Esc 取消', async () => {
   const wrapper = mountManager()
-
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  await button(wrapper, '重命名').trigger('click')
-  await wrapper.find('#chapter-manager-title').setValue('保留')
-
-  // 再次点击同一个已选中章节，不算切换上下文。
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click')
-
-  expect(wrapper.find('form').exists()).toBe(true)
-  expect(wrapper.find<HTMLInputElement>('#chapter-manager-title').element.value).toBe('保留')
-})
-
-// --- 键盘焦点 ---
-
-test('删除确认打开后焦点进入确认区，Esc 取消并恢复焦点', async () => {
-  const wrapper = mountManager()
-
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  const deleteButton = button(wrapper, '删除')
-  await deleteButton.trigger('click')
+  await openMenu(wrapper, 0)
+  await menuItem(wrapper, '删除')
   await nextTick()
 
   const cancelButton = button(wrapper, '取消')
   expect(document.activeElement).toBe(cancelButton.element)
 
   await cancelButton.trigger('keydown', { key: 'Escape' })
-  await nextTick()
-  await nextTick()
-
   expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
-  expect(document.activeElement).toBe(deleteButton.element)
-})
-
-// --- 折叠状态下新增 ---
-
-test('在折叠的父章节下新增子章节：自动展开父节点并显示新章节', async () => {
-  const wrapper = mountManager()
-
-  await wrapper.findAll('.chapter-tree__row')[0].trigger('click') // a
-  await wrapper.findAll('button.chapter-tree__toggle')[0].trigger('click') // 折叠 a
-  expect(rowTexts(wrapper)).toEqual(['1A', '2B'])
-
-  await button(wrapper, '新建子章节').trigger('click')
-  await wrapper.find('#chapter-manager-title').setValue('新子')
-  await wrapper.find('form').trigger('submit')
-
-  expect(rowTexts(wrapper)).toContain('1.3新子')
-  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1.3新子')
-  expect(wrapper.findAll('button.chapter-tree__toggle')[0].attributes('aria-expanded')).toBe('true')
 })

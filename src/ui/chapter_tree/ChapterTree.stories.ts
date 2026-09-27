@@ -46,9 +46,38 @@ export const Default: Story = {
   args: { tree: outline, selectedId: null },
 }
 
-/** 空树：没有章节行，只渲染空列表。 */
+/** 空树：显示空状态与「新建第一个章节」。 */
 export const Empty: Story = {
   args: { tree: [], selectedId: null },
+}
+
+/** 深层级 + 超长标题：检查 16px 缩进、编号弱化与标题省略号。 */
+const deepAndLong: ChapterTreeModel = [
+  {
+    id: 'c1',
+    title: '第一章 这是一个非常非常长的章节标题，用来验证标题是否单行截断并显示省略号',
+    children: [
+      {
+        id: 'c1-1',
+        title: '背景与动机',
+        children: [
+          {
+            id: 'c1-1-1',
+            title: '国内研究现状与主要问题分析',
+            children: [
+              { id: 'c1-1-1-1', title: '第四层章节标题仍然保持清晰的层级缩进', children: [] },
+            ],
+          },
+        ],
+      },
+      { id: 'c1-2', title: '研究方法与实验设计', children: [] },
+    ],
+  },
+  { id: 'c2', title: '第二章 结论', children: [] },
+]
+
+export const DeepAndLongTitles: Story = {
+  args: { tree: deepAndLong, selectedId: 'c1-1-1' },
 }
 
 export const Nested: Story = {
@@ -57,6 +86,19 @@ export const Nested: Story = {
 
 export const Selected: Story = {
   args: { tree: nested, selectedId: 'sec-1-2' },
+}
+
+/** 节点菜单打开：新建同级章节 / 新建子章节 / 重命名 / 删除。 */
+export const MenuOpen: Story = {
+  args: { tree: nested, selectedId: null },
+  play: async ({ canvasElement }) => {
+    canvasElement.querySelector<HTMLElement>('.chapter-tree__more')?.click()
+  },
+}
+
+/** 内联重命名：编号保留，标题变为输入框。 */
+export const InlineRename: Story = {
+  args: { tree: nested, selectedId: 'sec-1-1', editingId: 'sec-1-1' },
 }
 
 export const Collapsed: Story = {

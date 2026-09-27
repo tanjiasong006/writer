@@ -1,19 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
+import { computed, nextTick, ref, watch } from 'vue'
+import { findChapter, type ChapterId, type ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { resolveDropPosition, type DropPosition } from './drop_target.ts'
 import { canMoveChapter, type MoveIntent } from '../../application/move_chapter.ts'
 
 /**
- * 章节树展示组件。
+ * 章节树组件。
  *
- * 四件事：按 tree 渲染层级、把点击的章节通过 select 事件告诉上层、
- * 折叠/展开有子章节的节点、拖拽时用 DropTarget 提示落点。
- * 折叠与拖拽落点都是纯 UI 状态，默认全部展开，不回写 tree。
- * 编号由 Domain 的 computeChapterNumbers 计算，组件只负责显示格式；
- * 组件不修改 tree，也不包含任何章节业务规则。拖拽松手时只发出 move 意图，
- * 由上层（Application）决定是否、如何修改章节树。
+ * 负责：按 tree 渲染层级、选择、折叠/展开、拖拽落点反馈、Tree Header、
+ * 节点菜单、双击/F2 内联重命名、空状态。
+ *
+ * 所有会产生结构变化的行为都只发出意图事件，由上层（Application）执行；
+ * 组件不判断移动是否合法、不构造新树，也不包含任何章节结构规则。
+ * 折叠、菜单、正在编辑的章节都是纯 UI 状态，不回写 tree。
  */
 
 const props = defineProps<{
@@ -21,6 +21,8 @@ const props = defineProps<{
   tree: ChapterTree
   /** 当前选中的章节 id；仅用于显示选中态。 */
   selectedId?: ChapterId | null
+  /** 正在内联重命名的章节 id；由上层在新建后或用户触发时设置。 */
+  editingId?: ChapterId | null
 }>()
 
 const emit = defineEmits<{
@@ -28,6 +30,20 @@ const emit = defineEmits<{
   select: [chapterId: ChapterId]
   /** 用户在有效落点上松手，发出移动意图；组件不直接修改 tree。 */
   move: [intent: MoveIntent]
+  /** Tree Header + ：在当前章节之后新建（无选中时由上层追加到根末尾）。 */
+  'create-root': []
+  /** 在指定章节之后新建同级章节。 */
+  'create-sibling': [chapterId: ChapterId]
+  /** 在指定章节下新建子章节。 */
+  'create-child': [chapterId: ChapterId]
+  /** 请求进入重命名编辑（双击 / F2 / 菜单）。 */
+  'start-rename': [chapterId: ChapterId]
+  /** 内联重命名提交新标题。 */
+  rename: [chapterId: ChapterId, title: string]
+  /** 放弃本次重命名。 */
+  'cancel-rename': []
+  /** 请求删除章节，由上层决定是否确认。 */
+  delete: [chapterId: ChapterId]
 }>()
 
 interface ChapterRow {
@@ -78,9 +94,34 @@ const draggingId = ref<ChapterId | null>(null)
 /** 当前落点：命中行 id 与相对位置；离开有效目标后清空。 */
 const dropTarget = ref<{ readonly id: ChapterId; readonly position: DropPosition } | null>(null)
 
-function startDrag(chapterId: ChapterId): void {
-  draggingId.value = chapterId
+function startDrag(event: DragEvent, row: ChapterRow): void {
+  draggingId.value = row.id
   dropTarget.value = null
+  const dataTransfer = event.dataTransfer
+  if (!dataTransfer) return
+  dataTransfer.effectAllowed = 'move'
+  if (typeof dataTransfer.setDragImage !== 'function') return
+  // Drag Preview 只带编号 + 标题的轻量浮层，不复制整行节点 UI。
+  const preview = document.createElement('div')
+  preview.textContent = `${row.number} ${row.title}`
+  Object.assign(preview.style, {
+    position: 'fixed',
+    top: '-1000px',
+    left: '-1000px',
+    padding: '4px 10px',
+    background: '#ffffff',
+    border: '1px solid #d1d5db',
+    borderRadius: '4px',
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+    fontSize: '13px',
+    color: '#111827',
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+  })
+  document.body.appendChild(preview)
+  dataTransfer.setDragImage(preview, 10, 16)
+  // 浏览器已同步读取图像，下一帧移除即可。
+  window.setTimeout(() => preview.remove(), 0)
 }
 
 function updateDropTarget(event: DragEvent, chapterId: ChapterId): void {
@@ -133,6 +174,95 @@ function toggle(chapterId: ChapterId): void {
   collapsedIds.value = next
 }
 
+/** 当前打开菜单的章节 id；同一时间只允许一个菜单。 */
+const openMenuId = ref<ChapterId | null>(null)
+
+function toggleMenu(chapterId: ChapterId): void {
+  openMenuId.value = openMenuId.value === chapterId ? null : chapterId
+}
+
+function closeMenu(): void {
+  openMenuId.value = null
+}
+
+function requestCreateRoot(): void {
+  closeMenu()
+  emit('create-root')
+}
+
+function requestCreateSibling(chapterId: ChapterId): void {
+  closeMenu()
+  emit('create-sibling', chapterId)
+}
+
+function requestCreateChild(chapterId: ChapterId): void {
+  closeMenu()
+  emit('create-child', chapterId)
+}
+
+function requestStartRename(chapterId: ChapterId): void {
+  closeMenu()
+  emit('start-rename', chapterId)
+}
+
+function requestDelete(chapterId: ChapterId): void {
+  closeMenu()
+  emit('delete', chapterId)
+}
+
+/** 键盘 F2 进入重命名；其余按键不拦截（完整方向键导航属于 P1）。 */
+function onLabelKeydown(event: KeyboardEvent, chapterId: ChapterId): void {
+  if (event.key !== 'F2') return
+  event.preventDefault()
+  requestStartRename(chapterId)
+}
+
+/** 内联重命名的临时文本；由 editingId 驱动初始化。 */
+const draft = ref('')
+const renameInput = ref<HTMLInputElement | null>(null)
+/** 本次编辑是否已结束，避免 Esc 触发卸载后 blur 再次提交。 */
+let renameDone = false
+
+function setRenameInput(element: Element | { $el?: Element } | null): void {
+  renameInput.value = (element as HTMLInputElement | null) ?? null
+}
+
+async function focusRenameInput(): Promise<void> {
+  await nextTick()
+  renameInput.value?.focus()
+  renameInput.value?.select()
+}
+
+watch(
+  () => props.editingId,
+  (id) => {
+    renameDone = false
+    if (id === null || id === undefined) {
+      draft.value = ''
+      return
+    }
+    draft.value = findChapter(props.tree, id)?.title ?? ''
+    void focusRenameInput()
+  },
+  { immediate: true },
+)
+
+/** Enter / 失焦提交；空标题视为放弃，避免标题变空。 */
+function commitRename(): void {
+  const id = props.editingId
+  if (id === null || id === undefined || renameDone) return
+  renameDone = true
+  const title = draft.value.trim()
+  if (title.length === 0) emit('cancel-rename')
+  else emit('rename', id, title)
+}
+
+function cancelRename(): void {
+  if (renameDone) return
+  renameDone = true
+  emit('cancel-rename')
+}
+
 /** 把树摊平成带层级的显示行；折叠节点不展开其后代。 */
 const rows = computed<ChapterRow[]>(() => {
   const numbers = computeChapterNumbers(props.tree)
@@ -160,73 +290,223 @@ const rows = computed<ChapterRow[]>(() => {
 </script>
 
 <template>
-  <ul class="chapter-tree" role="tree" aria-label="章节树">
-    <li
-      v-for="row in rows"
-      :key="row.id"
-      class="chapter-tree__node"
-      role="treeitem"
-      :aria-level="row.depth + 1"
-      :aria-selected="row.id === selectedId"
-      :aria-expanded="row.hasChildren ? !collapsedIds.has(row.id) : undefined"
-    >
-      <div
-        class="chapter-tree__row"
-        draggable="true"
-        :class="[
-          { 'chapter-tree__row--selected': row.id === selectedId },
-          { 'chapter-tree__row--dragging': row.id === draggingId },
-          dropClass(row.id),
-        ]"
-        :data-depth="row.depth"
-        :style="{ paddingLeft: `${row.depth * 1.25}rem` }"
-        :aria-current="row.id === selectedId ? 'true' : undefined"
-        @click="emit('select', row.id)"
-        @dragstart="startDrag(row.id)"
-        @dragover.prevent="updateDropTarget($event, row.id)"
-        @dragleave="leaveRow(row.id)"
-        @drop.prevent="drop"
-        @dragend="endDrag"
+  <div class="chapter-tree">
+    <div class="chapter-tree__header">
+      <span class="chapter-tree__header-title">章节</span>
+      <button
+        type="button"
+        class="chapter-tree__add"
+        aria-label="新建章节"
+        @click="requestCreateRoot"
       >
-        <button
-          v-if="row.hasChildren"
-          type="button"
-          class="chapter-tree__toggle"
-          :aria-expanded="!collapsedIds.has(row.id)"
-          :aria-label="collapsedIds.has(row.id) ? '展开' : '折叠'"
-          @click.stop="toggle(row.id)"
-        ></button>
-        <span v-else class="chapter-tree__toggle chapter-tree__toggle--leaf" aria-hidden="true"></span>
-        <button type="button" class="chapter-tree__label">
-          <span class="chapter-tree__number">{{ row.number }}</span>
-          <span class="chapter-tree__title">{{ row.title }}</span>
-        </button>
-      </div>
-    </li>
-  </ul>
+        +
+      </button>
+    </div>
+
+    <ul class="chapter-tree__list" role="tree" aria-label="章节树">
+      <li
+        v-for="row in rows"
+        :key="row.id"
+        class="chapter-tree__node"
+        role="treeitem"
+        :aria-level="row.depth + 1"
+        :aria-selected="row.id === selectedId"
+        :aria-expanded="row.hasChildren ? !collapsedIds.has(row.id) : undefined"
+      >
+        <div
+          class="chapter-tree__row"
+          draggable="true"
+          :class="[
+            { 'chapter-tree__row--selected': row.id === selectedId },
+            { 'chapter-tree__row--dragging': row.id === draggingId },
+            dropClass(row.id),
+          ]"
+          :data-depth="row.depth"
+          :style="{ paddingLeft: `${row.depth * 16}px` }"
+          :aria-current="row.id === selectedId ? 'true' : undefined"
+          @click="emit('select', row.id)"
+          @dblclick="requestStartRename(row.id)"
+          @dragstart="startDrag($event, row)"
+          @dragover.prevent="updateDropTarget($event, row.id)"
+          @dragleave="leaveRow(row.id)"
+          @drop.prevent="drop"
+          @dragend="endDrag"
+        >
+          <span
+            v-if="dropTarget && dropTarget.id === row.id && dropTarget.position !== 'inside'"
+            class="chapter-tree__drop-line"
+            :class="`chapter-tree__drop-line--${dropTarget.position}`"
+            :style="{ left: `${row.depth * 16}px` }"
+          ></span>
+          <button
+            v-if="row.hasChildren"
+            type="button"
+            class="chapter-tree__toggle"
+            :aria-expanded="!collapsedIds.has(row.id)"
+            :aria-label="collapsedIds.has(row.id) ? '展开' : '折叠'"
+            @click.stop="toggle(row.id)"
+          ></button>
+          <span
+            v-else
+            class="chapter-tree__toggle chapter-tree__toggle--leaf"
+            aria-hidden="true"
+          ></span>
+
+          <div v-if="row.id === editingId" class="chapter-tree__edit" @click.stop>
+            <span class="chapter-tree__number">{{ row.number }}</span>
+            <input
+              :ref="setRenameInput"
+              class="chapter-tree__rename-input"
+              type="text"
+              autocomplete="off"
+              :value="draft"
+              @input="draft = ($event.target as HTMLInputElement).value"
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc.prevent="cancelRename"
+              @blur="commitRename"
+            />
+          </div>
+          <button
+            v-else
+            type="button"
+            class="chapter-tree__label"
+            @keydown="onLabelKeydown($event, row.id)"
+          >
+            <span class="chapter-tree__number">{{ row.number }}</span>
+            <span class="chapter-tree__title" :title="row.title">{{ row.title }}</span>
+          </button>
+
+          <button
+            type="button"
+            class="chapter-tree__more"
+            :class="{ 'chapter-tree__more--open': openMenuId === row.id }"
+            aria-label="更多操作"
+            aria-haspopup="menu"
+            @click.stop="toggleMenu(row.id)"
+          ></button>
+        </div>
+
+        <ul
+          v-if="openMenuId === row.id"
+          class="chapter-tree__menu"
+          role="menu"
+          draggable="false"
+          @click.stop
+          @keydown.esc="closeMenu"
+        >
+          <li><button type="button" role="menuitem" @click="requestCreateSibling(row.id)">新建同级章节</button></li>
+          <li><button type="button" role="menuitem" @click="requestCreateChild(row.id)">新建子章节</button></li>
+          <li class="chapter-tree__menu-separator" role="separator"></li>
+          <li><button type="button" role="menuitem" @click="requestStartRename(row.id)">重命名</button></li>
+          <li><button type="button" role="menuitem" @click="requestDelete(row.id)">删除</button></li>
+        </ul>
+      </li>
+    </ul>
+
+    <div v-if="tree.length === 0" class="chapter-tree__empty">
+      <p class="chapter-tree__empty-text">暂无章节</p>
+      <button type="button" class="chapter-tree__empty-action" @click="requestCreateRoot">
+        + 新建第一个章节
+      </button>
+    </div>
+
+    <div v-if="openMenuId !== null" class="chapter-tree__backdrop" @click="closeMenu"></div>
+  </div>
 </template>
 
 <style scoped>
-.chapter-tree__row {
-  display: flex;
-  align-items: center;
+.chapter-tree {
+  font-size: 14px;
 }
 
-.chapter-tree__row--selected {
+.chapter-tree__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding-right: 4px;
+}
+
+.chapter-tree__header-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chapter-tree__add {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: #6b7280;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chapter-tree__add:hover {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.chapter-tree__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chapter-tree__node {
+  position: relative;
+}
+
+.chapter-tree__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* P0 统一节点高度，拖拽目标尺寸稳定。 */
+  height: 32px;
+  transition: background 120ms ease;
+}
+
+.chapter-tree__row:hover {
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.chapter-tree__row--selected,
+.chapter-tree__row--selected:hover {
   background: rgba(59, 130, 246, 0.1);
+}
+
+/* 左侧强调条让选中章节在长文写作时一眼可辨。 */
+.chapter-tree__row--selected::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: #3b82f6;
 }
 
 .chapter-tree__row--dragging {
   opacity: 0.5;
 }
 
-/* 插入线用 inset 阴影，避免改变行高导致布局抖动。 */
-.chapter-tree__row--drop-before {
-  box-shadow: inset 0 2px 0 0 #3b82f6;
+/* 插入线按最终层级缩进：before / after 是目标的同级。 */
+.chapter-tree__drop-line {
+  position: absolute;
+  right: 0;
+  height: 2px;
+  background: #3b82f6;
+  pointer-events: none;
 }
 
-.chapter-tree__row--drop-after {
-  box-shadow: inset 0 -2px 0 0 #3b82f6;
+.chapter-tree__drop-line--before {
+  top: 0;
+}
+
+.chapter-tree__drop-line--after {
+  bottom: 0;
 }
 
 .chapter-tree__row--drop-inside {
@@ -234,7 +514,9 @@ const rows = computed<ChapterRow[]>(() => {
 }
 
 .chapter-tree__toggle {
-  width: 1.25rem;
+  flex: none;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: none;
   background: none;
@@ -247,7 +529,7 @@ const rows = computed<ChapterRow[]>(() => {
 }
 
 .chapter-tree__toggle[aria-expanded='false']::before {
-  content: '▸';
+  content: '›';
 }
 
 .chapter-tree__toggle--leaf {
@@ -256,13 +538,148 @@ const rows = computed<ChapterRow[]>(() => {
 
 .chapter-tree__label {
   flex: 1;
+  min-width: 0;
   display: flex;
-  gap: 0.5rem;
+  gap: 8px;
   padding: 0;
   border: none;
   background: none;
   cursor: pointer;
   color: inherit;
   text-align: left;
+}
+
+.chapter-tree__number {
+  flex: none;
+  color: #6b7280;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 标题单行截断，树高与拖拽目标尺寸保持稳定。 */
+.chapter-tree__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hover / 选中 / 菜单打开时显示 ···，默认保持安静。 */
+.chapter-tree__more {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-right: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: #6b7280;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+/* 用 CSS 呈现 ···，让行的可读文本只包含编号与标题。 */
+.chapter-tree__more::before {
+  content: '···';
+}
+
+.chapter-tree__row:hover .chapter-tree__more,
+.chapter-tree__row--selected .chapter-tree__more,
+.chapter-tree__more--open,
+.chapter-tree__more:focus-visible {
+  opacity: 1;
+}
+
+.chapter-tree__more:hover {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.chapter-tree__edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chapter-tree__rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  background: #ffffff;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.chapter-tree__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 20;
+  min-width: 11rem;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.chapter-tree__menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chapter-tree__menu button:hover {
+  background: rgba(15, 23, 42, 0.06);
+}
+
+.chapter-tree__menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: #e5e7eb;
+}
+
+/* 菜单打开时的全屏透明遮罩：点击任意处关闭，不引入全局监听。 */
+.chapter-tree__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+
+.chapter-tree__empty {
+  padding: 16px 4px;
+}
+
+.chapter-tree__empty-text {
+  margin: 0 0 8px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.chapter-tree__empty-action {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
 }
 </style>
