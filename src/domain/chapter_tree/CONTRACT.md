@@ -4,6 +4,8 @@
 
 定义章节树的数据结构，校验一棵树是否合法，并提供移动章节的操作。纯逻辑，不涉及 UI、存储、导入导出。
 
+失败原因一律用机器可读的 `code` 表达，不包含面向用户的自然语言；文案由 UI 层负责。
+
 ## 数据结构
 
 ```ts
@@ -23,9 +25,18 @@ type ChapterTree = ChapterNode[]
 ```ts
 validateTree(tree: unknown): ValidateTreeResult
 
+type TreeIssueCode =
+  | 'not-an-array'
+  | 'node-not-object'
+  | 'node-reused'
+  | 'id-invalid'
+  | 'id-duplicate'
+  | 'title-invalid'
+  | 'children-invalid'
+
 interface TreeIssue {
   path: string   // 出问题的位置，如 "[0].children[1]"；根为 "root"
-  message: string
+  code: TreeIssueCode
 }
 
 type ValidateTreeResult =
@@ -35,6 +46,8 @@ type ValidateTreeResult =
 
 成功时返回 `ok: true` 和可信的 `ChapterTree`；失败时返回 `ok: false` 和全部 `issues`。
 输入为 `unknown`，因为树常来自外部数据（文件、导入、粘贴），需在信任边界上做运行时检查。
+
+`issues` 只给机器可读的 `code` 和 `path`，不含面向用户的文案；文案由 UI 层根据 `code` 生成。
 
 ### moveChapter
 

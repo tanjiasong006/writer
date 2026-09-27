@@ -8,10 +8,20 @@ export interface ChapterNode {
 
 export type ChapterTree = ChapterNode[]
 
-/** 一条校验问题。path 指向出问题的位置。 */
+/** 校验问题的机器可读代码。面向用户的文案由 UI 层根据 code 生成。 */
+export type TreeIssueCode =
+  | 'not-an-array'
+  | 'node-not-object'
+  | 'node-reused'
+  | 'id-invalid'
+  | 'id-duplicate'
+  | 'title-invalid'
+  | 'children-invalid'
+
+/** 一条校验问题。path 指向出问题的位置，code 说明原因。 */
 export interface TreeIssue {
   path: string
-  message: string
+  code: TreeIssueCode
 }
 
 /**
@@ -36,13 +46,13 @@ export function validateTree(tree: unknown): ValidateTreeResult {
 
   const visit = (node: unknown, path: string): void => {
     if (typeof node !== 'object' || node === null || Array.isArray(node)) {
-      issues.push({ path, message: '节点必须是对象' })
+      issues.push({ path, code: 'node-not-object' })
       return
     }
 
     // 同一对象被再次遇到 = 循环引用或共享节点，继续递归会无限展开。
     if (seenNodes.has(node)) {
-      issues.push({ path, message: '节点被重复引用，存在循环或共享' })
+      issues.push({ path, code: 'node-reused' })
       return
     }
     seenNodes.add(node)
@@ -50,19 +60,19 @@ export function validateTree(tree: unknown): ValidateTreeResult {
     const n = node as Record<string, unknown>
 
     if (typeof n.id !== 'string' || n.id.length === 0) {
-      issues.push({ path, message: 'id 必须是非空字符串' })
+      issues.push({ path, code: 'id-invalid' })
     } else if (seenIds.has(n.id)) {
-      issues.push({ path, message: `id 重复: ${n.id}` })
+      issues.push({ path, code: 'id-duplicate' })
     } else {
       seenIds.add(n.id)
     }
 
     if (typeof n.title !== 'string') {
-      issues.push({ path, message: 'title 必须是字符串' })
+      issues.push({ path, code: 'title-invalid' })
     }
 
     if (!Array.isArray(n.children)) {
-      issues.push({ path, message: 'children 必须是数组' })
+      issues.push({ path, code: 'children-invalid' })
       return
     }
 
@@ -70,7 +80,7 @@ export function validateTree(tree: unknown): ValidateTreeResult {
   }
 
   if (!Array.isArray(tree)) {
-    return { ok: false, issues: [{ path: 'root', message: '章节树必须是数组' }] }
+    return { ok: false, issues: [{ path: 'root', code: 'not-an-array' }] }
   }
 
   tree.forEach((node, i) => visit(node, `[${i}]`))

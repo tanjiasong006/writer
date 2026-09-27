@@ -39,6 +39,7 @@ test('根不是数组', () => {
   const issues = issuesOf({ id: 'c1', title: 'x', children: [] })
   assert.equal(issues.length, 1)
   assert.equal(issues[0].path, 'root')
+  assert.equal(issues[0].code, 'not-an-array')
 })
 
 test('id 全局唯一：跨分支重复也能发现', () => {
@@ -48,35 +49,37 @@ test('id 全局唯一：跨分支重复也能发现', () => {
   ])
   assert.equal(issues.length, 1)
   assert.equal(issues[0].path, '[1]')
-  assert.match(issues[0].message, /id 重复/)
+  assert.equal(issues[0].code, 'id-duplicate')
 })
 
 test('id 为空字符串非法', () => {
   const issues = issuesOf([{ id: '', title: 'a', children: [] }])
   assert.equal(issues.length, 1)
   assert.equal(issues[0].path, '[0]')
+  assert.equal(issues[0].code, 'id-invalid')
 })
 
 test('id 类型错误非法', () => {
-  assert.equal(issuesOf([{ id: 1, title: 'a', children: [] }]).length, 1)
+  assert.equal(issuesOf([{ id: 1, title: 'a', children: [] }])[0].code, 'id-invalid')
 })
 
 test('title 必须是字符串', () => {
   const issues = issuesOf([{ id: 'c1', title: 42, children: [] }])
   assert.equal(issues.length, 1)
-  assert.match(issues[0].message, /title/)
+  assert.equal(issues[0].code, 'title-invalid')
 })
 
 test('children 必须是数组', () => {
   const issues = issuesOf([{ id: 'c1', title: 'a', children: null }])
   assert.equal(issues.length, 1)
-  assert.match(issues[0].message, /children/)
+  assert.equal(issues[0].code, 'children-invalid')
 })
 
 test('子节点非对象，路径带层级', () => {
   const issues = issuesOf([{ id: 'c1', title: 'a', children: ['oops'] }])
   assert.equal(issues.length, 1)
   assert.equal(issues[0].path, '[0].children[0]')
+  assert.equal(issues[0].code, 'node-not-object')
 })
 
 test('循环引用可安全遍历并报错', () => {
@@ -86,7 +89,7 @@ test('循环引用可安全遍历并报错', () => {
 
   const issues = issuesOf([a])
   assert.equal(issues.length, 1)
-  assert.match(issues[0].message, /循环|共享/)
+  assert.equal(issues[0].code, 'node-reused')
 })
 
 test('同一节点被两个父节点共享 = 非树', () => {
@@ -96,7 +99,7 @@ test('同一节点被两个父节点共享 = 非树', () => {
     { id: 'p2', title: 'p2', children: [shared] },
   ])
   assert.equal(issues.length, 1)
-  assert.match(issues[0].message, /循环|共享/)
+  assert.equal(issues[0].code, 'node-reused')
 })
 
 // --- moveChapter ---
