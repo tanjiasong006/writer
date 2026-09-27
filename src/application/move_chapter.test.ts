@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { moveChapterTo } from './move_chapter.ts'
+import { canMoveChapter, moveChapterTo } from './move_chapter.ts'
 import { validateTree } from '../domain/chapter_tree/chapter_tree.ts'
 import type { ChapterTree } from '../domain/chapter_tree/chapter_tree.ts'
 
@@ -110,4 +110,43 @@ test('移动不修改原树', () => {
   const snapshot = JSON.stringify(outline)
   moveChapterTo(outline, { chapterId: 'b', targetChapterId: 'a1', position: 'before' })
   assert.equal(JSON.stringify(outline), snapshot)
+})
+
+// --- canMoveChapter：UI 落点有效性 ---
+
+test('canMoveChapter：目标是自身时一律无效', () => {
+  assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'a1', position: 'before' }), false)
+  assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'a1', position: 'after' }), false)
+  assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'a1', position: 'inside' }), false)
+})
+
+test('canMoveChapter：目标是自身后代时无效', () => {
+  assert.equal(canMoveChapter(outline, { chapterId: 'a', targetChapterId: 'a2', position: 'before' }), false)
+  assert.equal(canMoveChapter(outline, { chapterId: 'a', targetChapterId: 'a2x', position: 'inside' }), false)
+})
+
+test('canMoveChapter：落点与当前位置相同视为 no-op', () => {
+  // a1 紧挨在 a2 前面，放到 a2 前面仍是原位。
+  assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'a2', position: 'before' }), false)
+  // a2 紧跟在 a1 后面，放到 a1 后面仍是原位。
+  assert.equal(canMoveChapter(outline, { chapterId: 'a2', targetChapterId: 'a1', position: 'after' }), false)
+  // a2 已经是 a 的最后一个子章节，inside 到 a 仍是原位。
+  assert.equal(canMoveChapter(outline, { chapterId: 'a2', targetChapterId: 'a', position: 'inside' }), false)
+})
+
+test('canMoveChapter：真正改变位置的落点有效', () => {
+  assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'a2', position: 'after' }), true)
+  assert.equal(canMoveChapter(outline, { chapterId: 'a2', targetChapterId: 'a1', position: 'before' }), true)
+  assert.equal(canMoveChapter(outline, { chapterId: 'b', targetChapterId: 'a1', position: 'before' }), true)
+  assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'a2', position: 'inside' }), true)
+})
+
+test('canMoveChapter：找不到章节时无效', () => {
+  assert.equal(canMoveChapter(outline, { chapterId: 'zzz', targetChapterId: 'a1', position: 'before' }), false)
+  assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'zzz', position: 'before' }), false)
+})
+
+test('canMoveChapter：inside 到原父章节不是最后一个时有效', () => {
+  // a1 不是 a 的最后一个子章节，inside 到 a 会移到末尾。
+  assert.equal(canMoveChapter(outline, { chapterId: 'a1', targetChapterId: 'a', position: 'inside' }), true)
 })

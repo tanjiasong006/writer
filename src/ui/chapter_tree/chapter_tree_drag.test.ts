@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import ChapterTree from './ChapterTree.vue'
 import type { ChapterTree as ChapterTreeModel } from '../../domain/chapter_tree/chapter_tree.ts'
 
+// a 有子章节 b；a、c 为根层相邻章节。
 const outline: ChapterTreeModel = [
   { id: 'a', title: 'A', children: [{ id: 'b', title: 'B', children: [] }] },
   { id: 'c', title: 'C', children: [] },
@@ -48,7 +49,7 @@ test('初始没有拖拽，也没有落点反馈', () => {
 })
 
 test('dragstart 标记被拖动的行', async () => {
-  const { wrapper, rows } = mountWithRows()
+  const { rows } = mountWithRows()
   await rows[0].trigger('dragstart')
   expect(rows[0].classes()).toContain('chapter-tree__row--dragging')
   expect(rows[1].classes()).not.toContain('chapter-tree__row--dragging')
@@ -56,8 +57,8 @@ test('dragstart 标记被拖动的行', async () => {
 
 test('拖到目标行上 1/3 显示 before 插入线', async () => {
   const { rows } = mountWithRows()
-  await rows[0].trigger('dragstart')
-  await rows[2].trigger('dragover', { clientY: 65 }) // c: 60..90，上 1/3
+  await rows[1].trigger('dragstart') // b
+  await rows[2].trigger('dragover', { clientY: 65 }) // c 上 1/3
   expect(dropClasses(rows[2])).toEqual(['chapter-tree__row--drop-before'])
 })
 
@@ -77,8 +78,8 @@ test('拖到目标行下 1/3 显示 after 插入线', async () => {
 
 test('同一行内移动时落点实时切换', async () => {
   const { rows } = mountWithRows()
-  await rows[0].trigger('dragstart')
-  const target = rows[2]
+  await rows[1].trigger('dragstart') // b
+  const target = rows[2] // c
 
   await target.trigger('dragover', { clientY: 65 })
   expect(dropClasses(target)).toEqual(['chapter-tree__row--drop-before'])
@@ -92,14 +93,14 @@ test('同一行内移动时落点实时切换', async () => {
 
 test('移到另一行时旧反馈清除，只保留新行反馈', async () => {
   const { rows } = mountWithRows()
-  await rows[0].trigger('dragstart')
+  await rows[2].trigger('dragstart') // c
 
   await rows[1].trigger('dragover', { clientY: 45 })
   expect(dropClasses(rows[1])).toEqual(['chapter-tree__row--drop-inside'])
 
-  await rows[2].trigger('dragover', { clientY: 65 })
+  await rows[0].trigger('dragover', { clientY: 15 })
   expect(dropClasses(rows[1])).toEqual([])
-  expect(dropClasses(rows[2])).toEqual(['chapter-tree__row--drop-before'])
+  expect(dropClasses(rows[0])).toEqual(['chapter-tree__row--drop-inside'])
 })
 
 test('dragleave 离开当前目标行后清除反馈', async () => {
@@ -119,16 +120,31 @@ test('拖到自己身上不产生反馈', async () => {
   expect(dropClasses(rows[0])).toEqual([])
 })
 
+test('拖到自己的后代上不产生反馈', async () => {
+  const { rows } = mountWithRows()
+  await rows[0].trigger('dragstart') // a
+  await rows[1].trigger('dragover', { clientY: 45 }) // b 是 a 的后代
+  expect(dropClasses(rows[1])).toEqual([])
+})
+
+test('落点不改变位置（no-op）时不产生反馈', async () => {
+  const { rows } = mountWithRows()
+  await rows[0].trigger('dragstart') // a
+  // a 已经是 c 的前一个兄弟，放到 c 之前仍是原位。
+  await rows[2].trigger('dragover', { clientY: 65 })
+  expect(dropClasses(rows[2])).toEqual([])
+})
+
 test('从别的行拖回自己时清掉旧行反馈', async () => {
   const { rows } = mountWithRows()
-  await rows[0].trigger('dragstart')
+  await rows[1].trigger('dragstart') // b
 
   await rows[2].trigger('dragover', { clientY: 75 })
   expect(dropClasses(rows[2])).toEqual(['chapter-tree__row--drop-inside'])
 
-  await rows[0].trigger('dragover', { clientY: 15 })
+  await rows[1].trigger('dragover', { clientY: 45 })
   expect(dropClasses(rows[2])).toEqual([])
-  expect(dropClasses(rows[0])).toEqual([])
+  expect(dropClasses(rows[1])).toEqual([])
 })
 
 test('drop 清除拖拽和落点状态', async () => {
@@ -145,24 +161,24 @@ test('drop 清除拖拽和落点状态', async () => {
 test('在有效落点松手时只发出一个 move intent', async () => {
   const { wrapper, rows } = mountWithRows()
   await rows[0].trigger('dragstart')
-  await rows[2].trigger('dragover', { clientY: 65 })
+  await rows[2].trigger('dragover', { clientY: 85 })
 
   await rows[2].trigger('drop')
 
   expect(wrapper.emitted('move')).toEqual([
-    [{ chapterId: 'a', targetChapterId: 'c', position: 'before' }],
+    [{ chapterId: 'a', targetChapterId: 'c', position: 'after' }],
   ])
 })
 
 test('inside 落点发出 inside 意图', async () => {
   const { wrapper, rows } = mountWithRows()
   await rows[0].trigger('dragstart')
-  await rows[1].trigger('dragover', { clientY: 45 })
+  await rows[2].trigger('dragover', { clientY: 75 })
 
-  await rows[1].trigger('drop')
+  await rows[2].trigger('drop')
 
   expect(wrapper.emitted('move')).toEqual([
-    [{ chapterId: 'a', targetChapterId: 'b', position: 'inside' }],
+    [{ chapterId: 'a', targetChapterId: 'c', position: 'inside' }],
   ])
 })
 
@@ -181,6 +197,26 @@ test('拖到自己身上松手不发出 move', async () => {
   await rows[0].trigger('dragover', { clientY: 15 })
 
   await rows[0].trigger('drop')
+
+  expect(wrapper.emitted('move')).toBeUndefined()
+})
+
+test('拖到后代上松手不发出 move', async () => {
+  const { wrapper, rows } = mountWithRows()
+  await rows[0].trigger('dragstart')
+  await rows[1].trigger('dragover', { clientY: 45 })
+
+  await rows[1].trigger('drop')
+
+  expect(wrapper.emitted('move')).toBeUndefined()
+})
+
+test('no-op 落点松手不发出 move', async () => {
+  const { wrapper, rows } = mountWithRows()
+  await rows[0].trigger('dragstart')
+  await rows[2].trigger('dragover', { clientY: 65 })
+
+  await rows[2].trigger('drop')
 
   expect(wrapper.emitted('move')).toBeUndefined()
 })

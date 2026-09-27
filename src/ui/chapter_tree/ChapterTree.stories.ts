@@ -64,10 +64,9 @@ export const Collapsed: Story = {
   },
 }
 
-/** 拖动章节行，松手后经 Application 用例真正改变树的位置。 */
-export const DragAndDrop: Story = {
-  args: { tree: nested, selectedId: null },
-  render: (args) => ({
+/** 可交互拖拽的渲染：持有一份树状态，把 move 意图交给 Application 执行。 */
+function interactive(args: { tree: ChapterTreeModel }) {
+  return {
     components: { ChapterTree },
     setup() {
       const tree = ref<ChapterTreeModel>(args.tree)
@@ -78,5 +77,24 @@ export const DragAndDrop: Story = {
       return { tree, move }
     },
     template: '<ChapterTree :tree="tree" @move="move" />',
-  }),
+  }
+}
+
+/** 拖动章节行，松手后经 Application 用例真正改变树的位置。 */
+export const DragAndDrop: Story = {
+  args: { tree: nested, selectedId: null },
+  render: (args) => interactive(args),
+}
+
+/**
+ * 边界情况：可人工验证无效目标与取消行为。
+ *
+ * - 把「第一部分 基础」拖到它自己的后代（第一章 / 1.1）上：不出现任何反馈，松手无变化。
+ * - 把「1.1 环境准备」放到紧邻的「1.2 第一个程序」之前：原位，无反馈、无变化。
+ * - 把「1.1 环境准备」放到「1.2 第一个程序」之后：正常插入线，松手后位置改变。
+ * - 未进入任何有效目标就松手 / 拖拽取消：所有反馈清除，树不变。
+ */
+export const DragBoundaries: Story = {
+  args: { tree: nested, selectedId: null },
+  render: (args) => interactive(args),
 }

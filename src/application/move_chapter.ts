@@ -32,11 +32,44 @@ export type MoveChapterResult =
  * 前置条件：tree 是一棵已通过 validateTree 的可信树。
  */
 export function moveChapterTo(tree: ChapterTree, intent: MoveIntent): MoveChapterResult {
+  const plan = resolveTarget(tree, intent)
+  if ('reason' in plan) return { ok: false, reason: plan.reason }
+  return moveChapter(tree, intent.chapterId, plan.targetParentId, plan.index)
+}
+
+/**
+ * 判断一次拖拽意图是否会真正改变章节树，供 UI 决定是否显示可放置反馈。
+ *
+ * 以下情况返回 false：
+ * - 被移动章节或目标章节不存在；
+ * - 目标是自身或自身后代（成环，由 Domain 判定）；
+ * - 落点换算后的位置与当前位置相同（no-op）。
+ *
+ * 前置条件：tree 是一棵已通过 validateTree 的可信树。
+ */
+export function canMoveChapter(tree: ChapterTree, intent: MoveIntent): boolean {
+  const plan = resolveTarget(tree, intent)
+  if ('reason' in plan) return false
+  // 摘下来再插回同一位置：没有实际位移。
+  if (plan.targetParentId === plan.moving.parentId && plan.index === plan.moving.index) return false
+  // 成环等剩余规则交给 Domain 判定，不在 Application 重复实现。
+  // ponytail: 每次悬停都让 Domain 算一棵新树来验合法性；章节树大到卡顿再换成纯校验函数。
+  return moveChapter(tree, intent.chapterId, plan.targetParentId, plan.index).ok
+}
+
+type TargetPlan = {
+  readonly moving: Location
+  readonly targetParentId: ChapterId | null
+  readonly index: number
+}
+
+/** 把意图换算成 Domain 需要的 (targetParentId, index)；无法定位时给出原因。 */
+function resolveTarget(tree: ChapterTree, intent: MoveIntent): TargetPlan | { reason: MoveReason } {
   const moving = locate(tree, intent.chapterId)
-  if (!moving) return { ok: false, reason: 'chapter-not-found' }
+  if (!moving) return { reason: 'chapter-not-found' }
 
   const target = locate(tree, intent.targetChapterId)
-  if (!target) return { ok: false, reason: 'target-not-found' }
+  if (!target) return { reason: 'target-not-found' }
 
   let targetParentId: ChapterId | null
   let index: number
@@ -52,7 +85,7 @@ export function moveChapterTo(tree: ChapterTree, intent: MoveIntent): MoveChapte
   // 摘下来再插回去：同父且原位置在插入点之前，移除后下标会前移一位。
   if (targetParentId === moving.parentId && moving.index < index) index -= 1
 
-  return moveChapter(tree, intent.chapterId, targetParentId, index)
+  return { moving, targetParentId, index }
 }
 
 interface Location {

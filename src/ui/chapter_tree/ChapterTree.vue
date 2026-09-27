@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { resolveDropPosition, type DropPosition } from './drop_target.ts'
-import type { MoveIntent } from '../../application/move_chapter.ts'
+import { canMoveChapter, type MoveIntent } from '../../application/move_chapter.ts'
 
 /**
  * 章节树展示组件。
@@ -53,16 +53,21 @@ function startDrag(chapterId: ChapterId): void {
 }
 
 function updateDropTarget(event: DragEvent, chapterId: ChapterId): void {
+  const dragging = draggingId.value
   // 拖到自己身上不算有效目标，清掉反馈。
-  if (chapterId === draggingId.value) {
+  if (dragging === null || chapterId === dragging) {
     dropTarget.value = null
     return
   }
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  dropTarget.value = {
-    id: chapterId,
-    position: resolveDropPosition(event.clientY, { top: rect.top, height: rect.height }),
+  const position = resolveDropPosition(event.clientY, { top: rect.top, height: rect.height })
+  // 自身、自身后代、以及不会产生位移的落点都不算有效目标，不显示反馈。
+  const intent: MoveIntent = { chapterId: dragging, targetChapterId: chapterId, position }
+  if (!canMoveChapter(props.tree, intent)) {
+    dropTarget.value = null
+    return
   }
+  dropTarget.value = { id: chapterId, position }
 }
 
 function leaveRow(chapterId: ChapterId): void {
