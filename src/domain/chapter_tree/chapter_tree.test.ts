@@ -256,6 +256,15 @@ test('插入失败的原因', () => {
     insertReason(outline, null, 0, chapter('c', 'C', [chapter('a')])),
     'id-duplicate',
   )
+  // 待插入子树内部重复 id（Set 去重会漏掉，必须单独发现）
+  assert.equal(
+    insertReason(outline, null, 0, chapter('c', 'C', [chapter('c1'), chapter('c1')])),
+    'id-duplicate',
+  )
+  assert.equal(
+    insertReason(outline, null, 0, chapter('c', 'C', [chapter('c1', 'C1', [chapter('c1')])])),
+    'id-duplicate',
+  )
 })
 
 test('删除根层节点', () => {
@@ -317,9 +326,7 @@ test('重命名不修改原树', () => {
   assert.equal(JSON.stringify(outline), snapshot)
 })
 
-test('重命名失败的原因', () => {
-  const missing = renameChapter(outline, 'zzz', 'x')
-  assert.equal(missing.ok ? '' : missing.reason, 'chapter-not-found')
-  const invalid = renameChapter(outline, 'a', 1 as any)
-  assert.equal(invalid.ok ? '' : invalid.reason, 'title-invalid')
+test('重命名不存在的章节', () => {
+  const result = renameChapter(outline, 'zzz', 'x')
+  assert.equal(result.ok ? '' : result.reason, 'chapter-not-found')
 })

@@ -91,7 +91,7 @@ insertChapter(
 type InsertReason =
   | 'parent-not-found'
   | 'index-out-of-range'
-  | 'id-duplicate'    // node 或其子树的 id 与树中已有 id 冲突
+  | 'id-duplicate'    // node 或其子树的 id 与树中已有 id 冲突，或待插入子树内部自身重复
 
 type InsertResult =
   | { readonly ok: true; readonly tree: ChapterTree }
@@ -119,7 +119,7 @@ type RemoveResult =
 ```ts
 renameChapter(tree: ChapterTree, chapterId: ChapterId, title: string): RenameResult
 
-type RenameReason = 'chapter-not-found' | 'title-invalid'
+type RenameReason = 'chapter-not-found'
 
 type RenameResult =
   | { readonly ok: true; readonly tree: ChapterTree }

@@ -189,7 +189,8 @@ export function insertChapter(
   }
 
   const ids = new Set<ChapterId>()
-  collectIds(node, ids)
+  // 子树内部也不能有重复 id；Set 会静默去重，所以在收集时就要发现。
+  if (collectIds(node, ids)) return { ok: false, reason: 'id-duplicate' }
   for (const id of ids) {
     if (findNode(tree, id)) return { ok: false, reason: 'id-duplicate' }
   }
@@ -221,7 +222,7 @@ export function removeChapter(tree: ChapterTree, chapterId: ChapterId): RemoveRe
   return { ok: true, tree: next }
 }
 
-export type RenameReason = 'chapter-not-found' | 'title-invalid'
+export type RenameReason = 'chapter-not-found'
 
 /** 重命名结果：成功时给出新的可信树，失败时给出原因。 */
 export type RenameResult =
@@ -240,7 +241,6 @@ export function renameChapter(
   title: string,
 ): RenameResult {
   if (!findNode(tree, chapterId)) return { ok: false, reason: 'chapter-not-found' }
-  if (typeof title !== 'string') return { ok: false, reason: 'title-invalid' }
   return { ok: true, tree: replaceTitle(tree, chapterId, title) }
 }
 
@@ -299,9 +299,13 @@ function insertNode(
   )
 }
 
-function collectIds(node: ChapterNode, acc: Set<ChapterId>): void {
+function collectIds(node: ChapterNode, acc: Set<ChapterId>): boolean {
+  if (acc.has(node.id)) return true
   acc.add(node.id)
-  for (const child of node.children) collectIds(child, acc)
+  for (const child of node.children) {
+    if (collectIds(child, acc)) return true
+  }
+  return false
 }
 
 function replaceTitle(
