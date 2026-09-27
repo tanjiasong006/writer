@@ -120,10 +120,10 @@ test('内联编辑失焦发出 rename', async () => {
   expect(wrapper.emitted('rename')).toEqual([['b', 'B2']])
 })
 
-test('双击标题发出 start-rename', async () => {
+test('双击标题不进入编辑，也不发出 start-rename', async () => {
   const wrapper = mountTree()
   await wrapper.findAll('.chapter-tree__row')[1].trigger('dblclick')
-  expect(wrapper.emitted('start-rename')).toEqual([['b']])
+  expect(wrapper.emitted('start-rename')).toBeUndefined()
 })
 
 test('F2 发出 start-rename', async () => {

@@ -9,7 +9,7 @@ import { canMoveChapter, type MoveIntent } from '../../application/move_chapter.
  * 章节树组件。
  *
  * 负责：按 tree 渲染层级、选择、折叠/展开、拖拽落点反馈、Tree Header、
- * 节点菜单、双击/F2 内联重命名、空状态。
+ * 节点菜单、F2 内联重命名、空状态。
  *
  * 所有会产生结构变化的行为都只发出意图事件，由上层（Application）执行；
  * 组件不判断移动是否合法、不构造新树，也不包含任何章节结构规则。
@@ -36,7 +36,7 @@ const emit = defineEmits<{
   'create-sibling': [chapterId: ChapterId]
   /** 在指定章节下新建子章节。 */
   'create-child': [chapterId: ChapterId]
-  /** 请求进入重命名编辑（双击 / F2 / 菜单）。 */
+  /** 请求进入重命名编辑（F2 / 菜单）。 */
   'start-rename': [chapterId: ChapterId]
   /** 内联重命名提交新标题。 */
   rename: [chapterId: ChapterId, title: string]
@@ -172,6 +172,11 @@ function toggle(chapterId: ChapterId): void {
   if (next.has(chapterId)) next.delete(chapterId)
   else next.add(chapterId)
   collapsedIds.value = next
+}
+
+/** 点击标题：选中由行 click 冒泡处理，这里只对有子章节的节点补上展开/收起。 */
+function toggleFromTitle(row: ChapterRow): void {
+  if (row.hasChildren) toggle(row.id)
 }
 
 /** 当前打开菜单的章节 id；同一时间只允许一个菜单。 */
@@ -325,7 +330,6 @@ const rows = computed<ChapterRow[]>(() => {
           :style="{ paddingLeft: `${row.depth * 16}px` }"
           :aria-current="row.id === selectedId ? 'true' : undefined"
           @click="emit('select', row.id)"
-          @dblclick="requestStartRename(row.id)"
           @dragstart="startDrag($event, row)"
           @dragover.prevent="updateDropTarget($event, row.id)"
           @dragleave="leaveRow(row.id)"
@@ -348,7 +352,7 @@ const rows = computed<ChapterRow[]>(() => {
           ></button>
           <span
             v-else
-            class="chapter-tree__toggle chapter-tree__toggle--leaf"
+            class="chapter-tree__leaf-spacer"
             aria-hidden="true"
           ></span>
 
@@ -370,6 +374,7 @@ const rows = computed<ChapterRow[]>(() => {
             v-else
             type="button"
             class="chapter-tree__label"
+            @click="toggleFromTitle(row)"
             @keydown="onLabelKeydown($event, row.id)"
           >
             <span class="chapter-tree__number">{{ row.number }}</span>
@@ -515,6 +520,9 @@ const rows = computed<ChapterRow[]>(() => {
 
 .chapter-tree__toggle {
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   height: 20px;
   padding: 0;
@@ -522,6 +530,7 @@ const rows = computed<ChapterRow[]>(() => {
   background: none;
   cursor: pointer;
   color: inherit;
+  line-height: 1;
 }
 
 .chapter-tree__toggle::before {
@@ -532,14 +541,18 @@ const rows = computed<ChapterRow[]>(() => {
   content: '›';
 }
 
-.chapter-tree__toggle--leaf {
-  cursor: default;
+.chapter-tree__leaf-spacer {
+  flex: none;
+  /* 与箭头等宽的占位，保证叶子节点标题对齐。 */
+  width: 20px;
+  height: 20px;
 }
 
 .chapter-tree__label {
   flex: 1;
   min-width: 0;
   display: flex;
+  align-items: baseline;
   gap: 8px;
   padding: 0;
   border: none;
@@ -612,7 +625,7 @@ const rows = computed<ChapterRow[]>(() => {
   border: 1px solid #93c5fd;
   border-radius: 4px;
   background: #ffffff;
-  color: inherit;
+  color: #111827;
   font: inherit;
   font-size: 14px;
   outline: none;
@@ -628,6 +641,7 @@ const rows = computed<ChapterRow[]>(() => {
   padding: 4px;
   list-style: none;
   background: #ffffff;
+  color: #111827;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);

@@ -46,6 +46,26 @@ test('点击章节行触发 select，并携带该章节 id', async () => {
   expect(wrapper.emitted('select')).toEqual([['c'], ['e']])
 })
 
+test('点击章节标题展开/收起该章节', async () => {
+  const wrapper = mountTree(outline)
+  const labelA = wrapper.findAll('.chapter-tree__label')[0]
+
+  await labelA.trigger('click')
+  expect(texts(wrapper)).toEqual(['1A', '2E'])
+
+  await labelA.trigger('click')
+  expect(texts(wrapper)).toEqual(['1A', '1.1B', '1.1.1C', '1.2D', '2E'])
+})
+
+test('点击叶子章节标题不改变显示，仍然触发 select', async () => {
+  const wrapper = mountTree(outline)
+
+  await wrapper.findAll('.chapter-tree__label')[4].trigger('click')
+
+  expect(texts(wrapper)).toEqual(['1A', '1.1B', '1.1.1C', '1.2D', '2E'])
+  expect(wrapper.emitted('select')).toEqual([['e']])
+})
+
 test('selectedId 标记选中行，其他行不受影响', () => {
   const wrapper = mountTree(outline, 'd')
 
@@ -99,13 +119,18 @@ test('折叠中间章节只隐藏其子树，不影响兄弟章节', async () =>
   expect(texts(wrapper)).toEqual(['1A', '1.1B', '1.2D', '2E'])
 })
 
-test('叶子章节不提供折叠按钮，只有占位符', () => {
+test('叶子章节不提供折叠按钮，只显示无箭头的占位符', () => {
   const wrapper = mountTree(outline)
   const rows = wrapper.findAll('.chapter-tree__row')
 
   const togglesByRow = rows.map((row) => row.find('button.chapter-tree__toggle').exists())
   // 行顺序：a, b, c, d, e，其中 a、b 有子章节。
   expect(togglesByRow).toEqual([true, true, false, false, false])
+
+  // 占位符不带 toggle 类，因此不会渲染 ::before 箭头。
+  const spacers = rows.map((row) => row.find('.chapter-tree__leaf-spacer').exists())
+  expect(spacers).toEqual([false, false, true, true, true])
+  expect(wrapper.find('.chapter-tree__toggle--leaf').exists()).toBe(false)
 })
 
 test('折叠不影响选中状态', async () => {
