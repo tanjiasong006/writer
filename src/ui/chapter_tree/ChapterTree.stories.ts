@@ -1,8 +1,15 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import { ref } from 'vue'
 import ChapterTree from './ChapterTree.vue'
-import type { ChapterTree as ChapterTreeModel } from '../../domain/chapter_tree/chapter_tree.ts'
+import type { ChapterId, ChapterTree as ChapterTreeModel } from '../../domain/chapter_tree/chapter_tree.ts'
+import {
+  appendChapter,
+  createChapterAfter,
+  type CreateChapterResult,
+} from '../../application/create_chapter.ts'
 import { moveChapterTo, type MoveIntent } from '../../application/move_chapter.ts'
+import { renameChapter } from '../../application/rename_chapter.ts'
+import { removeChapter } from '../../application/remove_chapter.ts'
 
 const outline: ChapterTreeModel = [
   { id: 'intro', title: '引言', children: [] },
@@ -32,11 +39,8 @@ const meta = {
   title: 'UI/ChapterTree',
   component: ChapterTree,
   tags: ['autodocs'],
-  render: (args) => ({
-    components: { ChapterTree },
-    setup: () => ({ args }),
-    template: '<ChapterTree v-bind="args" />',
-  }),
+  // ChapterTree 只发意图、不改树，Story 里补一个最小宿主，菜单/重命名/新建才可见地生效。
+  render: (args) => interactive(args),
 } satisfies Meta<typeof ChapterTree>
 
 export default meta
@@ -111,26 +115,99 @@ export const Collapsed: Story = {
   },
 }
 
-/** 可交互拖拽的渲染：持有一份树状态，把 move 意图交给 Application 执行。 */
-function interactive(args: { tree: ChapterTreeModel }) {
+/** 新建章节的默认标题，与 ChapterManager 保持一致。 */
+const NEW_CHAPTER_TITLE = '未命名章节'
+
+/** 只关心树结果的 Application 返回值（rename / remove / move）。 */
+type TreeResult =
+  | { readonly ok: true; readonly tree: ChapterTreeModel }
+  | { readonly ok: false }
+
+/**
+ * 可交互渲染：Story 作为最小宿主，持有 tree / selectedId / editingId，
+ * 把 ChapterTree 发出的意图交给 Application 用例执行。
+ * 只用于让菜单、内联重命名、新建、拖拽在 Storybook 里可见地生效，
+ * 真正的组合与错误文案属于 ChapterManager。
+ */
+function interactive(args: {
+  tree: ChapterTreeModel
+  selectedId?: ChapterId | null
+  editingId?: ChapterId | null
+}) {
   return {
     components: { ChapterTree },
     setup() {
       const tree = ref<ChapterTreeModel>(args.tree)
-      const move = (intent: MoveIntent): void => {
-        const result = moveChapterTo(tree.value, intent)
+      const selectedId = ref<ChapterId | null>(args.selectedId ?? null)
+      const editingId = ref<ChapterId | null>(args.editingId ?? null)
+
+      const applyTree = (result: TreeResult): void => {
         if (result.ok) tree.value = result.tree
       }
-      return { tree, move }
+      const applyCreate = (result: CreateChapterResult): void => {
+        if (!result.ok) return
+        tree.value = result.tree
+        selectedId.value = result.chapterId
+        editingId.value = result.chapterId
+      }
+      const select = (id: ChapterId): void => {
+        selectedId.value = id
+        editingId.value = null
+      }
+
+      return {
+        tree,
+        selectedId,
+        editingId,
+        select,
+        move: (intent: MoveIntent) => applyTree(moveChapterTo(tree.value, intent)),
+        createRoot: () =>
+          applyCreate(
+            selectedId.value === null
+              ? appendChapter(tree.value, null, NEW_CHAPTER_TITLE)
+              : createChapterAfter(tree.value, selectedId.value, NEW_CHAPTER_TITLE),
+          ),
+        createSibling: (id: ChapterId) =>
+          applyCreate(createChapterAfter(tree.value, id, NEW_CHAPTER_TITLE)),
+        createChild: (id: ChapterId) => applyCreate(appendChapter(tree.value, id, NEW_CHAPTER_TITLE)),
+        startRename: (id: ChapterId) => {
+          editingId.value = id
+        },
+        rename: (id: ChapterId, title: string) => {
+          editingId.value = null
+          applyTree(renameChapter(tree.value, id, title))
+        },
+        cancelRename: () => {
+          editingId.value = null
+        },
+        remove: (id: ChapterId) => {
+          applyTree(removeChapter(tree.value, id))
+          if (selectedId.value === id) selectedId.value = null
+        },
+      }
     },
-    template: '<ChapterTree :tree="tree" @move="move" />',
+    template: `
+      <ChapterTree
+        :tree="tree"
+        :selected-id="selectedId"
+        :editing-id="editingId"
+        @select="select"
+        @move="move"
+        @create-root="createRoot"
+        @create-sibling="createSibling"
+        @create-child="createChild"
+        @start-rename="startRename"
+        @rename="rename"
+        @cancel-rename="cancelRename"
+        @delete="remove"
+      />
+    `,
   }
 }
 
 /** 拖动章节行，松手后经 Application 用例真正改变树的位置。 */
 export const DragAndDrop: Story = {
   args: { tree: nested, selectedId: null },
-  render: (args) => interactive(args),
 }
 
 /**
@@ -143,5 +220,4 @@ export const DragAndDrop: Story = {
  */
 export const DragBoundaries: Story = {
   args: { tree: nested, selectedId: null },
-  render: (args) => interactive(args),
 }
