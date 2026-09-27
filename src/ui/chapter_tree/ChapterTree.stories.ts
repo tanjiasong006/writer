@@ -46,6 +46,11 @@ export const Default: Story = {
   args: { tree: outline, selectedId: null },
 }
 
+/** 空树：没有章节行，只渲染空列表。 */
+export const Empty: Story = {
+  args: { tree: [], selectedId: null },
+}
+
 export const Nested: Story = {
   args: { tree: nested, selectedId: null },
 }

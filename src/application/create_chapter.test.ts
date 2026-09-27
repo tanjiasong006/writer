@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { createChapter } from './create_chapter.ts'
+import { appendChapter, createChapter } from './create_chapter.ts'
 import { validateTree } from '../domain/chapter_tree/chapter_tree.ts'
 import type { ChapterTree } from '../domain/chapter_tree/chapter_tree.ts'
 
@@ -86,5 +86,38 @@ test('每次新建生成不同的非空 id，且确实进入树中', () => {
 test('新建不修改原树', () => {
   const snapshot = JSON.stringify(outline)
   createChapter(outline, 'a', 0, 'X')
+  assert.equal(JSON.stringify(outline), snapshot)
+})
+
+// --- appendChapter ---
+
+test('appendChapter：追加到根层级末尾', () => {
+  const result = appendChapter(outline, null, '新根')
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.equal(validateTree(result.tree).ok, true)
+  assert.deepEqual(
+    result.tree.map((n) => n.id),
+    ['a', 'b', result.chapterId],
+  )
+  assert.equal(result.tree.find((n) => n.id === result.chapterId)!.title, '新根')
+})
+
+test('appendChapter：追加到指定父章节末尾', () => {
+  const result = appendChapter(outline, 'a', '新子')
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.deepEqual(childIds(result.tree, 'a'), ['a1', 'a2', result.chapterId])
+})
+
+test('appendChapter：父章节不存在', () => {
+  const result = appendChapter(outline, 'zzz', 'X')
+  assert.equal(result.ok, false)
+  assert.equal(result.ok ? '' : result.reason, 'parent-not-found')
+})
+
+test('appendChapter：不修改原树', () => {
+  const snapshot = JSON.stringify(outline)
+  appendChapter(outline, 'a', '新子')
   assert.equal(JSON.stringify(outline), snapshot)
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { resolveDropPosition, type DropPosition } from './drop_target.ts'
@@ -40,6 +40,37 @@ interface ChapterRow {
 
 /** 被用户折叠的章节 id；只影响显示，不进入 Domain。 */
 const collapsedIds = ref(new Set<ChapterId>())
+
+/**
+ * 选中章节变化，或树引用变化时，展开选中章节的所有祖先，保证它可见。
+ * 例如在折叠的父章节下新增子章节，或把选中章节拖入已折叠的父节点。
+ * 树是不可变更新（每次生成新引用），因此只 watch 引用即可，无需 deep watch。
+ */
+watch(
+  [() => props.selectedId, () => props.tree],
+  () => {
+    const id = props.selectedId
+    if (id === null || id === undefined) return
+    const path = ancestorPath(props.tree, id)
+    if (path === null || path.length === 0) return
+    const next = new Set(collapsedIds.value)
+    let changed = false
+    for (const ancestorId of path) {
+      if (next.delete(ancestorId)) changed = true
+    }
+    if (changed) collapsedIds.value = next
+  },
+)
+
+/** 返回从根到 id 的祖先 id 列表（不含 id 本身）；找不到返回 null。 */
+function ancestorPath(nodes: ChapterTree, id: ChapterId): ChapterId[] | null {
+  for (const node of nodes) {
+    if (node.id === id) return []
+    const childPath = ancestorPath(node.children, id)
+    if (childPath !== null) return [node.id, ...childPath]
+  }
+  return null
+}
 
 /** 正在被拖动的章节 id；为 null 表示没有拖拽。 */
 const draggingId = ref<ChapterId | null>(null)
@@ -129,8 +160,16 @@ const rows = computed<ChapterRow[]>(() => {
 </script>
 
 <template>
-  <ul class="chapter-tree">
-    <li v-for="row in rows" :key="row.id" class="chapter-tree__node">
+  <ul class="chapter-tree" role="tree" aria-label="章节树">
+    <li
+      v-for="row in rows"
+      :key="row.id"
+      class="chapter-tree__node"
+      role="treeitem"
+      :aria-level="row.depth + 1"
+      :aria-selected="row.id === selectedId"
+      :aria-expanded="row.hasChildren ? !collapsedIds.has(row.id) : undefined"
+    >
       <div
         class="chapter-tree__row"
         draggable="true"

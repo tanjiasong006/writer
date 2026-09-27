@@ -1,4 +1,5 @@
 import {
+  findChapter,
   insertChapter,
   type ChapterId,
   type ChapterNode,
@@ -33,4 +34,20 @@ export function createChapter(
   return result.ok
     ? { ok: true, tree: result.tree, chapterId: node.id }
     : { ok: false, reason: result.reason }
+}
+
+/**
+ * 在 parentId 的末尾追加一个新章节（parentId 为 null 时追加到根层级）。
+ *
+ * 这是“新增章节”这一操作的完整用例：Application 负责把“追加”换算成具体 index，
+ * UI 不需要为了取子节点数量而遍历树。
+ */
+export function appendChapter(
+  tree: ChapterTree,
+  parentId: ChapterId | null,
+  title: string,
+): CreateChapterResult {
+  const index =
+    parentId === null ? tree.length : (findChapter(tree, parentId)?.children.length ?? 0)
+  return createChapter(tree, parentId, index, title)
 }

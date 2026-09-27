@@ -91,6 +91,16 @@ export function validateTree(tree: unknown): ValidateTreeResult {
     : { ok: false, issues }
 }
 
+/**
+ * 按 id 查找章节节点；找不到返回 null。
+ *
+ * 只读查询，不修改树。Application 与 UI 都可以用它读取节点（如标题、子节点数），
+ * 避免各自重写一遍树遍历。
+ */
+export function findChapter(tree: ChapterTree, id: ChapterId): ChapterNode | null {
+  return findNode(tree, id)
+}
+
 export type MoveReason =
   | 'chapter-not-found'
   | 'target-not-found'

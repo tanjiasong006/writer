@@ -53,6 +53,15 @@ type ValidateTreeResult =
 
 `issues` 只给机器可读的 `code` 和 `path`，不含面向用户的文案；文案由 UI 层根据 `code` 生成。
 
+### findChapter
+
+```ts
+findChapter(tree: ChapterTree, id: ChapterId): ChapterNode | null
+```
+
+按 id 查找章节节点，找不到返回 `null`。只读查询，不修改树。
+Application 与 UI 都可用它读取节点（如标题、子节点数），避免各自重写树遍历。
+
 ### validateMove
 
 ```ts

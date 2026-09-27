@@ -118,3 +118,16 @@ test('折叠不影响选中状态', async () => {
   const selected = wrapper.findAll('.chapter-tree__row--selected')
   expect(selected.map((row) => row.text())).toEqual(['1.1.1C'])
 })
+
+test('selectedId 变化时自动展开祖先，让选中章节可见', async () => {
+  const wrapper = mountTree(outline)
+
+  // 折叠 a 后，b 与 c 都被隐藏。
+  await wrapper.findAll('button.chapter-tree__toggle')[0].trigger('click')
+  expect(texts(wrapper)).toEqual(['1A', '2E'])
+
+  await wrapper.setProps({ selectedId: 'c' })
+
+  expect(texts(wrapper)).toEqual(['1A', '1.1B', '1.1.1C', '1.2D', '2E'])
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1.1.1C')
+})
