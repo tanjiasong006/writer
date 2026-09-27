@@ -2,7 +2,7 @@
 
 ## 职责
 
-定义章节树的数据结构，校验一棵树是否合法，并提供移动章节的操作。纯逻辑，不涉及 UI、存储、导入导出。
+定义章节树的数据结构，校验一棵树是否合法，并提供移动、新增、删除、重命名章节的操作。纯逻辑，不涉及 UI、存储、导入导出。
 
 失败原因一律用机器可读的 `code` 表达，不包含面向用户的自然语言；文案由 UI 层负责。
 
@@ -74,6 +74,57 @@ type MoveResult =
 
 这是移动的最小原语；上移/下移/拖放到某节点前后等行为由上层根据它组合。
 
+### insertChapter
+
+```ts
+insertChapter(
+  tree: ChapterTree,          // 已通过 validateTree 的可信树
+  parentId: ChapterId | null, // null 表示根层级
+  index: number,              // 插入位置，0..目标 children 当前长度（等于长度即追加）
+  node: ChapterNode,          // 完整的待插入节点（含子树）
+): InsertResult
+
+type InsertReason =
+  | 'parent-not-found'
+  | 'index-out-of-range'
+  | 'id-duplicate'    // node 或其子树的 id 与树中已有 id 冲突
+  | 'invalid-node'    // node 结构不合法（id 空、title 非字符串、children 非数组等）
+
+type InsertResult =
+  | { ok: true; tree: ChapterTree }
+  | { ok: false; reason: InsertReason }
+```
+
+纯函数：不修改传入的 `tree`。`node` 必须是合法的 `ChapterNode`，其子树内也不能有重复 id。
+
+### removeChapter
+
+```ts
+removeChapter(tree: ChapterTree, chapterId: ChapterId): RemoveResult
+
+type RemoveReason = 'chapter-not-found'
+
+type RemoveResult =
+  | { ok: true; tree: ChapterTree }
+  | { ok: false; reason: RemoveReason }
+```
+
+删除章节及其整棵子树，纯函数。允许删到空树（空树合法）。
+
+### renameChapter
+
+```ts
+renameChapter(tree: ChapterTree, chapterId: ChapterId, title: string): RenameResult
+
+type RenameReason = 'chapter-not-found' | 'title-invalid'
+
+type RenameResult =
+  | { ok: true; tree: ChapterTree }
+  | { ok: false; reason: RenameReason }
+```
+
+只改 `title`，不动 id、children 和位置，纯函数。空字符串是合法 `title`（不变量只要求是字符串）。
+
 ## 不变量
 
 - `ChapterId` 全局唯一且为非空字符串。
@@ -82,4 +133,4 @@ type MoveResult =
 
 ## 非目标
 
-新增、删除、编号、UI、持久化均不在此模块。
+编号、UI、持久化均不在此模块。

@@ -150,6 +150,102 @@ export function moveChapter(
   return { ok: true, tree: next }
 }
 
+export type InsertReason =
+  | 'parent-not-found'
+  | 'index-out-of-range'
+  | 'id-duplicate'
+  | 'invalid-node'
+
+/** 新增结果：成功时给出新的可信树，失败时给出原因。 */
+export type InsertResult =
+  | { ok: true; tree: ChapterTree }
+  | { ok: false; reason: InsertReason }
+
+/**
+ * 在 targetParentId 下的第 index 个位置插入一个新章节（node 及其子树）。
+ *
+ * - targetParentId 为 null 表示插入到根层级。
+ * - index 是插入位置，范围 0..目标 children 当前长度（等于长度即追加）。
+ * - node 必须是完整的 ChapterNode；它的 id 不能与树中已有 id 重复。
+ * - 纯函数：不修改传入的 tree。
+ *
+ * 前置条件：tree 是一棵已通过 validateTree 的可信树。
+ */
+export function insertChapter(
+  tree: ChapterTree,
+  parentId: ChapterId | null,
+  index: number,
+  node: ChapterNode,
+): InsertResult {
+  if (!validateTree([node]).ok) return { ok: false, reason: 'invalid-node' }
+
+  if (parentId !== null && !findNode(tree, parentId)) {
+    return { ok: false, reason: 'parent-not-found' }
+  }
+
+  const length =
+    parentId === null ? tree.length : (findNode(tree, parentId)?.children.length ?? 0)
+
+  if (!Number.isInteger(index) || index < 0 || index > length) {
+    return { ok: false, reason: 'index-out-of-range' }
+  }
+
+  const ids = new Set<ChapterId>()
+  collectIds(node, ids)
+  for (const id of ids) {
+    if (findNode(tree, id)) return { ok: false, reason: 'id-duplicate' }
+  }
+
+  const next =
+    parentId === null
+      ? spliceAt(tree, index, node)
+      : insertNode(tree, parentId, index, node)
+
+  return { ok: true, tree: next }
+}
+
+export type RemoveReason = 'chapter-not-found'
+
+/** 删除结果：成功时给出新的可信树，失败时给出原因。 */
+export type RemoveResult =
+  | { ok: true; tree: ChapterTree }
+  | { ok: false; reason: RemoveReason }
+
+/**
+ * 删除 chapterId 对应的章节（连同子树），返回新树。
+ * 纯函数：不修改传入的 tree。
+ *
+ * 前置条件：tree 是一棵已通过 validateTree 的可信树。
+ */
+export function removeChapter(tree: ChapterTree, chapterId: ChapterId): RemoveResult {
+  const [next, removed] = removeNode(tree, chapterId)
+  if (!removed) return { ok: false, reason: 'chapter-not-found' }
+  return { ok: true, tree: next }
+}
+
+export type RenameReason = 'chapter-not-found' | 'title-invalid'
+
+/** 重命名结果：成功时给出新的可信树，失败时给出原因。 */
+export type RenameResult =
+  | { ok: true; tree: ChapterTree }
+  | { ok: false; reason: RenameReason }
+
+/**
+ * 修改 chapterId 对应章节的 title，返回新树。
+ * 只改 title，不动 id、children 和位置。纯函数：不修改传入的 tree。
+ *
+ * 前置条件：tree 是一棵已通过 validateTree 的可信树。
+ */
+export function renameChapter(
+  tree: ChapterTree,
+  chapterId: ChapterId,
+  title: string,
+): RenameResult {
+  if (!findNode(tree, chapterId)) return { ok: false, reason: 'chapter-not-found' }
+  if (typeof title !== 'string') return { ok: false, reason: 'title-invalid' }
+  return { ok: true, tree: replaceTitle(tree, chapterId, title) }
+}
+
 function findNode(list: ChapterNode[], id: ChapterId): ChapterNode | null {
   for (const node of list) {
     if (node.id === id) return node
@@ -198,5 +294,18 @@ function insertNode(
     current.id === parentId
       ? { ...current, children: spliceAt(current.children, index, node) }
       : { ...current, children: insertNode(current.children, parentId, index, node) },
+  )
+}
+
+function collectIds(node: ChapterNode, acc: Set<ChapterId>): void {
+  acc.add(node.id)
+  for (const child of node.children) collectIds(child, acc)
+}
+
+function replaceTitle(list: ChapterNode[], id: ChapterId, title: string): ChapterNode[] {
+  return list.map((node) =>
+    node.id === id
+      ? { ...node, title }
+      : { ...node, children: replaceTitle(node.children, id, title) },
   )
 }

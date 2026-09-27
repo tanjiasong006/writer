@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { moveChapter, validateTree } from './chapter_tree.ts'
-import type { ChapterTree, MoveReason, TreeIssue } from './chapter_tree.ts'
+import { insertChapter, moveChapter, removeChapter, renameChapter, validateTree } from './chapter_tree.ts'
+import type { ChapterNode, ChapterTree, MoveReason, TreeIssue } from './chapter_tree.ts'
 
 const valid: ChapterTree = [
   {
@@ -185,4 +185,147 @@ test('移动失败的原因', () => {
   assert.equal(moveReason(outline, 'a1', 'a', 3), 'index-out-of-range')
   assert.equal(moveReason(outline, 'a1', 'a', -1), 'index-out-of-range')
   assert.equal(moveReason(outline, 'a1', 'a', 1.5), 'index-out-of-range')
+})
+
+// --- insertChapter / removeChapter / renameChapter ---
+
+function chapter(id: string, title = id, children: ChapterNode[] = []): ChapterNode {
+  return { id, title, children }
+}
+
+/** 断言操作成功、结果树通过校验，并返回结果树。 */
+function expectValid(
+  result: { ok: true; tree: ChapterTree } | { ok: false; reason: string },
+): ChapterTree {
+  assert.equal(result.ok, true)
+  if (!result.ok) throw new Error('期望成功，但操作失败了')
+  const validated = validateTree(result.tree)
+  assert.equal(validated.ok, true)
+  return result.tree
+}
+
+function insertReason(
+  tree: ChapterTree,
+  parent: string | null,
+  index: number,
+  node: ChapterNode,
+): string {
+  const result = insertChapter(tree, parent, index, node)
+  assert.equal(result.ok, false)
+  return result.ok ? '' : result.reason
+}
+
+test('插入到根层级', () => {
+  const next = expectValid(insertChapter(outline, null, 1, chapter('c')))
+  assert.deepEqual(next.map((n) => n.id), ['a', 'c', 'b'])
+})
+
+test('插入到指定父节点下', () => {
+  const next = expectValid(insertChapter(outline, 'a', 1, chapter('c')))
+  assert.deepEqual(childIds(next, 'a'), ['a1', 'c', 'a2'])
+})
+
+test('index 等于长度即追加', () => {
+  const atRoot = expectValid(insertChapter(outline, null, outline.length, chapter('c')))
+  assert.deepEqual(atRoot.map((n) => n.id), ['a', 'b', 'c'])
+  const underA = expectValid(insertChapter(outline, 'a', 2, chapter('c')))
+  assert.deepEqual(childIds(underA, 'a'), ['a1', 'a2', 'c'])
+})
+
+test('插入带子树的节点，结构完整保留', () => {
+  const subtree = chapter('c', 'C', [chapter('c1'), chapter('c2', 'C2', [chapter('c2x')])])
+  const next = expectValid(insertChapter(outline, null, 0, subtree))
+  assert.deepEqual(next.map((n) => n.id), ['c', 'a', 'b'])
+  assert.deepEqual(childIds(next, 'c'), ['c1', 'c2'])
+  assert.deepEqual(childIds(next, 'c2'), ['c2x'])
+})
+
+test('插入不修改原树', () => {
+  const snapshot = JSON.stringify(outline)
+  insertChapter(outline, 'a', 0, chapter('c'))
+  assert.equal(JSON.stringify(outline), snapshot)
+})
+
+test('插入失败的原因', () => {
+  assert.equal(insertReason(outline, 'zzz', 0, chapter('c')), 'parent-not-found')
+  assert.equal(insertReason(outline, null, -1, chapter('c')), 'index-out-of-range')
+  assert.equal(insertReason(outline, null, 3, chapter('c')), 'index-out-of-range')
+  assert.equal(insertReason(outline, null, 1.5, chapter('c')), 'index-out-of-range')
+  assert.equal(insertReason(outline, null, 0, chapter('a1')), 'id-duplicate')
+  assert.equal(
+    insertReason(outline, null, 0, chapter('c', 'C', [chapter('a')])),
+    'id-duplicate',
+  )
+  assert.equal(insertReason(outline, null, 0, chapter('')), 'invalid-node')
+  assert.equal(insertReason(outline, null, 0, chapter('c', 1 as any)), 'invalid-node')
+  assert.equal(
+    insertReason(outline, null, 0, { id: 'c', title: 'C', children: null } as any),
+    'invalid-node',
+  )
+})
+
+test('删除根层节点', () => {
+  const next = expectValid(removeChapter(outline, 'a'))
+  assert.deepEqual(next.map((n) => n.id), ['b'])
+})
+
+test('删除嵌套节点', () => {
+  const next = expectValid(removeChapter(outline, 'a1'))
+  assert.deepEqual(childIds(next, 'a'), ['a2'])
+})
+
+test('删除带子树的节点会一并删除', () => {
+  const next = expectValid(removeChapter(outline, 'a2'))
+  assert.deepEqual(childIds(next, 'a'), ['a1'])
+  assert.deepEqual(next.map((n) => n.id), ['a', 'b'])
+})
+
+test('全部删除得到合法空树', () => {
+  const once = expectValid(removeChapter(outline, 'a'))
+  const next = expectValid(removeChapter(once, 'b'))
+  assert.deepEqual(next, [])
+})
+
+test('删除不修改原树', () => {
+  const snapshot = JSON.stringify(outline)
+  removeChapter(outline, 'a2')
+  assert.equal(JSON.stringify(outline), snapshot)
+})
+
+test('删除不存在的章节', () => {
+  const result = removeChapter(outline, 'zzz')
+  assert.equal(result.ok, false)
+  assert.equal(result.ok ? '' : result.reason, 'chapter-not-found')
+})
+
+test('重命名根层节点', () => {
+  const next = expectValid(renameChapter(outline, 'a', '新标题'))
+  assert.equal(next.find((n) => n.id === 'a')!.title, '新标题')
+})
+
+test('重命名嵌套节点，children 和位置不变', () => {
+  const next = expectValid(renameChapter(outline, 'a2', '新标题'))
+  assert.deepEqual(next.map((n) => n.id), ['a', 'b'])
+  assert.equal(childIds(next, 'a').join(','), 'a1,a2')
+  assert.deepEqual(childIds(next, 'a2'), ['a2x'])
+  const find = next[0].children.find((n) => n.id === 'a2')!
+  assert.equal(find.title, '新标题')
+})
+
+test('空字符串 title 合法', () => {
+  const next = expectValid(renameChapter(outline, 'b', ''))
+  assert.equal(next.find((n) => n.id === 'b')!.title, '')
+})
+
+test('重命名不修改原树', () => {
+  const snapshot = JSON.stringify(outline)
+  renameChapter(outline, 'a', '新标题')
+  assert.equal(JSON.stringify(outline), snapshot)
+})
+
+test('重命名失败的原因', () => {
+  const missing = renameChapter(outline, 'zzz', 'x')
+  assert.equal(missing.ok ? '' : missing.reason, 'chapter-not-found')
+  const invalid = renameChapter(outline, 'a', 1 as any)
+  assert.equal(invalid.ok ? '' : invalid.reason, 'title-invalid')
 })
