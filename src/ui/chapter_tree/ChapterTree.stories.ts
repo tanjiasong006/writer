@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
+import { ref } from 'vue'
 import ChapterTree from './ChapterTree.vue'
 import type { ChapterTree as ChapterTreeModel } from '../../domain/chapter_tree/chapter_tree.ts'
+import { moveChapterTo, type MoveIntent } from '../../application/move_chapter.ts'
 
 const outline: ChapterTreeModel = [
   { id: 'intro', title: '引言', children: [] },
@@ -62,7 +64,19 @@ export const Collapsed: Story = {
   },
 }
 
-/** 直接拖动章节行，观察插入线与 inside 高亮；本阶段松手不会改变树。 */
+/** 拖动章节行，松手后经 Application 用例真正改变树的位置。 */
 export const DragAndDrop: Story = {
   args: { tree: nested, selectedId: null },
+  render: (args) => ({
+    components: { ChapterTree },
+    setup() {
+      const tree = ref<ChapterTreeModel>(args.tree)
+      const move = (intent: MoveIntent): void => {
+        const result = moveChapterTo(tree.value, intent)
+        if (result.ok) tree.value = result.tree
+      }
+      return { tree, move }
+    },
+    template: '<ChapterTree :tree="tree" @move="move" />',
+  }),
 }

@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { resolveDropPosition, type DropPosition } from './drop_target.ts'
+import type { MoveIntent } from '../../application/move_chapter.ts'
 
 /**
  * 章节树展示组件。
@@ -11,8 +12,8 @@ import { resolveDropPosition, type DropPosition } from './drop_target.ts'
  * 折叠/展开有子章节的节点、拖拽时用 DropTarget 提示落点。
  * 折叠与拖拽落点都是纯 UI 状态，默认全部展开，不回写 tree。
  * 编号由 Domain 的 computeChapterNumbers 计算，组件只负责显示格式；
- * 组件不修改 tree，也不包含任何章节业务规则。拖拽本阶段只做视觉反馈，
- * 不产生任何树变更。
+ * 组件不修改 tree，也不包含任何章节业务规则。拖拽松手时只发出 move 意图，
+ * 由上层（Application）决定是否、如何修改章节树。
  */
 
 const props = defineProps<{
@@ -25,6 +26,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** 用户选中了某个章节。 */
   select: [chapterId: ChapterId]
+  /** 用户在有效落点上松手，发出移动意图；组件不直接修改 tree。 */
+  move: [intent: MoveIntent]
 }>()
 
 interface ChapterRow {
@@ -66,7 +69,17 @@ function leaveRow(chapterId: ChapterId): void {
   if (dropTarget.value?.id === chapterId) dropTarget.value = null
 }
 
-/** 松手或拖拽结束都清空拖拽状态；本阶段不修改树。 */
+/** 松手：有有效落点时发一个 move 意图，然后一律清空拖拽状态。 */
+function drop(): void {
+  const target = dropTarget.value
+  const chapterId = draggingId.value
+  if (chapterId !== null && target !== null) {
+    emit('move', { chapterId, targetChapterId: target.id, position: target.position })
+  }
+  endDrag()
+}
+
+/** 松手或拖拽结束都清空拖拽状态；本组件不修改 tree。 */
 function endDrag(): void {
   draggingId.value = null
   dropTarget.value = null
@@ -128,7 +141,7 @@ const rows = computed<ChapterRow[]>(() => {
         @dragstart="startDrag(row.id)"
         @dragover.prevent="updateDropTarget($event, row.id)"
         @dragleave="leaveRow(row.id)"
-        @drop.prevent="endDrag"
+        @drop.prevent="drop"
         @dragend="endDrag"
       >
         <button
@@ -153,6 +166,10 @@ const rows = computed<ChapterRow[]>(() => {
 .chapter-tree__row {
   display: flex;
   align-items: center;
+}
+
+.chapter-tree__row--selected {
+  background: rgba(59, 130, 246, 0.1);
 }
 
 .chapter-tree__row--dragging {

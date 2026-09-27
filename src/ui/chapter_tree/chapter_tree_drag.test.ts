@@ -142,6 +142,49 @@ test('drop 清除拖拽和落点状态', async () => {
   expect(wrapper.find('.chapter-tree__row--drop-inside').exists()).toBe(false)
 })
 
+test('在有效落点松手时只发出一个 move intent', async () => {
+  const { wrapper, rows } = mountWithRows()
+  await rows[0].trigger('dragstart')
+  await rows[2].trigger('dragover', { clientY: 65 })
+
+  await rows[2].trigger('drop')
+
+  expect(wrapper.emitted('move')).toEqual([
+    [{ chapterId: 'a', targetChapterId: 'c', position: 'before' }],
+  ])
+})
+
+test('inside 落点发出 inside 意图', async () => {
+  const { wrapper, rows } = mountWithRows()
+  await rows[0].trigger('dragstart')
+  await rows[1].trigger('dragover', { clientY: 45 })
+
+  await rows[1].trigger('drop')
+
+  expect(wrapper.emitted('move')).toEqual([
+    [{ chapterId: 'a', targetChapterId: 'b', position: 'inside' }],
+  ])
+})
+
+test('没有有效落点时松手不发出 move', async () => {
+  const { wrapper, rows } = mountWithRows()
+  await rows[0].trigger('dragstart')
+
+  await rows[2].trigger('drop') // 没有先 dragover
+
+  expect(wrapper.emitted('move')).toBeUndefined()
+})
+
+test('拖到自己身上松手不发出 move', async () => {
+  const { wrapper, rows } = mountWithRows()
+  await rows[0].trigger('dragstart')
+  await rows[0].trigger('dragover', { clientY: 15 })
+
+  await rows[0].trigger('drop')
+
+  expect(wrapper.emitted('move')).toBeUndefined()
+})
+
 test('dragend 清除拖拽和落点状态', async () => {
   const { wrapper, rows } = mountWithRows()
   await rows[0].trigger('dragstart')
