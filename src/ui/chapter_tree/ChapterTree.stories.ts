@@ -61,3 +61,8 @@ export const Collapsed: Story = {
     for (const toggle of toggles) toggle.click()
   },
 }
+
+/** 直接拖动章节行，观察插入线与 inside 高亮；本阶段松手不会改变树。 */
+export const DragAndDrop: Story = {
+  args: { tree: nested, selectedId: null },
+}

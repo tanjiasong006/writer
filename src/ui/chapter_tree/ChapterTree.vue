@@ -2,14 +2,17 @@
 import { computed, ref } from 'vue'
 import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
+import { resolveDropPosition, type DropPosition } from './drop_target.ts'
 
 /**
  * 章节树展示组件。
  *
- * 三件事：按 tree 渲染层级、把点击的章节通过 select 事件告诉上层、
- * 折叠/展开有子章节的节点。折叠状态是纯 UI 状态，默认全部展开，不回写 tree。
+ * 四件事：按 tree 渲染层级、把点击的章节通过 select 事件告诉上层、
+ * 折叠/展开有子章节的节点、拖拽时用 DropTarget 提示落点。
+ * 折叠与拖拽落点都是纯 UI 状态，默认全部展开，不回写 tree。
  * 编号由 Domain 的 computeChapterNumbers 计算，组件只负责显示格式；
- * 组件不修改 tree，也不包含任何章节业务规则。
+ * 组件不修改 tree，也不包含任何章节业务规则。拖拽本阶段只做视觉反馈，
+ * 不产生任何树变更。
  */
 
 const props = defineProps<{
@@ -34,6 +37,45 @@ interface ChapterRow {
 
 /** 被用户折叠的章节 id；只影响显示，不进入 Domain。 */
 const collapsedIds = ref(new Set<ChapterId>())
+
+/** 正在被拖动的章节 id；为 null 表示没有拖拽。 */
+const draggingId = ref<ChapterId | null>(null)
+
+/** 当前落点：命中行 id 与相对位置；离开有效目标后清空。 */
+const dropTarget = ref<{ readonly id: ChapterId; readonly position: DropPosition } | null>(null)
+
+function startDrag(chapterId: ChapterId): void {
+  draggingId.value = chapterId
+  dropTarget.value = null
+}
+
+function updateDropTarget(event: DragEvent, chapterId: ChapterId): void {
+  // 拖到自己身上不算有效目标，清掉反馈。
+  if (chapterId === draggingId.value) {
+    dropTarget.value = null
+    return
+  }
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  dropTarget.value = {
+    id: chapterId,
+    position: resolveDropPosition(event.clientY, { top: rect.top, height: rect.height }),
+  }
+}
+
+function leaveRow(chapterId: ChapterId): void {
+  if (dropTarget.value?.id === chapterId) dropTarget.value = null
+}
+
+/** 松手或拖拽结束都清空拖拽状态；本阶段不修改树。 */
+function endDrag(): void {
+  draggingId.value = null
+  dropTarget.value = null
+}
+
+function dropClass(chapterId: ChapterId): string | null {
+  if (dropTarget.value?.id !== chapterId) return null
+  return `chapter-tree__row--drop-${dropTarget.value.position}`
+}
 
 function toggle(chapterId: ChapterId): void {
   const next = new Set(collapsedIds.value)
@@ -73,11 +115,21 @@ const rows = computed<ChapterRow[]>(() => {
     <li v-for="row in rows" :key="row.id" class="chapter-tree__node">
       <div
         class="chapter-tree__row"
-        :class="{ 'chapter-tree__row--selected': row.id === selectedId }"
+        draggable="true"
+        :class="[
+          { 'chapter-tree__row--selected': row.id === selectedId },
+          { 'chapter-tree__row--dragging': row.id === draggingId },
+          dropClass(row.id),
+        ]"
         :data-depth="row.depth"
         :style="{ paddingLeft: `${row.depth * 1.25}rem` }"
         :aria-current="row.id === selectedId ? 'true' : undefined"
         @click="emit('select', row.id)"
+        @dragstart="startDrag(row.id)"
+        @dragover.prevent="updateDropTarget($event, row.id)"
+        @dragleave="leaveRow(row.id)"
+        @drop.prevent="endDrag"
+        @dragend="endDrag"
       >
         <button
           v-if="row.hasChildren"
@@ -101,6 +153,23 @@ const rows = computed<ChapterRow[]>(() => {
 .chapter-tree__row {
   display: flex;
   align-items: center;
+}
+
+.chapter-tree__row--dragging {
+  opacity: 0.5;
+}
+
+/* 插入线用 inset 阴影，避免改变行高导致布局抖动。 */
+.chapter-tree__row--drop-before {
+  box-shadow: inset 0 2px 0 0 #3b82f6;
+}
+
+.chapter-tree__row--drop-after {
+  box-shadow: inset 0 -2px 0 0 #3b82f6;
+}
+
+.chapter-tree__row--drop-inside {
+  background: rgba(59, 130, 246, 0.15);
 }
 
 .chapter-tree__toggle {
