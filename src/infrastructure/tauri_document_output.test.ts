@@ -6,7 +6,9 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 const invokeMock = vi.mocked(invoke)
 const request = { title: '论文', chapters: [{ id: 'a', number: [1], title: '绪论', markdown: '正文' }] }
 
-beforeEach(() => invokeMock.mockReset())
+beforeEach(() => {
+  invokeMock.mockReset()
+})
 
 test('按格式调用对应命令，并解析导出报告', async () => {
   invokeMock.mockResolvedValue({ missingImages: ['../assets/a.png', 3] })
@@ -28,6 +30,8 @@ test('Rust 返回的结构化错误原样传递，未知错误归为 unknown', a
     ok: false,
     error: { code: 'io', message: '只读文件系统' },
   })
-  invokeMock.mockRejectedValue(new Error('boom'))
+  invokeMock.mockImplementation(async () => {
+    throw new Error('boom')
+  })
   expect(await output.renderPreview('/p', request)).toEqual({ ok: false, error: { code: 'unknown', message: 'boom' } })
 })
