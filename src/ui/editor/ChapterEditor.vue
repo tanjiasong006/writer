@@ -267,9 +267,32 @@ defineExpose({
   font-size: var(--doc-body-size);
   line-height: var(--doc-line-height);
   color: #111827;
-  caret-color: #111827;
+  /* 文字光标由 caret.ts 自绘（WebKit 的原生光标在段落第二行起高度不对）；输入法组字期间用原生光标。 */
+  caret-color: transparent;
   outline: none;
   overflow-wrap: anywhere;
+}
+
+.chapter-editor__body :deep(.chapter-editor__content.is-composing) {
+  caret-color: #111827;
+}
+
+.chapter-editor__body {
+  position: relative;
+}
+
+.chapter-editor__body :deep(.editor-caret) {
+  position: absolute;
+  width: 1.5px;
+  background: #111827;
+  pointer-events: none;
+  animation: editor-caret-blink 1.1s steps(1) infinite;
+}
+
+@keyframes editor-caret-blink {
+  50% {
+    visibility: hidden;
+  }
 }
 
 .chapter-editor__body :deep(p) {
@@ -485,6 +508,11 @@ defineExpose({
 
 .chapter-editor__body :deep(.is-figure[data-image-align='right'] img) {
   object-position: right;
+}
+
+/* 选中的图片只在图片本身外画一个框（不用 ProseMirror 默认画在外层容器上的框）。 */
+.chapter-editor__body :deep(.editor-image.ProseMirror-selectednode) {
+  outline: none;
 }
 
 .chapter-editor__body :deep(.editor-image.ProseMirror-selectednode img),
