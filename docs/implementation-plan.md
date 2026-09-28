@@ -14,8 +14,8 @@
 |---|---|---|
 | S0 | 章节树 Domain / Application / UI（已有） | ✅ 完成 |
 | S1 | 文档模型 + 项目格式（manifest 解析/生成、文件名规则） | ✅ 完成 |
-| S2 | Rust 存储层：保存事务、恢复、打开/新建、Tauri command | ⏳ 进行中 |
-| S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | 待开始 |
+| S2 | Rust 存储层：保存事务、恢复、打开/新建、Tauri command | ✅ 完成 |
+| S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | ⏳ 进行中 |
 | S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | 待开始 |
 | S5 | CodeMirror 正文编辑、按内容决定删除确认 | 待开始 |
 | S6 | 插入内容：工具栏、图片资源导入、表格等 | 待开始 |
@@ -94,3 +94,17 @@
   `validateMove` / `insertChapter` 拒绝超限结果（新 reason `depth-exceeded`，UI 已补文案）。
   known-risks #1 因此关闭。
 - 验证：npm test 200/200，vue-tsc 通过。
+
+### S2（完成）
+
+- `src-tauri/src/storage/`：create / open / save，staging + journal + 前滚，孤儿文件移入 `.writer/recovered/`。
+- 换名只是编号变化时优先硬链接进 staging（不复制数据、字节不变），不支持硬链接时复制。
+- `Fs` 抽象 + `FaultyFs`：崩溃矩阵测试在保存的**每一个**文件系统操作处注入失败并模拟崩溃，
+  验证重开后磁盘恰为旧/新状态之一、已提交必前滚、之后重试收敛。覆盖 A/B 交换、子树移动、
+  顶部插入导致 20 个文件后移、删除子树 + 编辑、纯编辑、新建项目。
+- 变异验证：去掉 journal 提交点后崩溃矩阵立即失败，说明测试确实约束了协议。
+- 其他：字节级保留（BOM/CRLF）、未变文件不被触碰、非法文件名/路径穿越/重名/恶意 journal 拒绝、
+  缺失正文与非 UTF-8 拒绝打开、中文 + emoji 路径。
+- Tauri command：`project_create` / `project_open` / `project_save`（后台线程 + 全局串行锁）；接入 dialog 插件。
+- 验证：cargo test 23/23，cargo clippy --all-targets 无警告，npm test / vue-tsc 通过。
+- 备注：macOS 上 fsync 为 F_FULLFSYNC，大批量换名时的耗时在 S10 测量。
