@@ -23,6 +23,7 @@ const emit = defineEmits<{
       </button>
       <button type="button" :disabled="busy" @click="emit('open-project')">打开文档</button>
     </div>
+    <p class="welcome__hint">每个文档保存为一个文件夹，打开时选择该文件夹即可。</p>
     <p v-if="error" class="welcome__error" role="alert">{{ error }}</p>
   </div>
 </template>
@@ -74,6 +75,12 @@ const emit = defineEmits<{
 .welcome__actions button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.welcome__hint {
+  margin: 4px 0 0;
+  color: #9ca3af;
+  font-size: 13px;
 }
 
 .welcome__error {

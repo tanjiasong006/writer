@@ -37,7 +37,7 @@ export function fileName(path: string): string {
 export function messageForStorageFailure(failure: StorageFailure): string {
   switch (failure.code) {
     case 'not-a-project':
-      return '所选目录不是 Writer 文档（缺少 writer.json）。'
+      return '所选文件夹不是 Writer 文档。请选择文档所在的文件夹（其中有 writer.json 文件）。'
     case 'target-not-empty':
       return '目标位置已存在且不为空，请选择新的名称或空文件夹。'
     case 'manifest-invalid':
@@ -45,7 +45,7 @@ export function messageForStorageFailure(failure: StorageFailure): string {
     case 'version-unsupported':
       return '该文档由更新版本的 Writer 创建，请升级后再打开。'
     case 'journal-invalid':
-      return '上次保存的恢复记录已损坏，为避免破坏数据已停止打开。请备份该文件夹后联系支持。'
+      return '上次保存的恢复记录（.writer/journal.json）已损坏，为避免破坏数据已停止打开。正文仍在 content 文件夹中，请先备份整个文档文件夹。'
     case 'content-missing':
       return `章节正文文件 content/${failure.file} 不存在，为避免覆盖数据已停止打开。`
     case 'content-not-utf8':
