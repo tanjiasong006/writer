@@ -16,12 +16,15 @@ use std::path::Path;
 
 use serde::Serialize;
 
+use crate::io_kind::{classify, IoKind};
+
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "code", rename_all = "kebab-case")]
 pub enum ExportError {
     /// 系统中找不到能显示中文的字体（PDF 导出）。
     NoCjkFont,
     Io {
+        kind: IoKind,
         message: String,
     },
     RenderFailed {
@@ -40,6 +43,7 @@ pub struct ExportReport {
 /// 原子写出导出文件：临时文件 → fsync → rename。
 pub fn write_output(target: &Path, bytes: &[u8]) -> Result<(), ExportError> {
     let io = |error: std::io::Error| ExportError::Io {
+        kind: classify(&error),
         message: error.to_string(),
     };
     let dir = target
@@ -47,6 +51,7 @@ pub fn write_output(target: &Path, bytes: &[u8]) -> Result<(), ExportError> {
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     let name = target.file_name().ok_or_else(|| ExportError::Io {
+        kind: IoKind::Other,
         message: "invalid target path".into(),
     })?;
     let tmp = dir.join(format!(".{}.writer-tmp", name.to_string_lossy()));

@@ -3,7 +3,7 @@ import { provide } from 'vue'
 import App from './App.vue'
 import { APP_SERVICES } from './ui/services.ts'
 import { createMemoryServices } from './testing/memory_services.ts'
-import { sampleDocument } from './testing/sample_document.ts'
+import { largeDocument, sampleDocument } from './testing/sample_document.ts'
 
 /** 每个 story 用独立的内存存储，不依赖 Tauri。 */
 function withServices(configure: (services: ReturnType<typeof createMemoryServices>) => void) {
@@ -48,8 +48,18 @@ export const SaveFailing: Story = {
     withServices((services) => {
       services.storage.seed('/文稿/示例论文', sampleDocument())
       services.shell.lastProjectPath = '/文稿/示例论文'
-      const failure = { code: 'io', operation: 'write', path: 'content/ch_1.md', message: '磁盘已满' } as const
+      const failure = { code: 'io', operation: 'write', path: 'content/ch_1.md', kind: 'disk-full', message: 'No space left on device' } as const
       services.storage.save = async () => ({ ok: false, error: failure })
+    }),
+  ],
+}
+
+/** 大文档：1050 个章节、每章约 2000 字，用于检查章节树、切换章节、输入与预览的性能。 */
+export const LargeDocument: Story = {
+  decorators: [
+    withServices((services) => {
+      services.storage.seed('/文稿/大文档', largeDocument())
+      services.shell.lastProjectPath = '/文稿/大文档'
     }),
   ],
 }

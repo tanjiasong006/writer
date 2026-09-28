@@ -573,6 +573,33 @@ fn error_serializes_with_code_and_camel_case_fields() {
     );
 }
 
+/// 只读项目：保存失败且不改动磁盘，错误带可读的分类（前端据此说明"没有写入权限"）。
+#[cfg(unix)]
+#[test]
+fn saving_a_read_only_project_reports_permission_denied_and_changes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new().unwrap();
+    let root = project_root(&dir);
+    let old = State::new("只读", &[("a", "ch_1.md", "旧")]);
+    old.write_to(&root);
+    let read_only = |path: &Path, mode| fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    fs::create_dir_all(root.join(".writer")).unwrap();
+    for path in [root.join(".writer"), root.join("content"), root.clone()] {
+        read_only(&path, 0o555);
+    }
+
+    let new = State::new("只读", &[("a", "ch_1.md", "新")]);
+    let error = save_project(&RealFs, &root, &new.request(&["a"])).unwrap_err();
+    let json = serde_json::to_value(&error).unwrap();
+    assert_eq!(json["code"], "io");
+    assert_eq!(json["kind"], "permission-denied");
+
+    for path in [root.clone(), root.join("content"), root.join(".writer")] {
+        read_only(&path, 0o755);
+    }
+    assert_disk_is(&root, &old);
+}
+
 /// 与 TS 共享的格式契约：`fixtures/示例项目` 同时被 TS 的 fixture_contract 测试读取。
 #[test]
 fn shared_fixture_opens_and_survives_a_rename_save() {

@@ -185,4 +185,12 @@ body {
   margin: 0;
   overflow: hidden;
 }
+
+/* WebKit 中表单控件默认使用系统控件字体，不继承界面字体（中文字形会不一致）。 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
 </style>

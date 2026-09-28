@@ -26,6 +26,7 @@ async fn run_storage<T: Send + 'static>(
         Err(StorageError::Io {
             operation: "task".into(),
             path: String::new(),
+            kind: crate::io_kind::IoKind::Other,
             message: error.to_string(),
         })
     })

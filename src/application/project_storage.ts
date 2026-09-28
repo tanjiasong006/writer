@@ -6,6 +6,9 @@ import type { WriterDocument } from '../domain/document/document.ts'
  * 格式与一致性规则见 docs/project-format.md。
  */
 
+/** 文件系统错误的分类（与 Rust io_kind 一致）。 */
+export type IoKind = 'permission-denied' | 'read-only' | 'disk-full' | 'not-found' | 'busy' | 'other'
+
 /** 存储失败的机器可读原因；面向用户的文案由 UI 层根据 code 生成。 */
 export type StorageFailure =
   | { readonly code: 'not-a-project' }
@@ -21,7 +24,15 @@ export type StorageFailure =
   | { readonly code: 'asset-unsupported' }
   | { readonly code: 'asset-too-large' }
   | { readonly code: 'asset-not-found' }
-  | { readonly code: 'io'; readonly operation: string; readonly path: string; readonly message: string }
+  | {
+      readonly code: 'io'
+      readonly operation: string
+      readonly path: string
+      /** 错误分类；缺失时按 other 处理。 */
+      readonly kind?: IoKind
+      /** 操作系统的原始错误文本，只在无法分类时展示。 */
+      readonly message: string
+    }
   | { readonly code: 'unknown'; readonly message: string }
 
 export type StorageResult<T> =

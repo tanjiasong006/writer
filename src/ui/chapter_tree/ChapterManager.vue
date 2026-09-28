@@ -269,8 +269,18 @@ function messageForMove(reason: MoveReason): string {
         </template>
         <template v-else>该章节包含正文，删除后无法恢复。</template>
       </p>
-      <button type="button" @click="confirmDelete">确认删除</button>
-      <button type="button" ref="confirmCancelButton" @click="cancelDelete">取消</button>
+      <div class="chapter-manager__confirm-actions">
+        <button type="button" ref="confirmCancelButton" class="chapter-manager__button" @click="cancelDelete">
+          取消
+        </button>
+        <button
+          type="button"
+          class="chapter-manager__button chapter-manager__button--danger"
+          @click="confirmDelete"
+        >
+          确认删除
+        </button>
+      </div>
     </div>
 
     <p v-if="errorMessage !== null" class="chapter-manager__error" role="alert">
@@ -298,24 +308,53 @@ function messageForMove(reason: MoveReason): string {
 
 <style scoped>
 .chapter-manager__confirm {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-  padding: 0.5rem 0.75rem;
+  margin: 0 4px 8px;
+  padding: 10px 12px;
   border: 1px solid #fecaca;
   border-radius: 6px;
   background: #fef2f2;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .chapter-manager__confirm-text {
-  flex-basis: 100%;
-  margin: 0;
+  margin: 0 0 8px;
+  color: #111827;
+}
+
+.chapter-manager__confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chapter-manager__button {
+  padding: 4px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #111827;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.chapter-manager__button:hover {
+  background: #f9fafb;
+}
+
+.chapter-manager__button--danger {
+  border-color: #dc2626;
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.chapter-manager__button--danger:hover {
+  background: #b91c1c;
 }
 
 .chapter-manager__error {
-  margin: 0 0 0.75rem;
+  margin: 0 4px 8px;
   color: #b91c1c;
+  font-size: 13px;
 }
 </style>

@@ -21,6 +21,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::io_kind::{classify, IoKind};
 use fs::Fs;
 use names::{is_content_file_name, is_staged_file_name};
 
@@ -75,6 +76,7 @@ pub enum StorageError {
     Io {
         operation: String,
         path: String,
+        kind: IoKind,
         message: String,
     },
 }
@@ -87,6 +89,7 @@ fn io_error(operation: &str, path: &Path) -> impl FnOnce(io::Error) -> StorageEr
     move |error| StorageError::Io {
         operation,
         path,
+        kind: classify(&error),
         message: error.to_string(),
     }
 }

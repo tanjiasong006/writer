@@ -32,3 +32,29 @@ export function sampleDocument(): WriterDocument {
   if (!result.ok) throw new Error('sample document is inconsistent')
   return result.document
 }
+
+/**
+ * 大文档：parts 个一级章节，每个下有 sectionsPerPart 个二级章节，每章约 2000 字正文。
+ * 用于 Storybook 中人工检查与测量大文档下的交互性能。
+ */
+export function largeDocument(parts = 50, sectionsPerPart = 20): WriterDocument {
+  const paragraph = '长文档写作需要清晰的结构与稳定的输出。'.repeat(20)
+  const body = Array.from({ length: 5 }, () => paragraph).join('\n\n')
+  const tree = Array.from({ length: parts }, (_, p) => ({
+    id: `p${p}`,
+    title: `第 ${p + 1} 部分`,
+    children: Array.from({ length: sectionsPerPart }, (_, s) => ({
+      id: `p${p}-s${s}`,
+      title: `小节 ${s + 1}`,
+      children: [],
+    })),
+  }))
+  const contents = new Map<string, string>()
+  for (const part of tree) {
+    contents.set(part.id, body)
+    for (const section of part.children) contents.set(section.id, body)
+  }
+  const result = createDocument('大文档', tree, contents)
+  if (!result.ok) throw new Error('large document is inconsistent')
+  return result.document
+}

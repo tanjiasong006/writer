@@ -16,6 +16,6 @@ export const Saving: Story = { args: { status: 'saving', error: null } }
 export const Failed: Story = {
   args: {
     status: 'failed',
-    error: { code: 'io', operation: 'write', path: 'content/ch_1.md', message: '磁盘已满' },
+    error: { code: 'io', operation: 'write', path: 'content/ch_1.md', kind: 'disk-full', message: 'No space left on device' },
   },
 }

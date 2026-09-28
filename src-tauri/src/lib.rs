@@ -2,6 +2,7 @@ use tauri::Manager;
 
 mod commands;
 mod export;
+mod io_kind;
 mod render;
 mod storage;
 

@@ -20,7 +20,7 @@ async function openMenu(wrapper: ReturnType<typeof mount>, rowIndex: number): Pr
 }
 
 async function clickMenu(wrapper: ReturnType<typeof mount>, label: string): Promise<void> {
-  const item = wrapper.findAll('.chapter-tree__menu button').find((b) => b.text() === label)
+  const item = wrapper.findAll('.chapter-tree__menu button').find((b) => b.text().startsWith(label))
   if (!item) throw new Error(`菜单项不存在：${label}`)
   await item.trigger('click')
 }
@@ -38,12 +38,14 @@ test('空状态按钮发出 create-root', async () => {
   expect(wrapper.emitted('create-root')).toHaveLength(1)
 })
 
-test('节点菜单包含四项并点击后关闭', async () => {
+test('节点菜单包含新建、移动、重命名、删除，点击后关闭', async () => {
   const wrapper = mountTree()
   await openMenu(wrapper, 0)
 
-  const labels = wrapper.findAll('.chapter-tree__menu button').map((b) => b.text())
-  expect(labels).toEqual(['新建同级章节', '新建子章节', '重命名', '删除'])
+  const labels = wrapper
+    .findAll('.chapter-tree__menu button')
+    .map((b) => b.text().replace(/(⌥⇧|Alt\+Shift\+).$/, ''))
+  expect(labels).toEqual(['新建同级章节', '新建子章节', '上移', '下移', '升级', '降级', '重命名', '删除'])
 
   await clickMenu(wrapper, '新建同级章节')
   expect(wrapper.find('.chapter-tree__menu').exists()).toBe(false)

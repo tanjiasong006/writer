@@ -4,6 +4,7 @@ import {
   type ChapterNumber,
 } from '../domain/chapter_numbering/chapter_numbering.ts'
 import type { WriterDocument } from '../domain/document/document.ts'
+import type { IoKind } from './project_storage.ts'
 
 /**
  * 全文输出（预览、导出）的端口与请求组装。渲染由 Rust `render` 模块完成，
@@ -25,7 +26,7 @@ export interface RenderChapter {
 
 export type OutputFailure =
   | { readonly code: 'no-cjk-font' }
-  | { readonly code: 'io'; readonly message: string }
+  | { readonly code: 'io'; readonly kind?: IoKind; readonly message: string }
   | { readonly code: 'render-failed'; readonly message: string }
   | { readonly code: 'unknown'; readonly message: string }
 

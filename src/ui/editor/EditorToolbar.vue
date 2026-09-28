@@ -19,20 +19,47 @@ const emit = defineEmits<{ command: [command: ToolbarCommand] }>()
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
 const mod = isMac ? '⌘' : 'Ctrl+'
 
-const groups: ReadonlyArray<ReadonlyArray<{ command: ToolbarCommand; label: string; text: string; title: string }>> = [
+/**
+ * 按钮内容：粗体 / 斜体用字母，其余用 16×16 的单色线条图标（SVG path，颜色跟随文字）。
+ * 不用 emoji 或符号字符：它们在不同系统上字形、大小和颜色都不一致。
+ */
+interface ToolbarItem {
+  readonly command: ToolbarCommand
+  readonly label: string
+  readonly title: string
+  readonly text?: string
+  readonly icon?: string
+}
+
+const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
   [
     { command: 'bold', label: '粗体', text: 'B', title: `粗体（${mod}B）` },
     { command: 'italic', label: '斜体', text: 'I', title: `斜体（${mod}I）` },
   ],
   [
-    { command: 'bullet-list', label: '无序列表', text: '•', title: '无序列表' },
-    { command: 'ordered-list', label: '有序列表', text: '1.', title: '有序列表' },
-    { command: 'quote', label: '引用', text: '❝', title: '引用' },
+    {
+      command: 'bullet-list',
+      label: '无序列表',
+      title: '无序列表',
+      icon: 'M6 4h8M6 8h8M6 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01',
+    },
+    {
+      command: 'ordered-list',
+      label: '有序列表',
+      title: '有序列表',
+      icon: 'M7 4h7M7 8h7M7 12h7M2 3l1-.5V6M2 9.5c.5-.6 2-.6 2 .3 0 .8-2 1.2-2 2.2h2',
+    },
+    { command: 'quote', label: '引用', title: '引用', icon: 'M3 3v10M6.5 5h7M6.5 8h7M6.5 11h5' },
   ],
   [
-    { command: 'code-block', label: '代码块', text: '</>', title: '代码块' },
-    { command: 'table', label: '表格', text: '▦', title: '插入表格' },
-    { command: 'image', label: '图片', text: '🖼', title: '插入图片' },
+    { command: 'code-block', label: '代码块', title: '代码块', icon: 'M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5' },
+    { command: 'table', label: '表格', title: '插入表格', icon: 'M2.5 3h11v10h-11zM2.5 6.5h11M2.5 9.8h11M6.2 3v10M9.8 3v10' },
+    {
+      command: 'image',
+      label: '图片',
+      title: '插入图片',
+      icon: 'M2.5 3h11v10h-11zM2.5 11l3.2-3.2 2.3 2.3 2-2 3.5 3.4M10.5 6h.01',
+    },
   ],
 ]
 </script>
@@ -51,7 +78,15 @@ const groups: ReadonlyArray<ReadonlyArray<{ command: ToolbarCommand; label: stri
         @mousedown.prevent
         @click="emit('command', item.command)"
       >
-        {{ item.text }}
+        <svg
+          v-if="item.icon"
+          class="editor-toolbar__icon"
+          viewBox="0 0 16 16"
+          aria-hidden="true"
+        >
+          <path :d="item.icon" />
+        </svg>
+        <template v-else>{{ item.text }}</template>
       </button>
     </div>
   </div>
@@ -84,6 +119,18 @@ const groups: ReadonlyArray<ReadonlyArray<{ command: ToolbarCommand; label: stri
   color: #374151;
   font-size: 13px;
   cursor: pointer;
+}
+
+.editor-toolbar__icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .editor-toolbar__button:hover {

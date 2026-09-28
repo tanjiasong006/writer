@@ -289,6 +289,31 @@ function parentOf(chapterId: ChapterId): ChapterId | null {
   return path === null || path.length === 0 ? null : path[path.length - 1]
 }
 
+/** 菜单中的移动项；快捷键与键盘操作一致（Alt / ⌥ + Shift + 方向键）。 */
+const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
+const moveShortcut = isMac ? '⌥⇧' : 'Alt+Shift+'
+const MOVE_ITEMS: ReadonlyArray<{ direction: KeyboardMoveDirection; label: string; key: string }> = [
+  { direction: 'up', label: '上移', key: '↑' },
+  { direction: 'down', label: '下移', key: '↓' },
+  { direction: 'outdent', label: '升级', key: '←' },
+  { direction: 'indent', label: '降级', key: '→' },
+]
+
+function canMoveBy(chapterId: ChapterId, direction: KeyboardMoveDirection): boolean {
+  return keyboardMoveIntent(props.tree, chapterId, direction) !== null
+}
+
+/** 上移 / 下移 / 升级 / 降级：换算成与拖拽相同的 MoveIntent；已在边界时什么也不做。 */
+function requestMove(chapterId: ChapterId, direction: KeyboardMoveDirection): void {
+  closeMenu()
+  const intent = keyboardMoveIntent(props.tree, chapterId, direction)
+  if (intent === null) return
+  if (chapterId !== props.selectedId) emit('select', chapterId)
+  emit('move', intent)
+  // 行在 DOM 中被重排后会失去焦点，移动后把焦点放回原章节。
+  void focusRow(chapterId)
+}
+
 const MOVE_KEYS: Readonly<Record<string, KeyboardMoveDirection>> = {
   ArrowUp: 'up',
   ArrowDown: 'down',
@@ -308,12 +333,7 @@ function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
     const direction = MOVE_KEYS[event.key]
     if (direction === undefined) return
     event.preventDefault()
-    const intent = keyboardMoveIntent(props.tree, row.id, direction)
-    if (intent === null) return
-    if (row.id !== props.selectedId) emit('select', row.id)
-    emit('move', intent)
-    // 行在 DOM 中被重排后会失去焦点，移动后把焦点放回原章节。
-    void focusRow(row.id)
+    requestMove(row.id, direction)
     return
   }
   if (event.altKey || event.shiftKey || event.metaKey || event.ctrlKey) return
@@ -544,6 +564,17 @@ const rows = computed<ChapterRow[]>(() => {
           <li><button type="button" role="menuitem" @click="requestCreateSibling(row.id)">新建同级章节</button></li>
           <li><button type="button" role="menuitem" @click="requestCreateChild(row.id)">新建子章节</button></li>
           <li class="chapter-tree__menu-separator" role="separator"></li>
+          <li v-for="item in MOVE_ITEMS" :key="item.direction">
+            <button
+              type="button"
+              role="menuitem"
+              :disabled="!canMoveBy(row.id, item.direction)"
+              @click="requestMove(row.id, item.direction)"
+            >
+              {{ item.label }}<kbd class="chapter-tree__shortcut">{{ moveShortcut }}{{ item.key }}</kbd>
+            </button>
+          </li>
+          <li class="chapter-tree__menu-separator" role="separator"></li>
           <li><button type="button" role="menuitem" @click="requestStartRename(row.id)">重命名</button></li>
           <li><button type="button" role="menuitem" @click="requestDelete(row.id)">删除</button></li>
         </ul>
@@ -680,7 +711,8 @@ const rows = computed<ChapterRow[]>(() => {
   border: none;
   background: none;
   cursor: pointer;
-  color: inherit;
+  color: #6b7280;
+  font-size: 14px;
   line-height: 1;
 }
 
@@ -701,6 +733,8 @@ const rows = computed<ChapterRow[]>(() => {
 
 .chapter-tree__label {
   flex: 1;
+  /* 按钮不继承字号：显式使用 ui-spec §32 的 14px。 */
+  font-size: 14px;
   min-width: 0;
   display: flex;
   align-items: baseline;
@@ -809,6 +843,23 @@ const rows = computed<ChapterRow[]>(() => {
   font-size: 13px;
   text-align: left;
   cursor: pointer;
+}
+
+.chapter-tree__menu button:disabled {
+  color: #9ca3af;
+  cursor: default;
+}
+
+.chapter-tree__menu button:disabled:hover {
+  background: none;
+}
+
+.chapter-tree__shortcut {
+  float: right;
+  margin-left: 16px;
+  color: #9ca3af;
+  font-family: inherit;
+  font-size: 12px;
 }
 
 .chapter-tree__menu button:hover {

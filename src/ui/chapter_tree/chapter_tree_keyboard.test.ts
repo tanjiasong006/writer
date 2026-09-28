@@ -195,3 +195,20 @@ test('键盘降级超过层级上限时显示原因，不改树', async () => {
   expect(wrapper.emitted('update:tree')).toBeUndefined()
   expect(wrapper.find('.chapter-manager__error').text()).toContain('层级太深')
 })
+
+test('菜单中的移动项：边界处不可用，可用时与快捷键效果相同', async () => {
+  const wrapper = mountManager('b')
+  const menuItem = (label: string) =>
+    wrapper.findAll('.chapter-tree__menu button').find((b) => b.text().startsWith(label))!
+
+  await wrapper.find('.chapter-tree__row:has([data-chapter-id="b"]) .chapter-tree__more').trigger('click')
+  expect(menuItem('下移').attributes('disabled')).toBeDefined()
+  expect(menuItem('升级').attributes('disabled')).toBeDefined()
+  expect(menuItem('上移').attributes('disabled')).toBeUndefined()
+
+  await menuItem('降级').trigger('click')
+  await flushPromises()
+  expect(currentTree(wrapper)[0].children.map((n) => n.id)).toEqual(['a1', 'a2', 'b'])
+  expect(wrapper.find('.chapter-tree__menu').exists()).toBe(false)
+  expect(focusedId()).toBe('b')
+})
