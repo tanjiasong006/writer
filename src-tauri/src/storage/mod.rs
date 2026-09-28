@@ -10,6 +10,8 @@ pub mod lock;
 mod names;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod model_tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
