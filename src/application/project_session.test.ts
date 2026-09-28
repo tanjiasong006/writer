@@ -3,7 +3,7 @@ import type { ChapterTree } from '../domain/chapter_tree/chapter_tree.ts'
 import { createDocument, type WriterDocument } from '../domain/document/document.ts'
 import { MemoryProjectStorage } from '../testing/memory_project_storage.ts'
 import { ProjectSession } from './project_session.ts'
-import { createProject, openProject } from './project_lifecycle.ts'
+import { createProject, openProject, releaseSession } from './project_lifecycle.ts'
 import { appendChapter } from './create_chapter.ts'
 import { moveChapterTo } from './move_chapter.ts'
 import { removeChapter } from './remove_chapter.ts'
@@ -300,4 +300,32 @@ test('createProject：新建空文档；目标已存在时失败', async () => {
     ok: false,
     error: { code: 'target-not-empty' },
   })
+})
+
+test('releaseSession：保存成功直接释放，不询问', async () => {
+  const { storage, session } = setup()
+  session.setContent('a', '1')
+  const confirm = vi.fn(async () => false)
+  expect(await releaseSession(session, confirm)).toBe(true)
+  expect(confirm).not.toHaveBeenCalled()
+  expect(storage.committed(PATH)!.contents.get('a')).toBe('1')
+})
+
+test('releaseSession：保存失败时询问；用户拒绝丢弃则会话保留且仍可保存', async () => {
+  const { storage, session } = setup({ autosaveDelayMs: 1000 })
+  session.setContent('a', '1')
+  storage.failNext({ code: 'io', operation: 'write', path: 'x', message: 'x' })
+  const confirm = vi.fn(async () => false)
+  expect(await releaseSession(session, confirm)).toBe(false)
+  expect(confirm).toHaveBeenCalledWith({ code: 'io', operation: 'write', path: 'x', message: 'x' })
+  expect(session.isDirty).toBe(true)
+  expect(await session.save()).toBe(true)
+})
+
+test('releaseSession：保存失败且用户确认丢弃 → 释放', async () => {
+  const { storage, session } = setup()
+  session.setContent('a', '1')
+  storage.failNext({ code: 'io', operation: 'write', path: 'x', message: 'x' })
+  expect(await releaseSession(session, async () => true)).toBe(true)
+  expect(storage.committed(PATH)!.contents.get('a')).toBe('引言')
 })

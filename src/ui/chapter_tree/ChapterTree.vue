@@ -54,8 +54,28 @@ interface ChapterRow {
   readonly hasChildren: boolean
 }
 
-/** 被用户折叠的章节 id；只影响显示，不进入 Domain。 */
-const collapsedIds = ref(new Set<ChapterId>())
+/**
+ * 被用户折叠的章节 id；只影响显示，不进入 Domain。
+ * 上层可以绑定 v-model:collapsed-ids 以随项目保存；不绑定时是组件内部状态。
+ */
+const collapsedIds = defineModel<ReadonlySet<ChapterId>>('collapsedIds', {
+  default: () => new Set<ChapterId>(),
+})
+
+const listElement = ref<HTMLElement | null>(null)
+
+/**
+ * 当前章节变化后让它可见（ui-spec §28）：祖先已由下面的 watch 展开，
+ * 这里等 DOM 更新后用 block: 'nearest' 滚动，避免强烈跳动。
+ */
+watch(
+  () => props.selectedId,
+  async () => {
+    await nextTick()
+    const row = listElement.value?.querySelector<HTMLElement>('.chapter-tree__row--selected')
+    row?.scrollIntoView?.({ block: 'nearest' })
+  },
+)
 
 /**
  * 选中章节变化，或树引用变化时，展开选中章节的所有祖先，保证它可见。
@@ -308,7 +328,7 @@ const rows = computed<ChapterRow[]>(() => {
       </button>
     </div>
 
-    <ul class="chapter-tree__list" role="tree" aria-label="章节树">
+    <ul ref="listElement" class="chapter-tree__list" role="tree" aria-label="章节树">
       <li
         v-for="row in rows"
         :key="row.id"

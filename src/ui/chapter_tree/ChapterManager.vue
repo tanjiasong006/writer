@@ -10,6 +10,7 @@ import { moveChapterTo, type MoveIntent } from '../../application/move_chapter.t
 import { renameChapter } from '../../application/rename_chapter.ts'
 import { removeChapter } from '../../application/remove_chapter.ts'
 import {
+  countDescendants,
   findChapter,
   type ChapterId,
   type ChapterTree as ChapterTreeModel,
@@ -30,21 +31,25 @@ import {
 /** 新建章节的默认标题；创建后立即进入内联编辑，用户直接输入即可。 */
 const DEFAULT_TITLE = '未命名章节'
 
-const props = withDefaults(
-  defineProps<{
-    /** 初始章节树；调用方保证是已校验的可信树。 */
-    initialTree?: ChapterTreeModel
-    /** 初始选中章节 id。 */
-    initialSelectedId?: ChapterId | null
-  }>(),
-  {
-    initialTree: () => [],
-    initialSelectedId: null,
-  },
-)
+/**
+ * 受控组件：章节树与选中章节由上层持有（v-model:tree / v-model:selected-id），
+ * 这里只把意图交给 Application 用例并发出新值。
+ */
+const tree = defineModel<ChapterTreeModel>('tree', { required: true })
+const selectedId = defineModel<ChapterId | null>('selectedId', { default: null })
+/** 折叠状态；上层绑定时可随项目保存与恢复，不绑定时是组件内部状态。 */
+const collapsedIds = defineModel<ReadonlySet<ChapterId>>('collapsedIds', {
+  default: () => new Set<ChapterId>(),
+})
 
-const tree = ref<ChapterTreeModel>(props.initialTree)
-const selectedId = ref<ChapterId | null>(props.initialSelectedId)
+const props = defineProps<{
+  /**
+   * 章节是否有正文。没有子章节且没有正文的章节直接删除，不需要确认（ui-spec §23）。
+   * 不提供时保守地认为都有正文，删除总是先确认。
+   */
+  hasContent?: (chapterId: ChapterId) => boolean
+}>()
+
 const editingId = ref<ChapterId | null>(null)
 const deletingId = ref<ChapterId | null>(null)
 const errorMessage = ref<string | null>(null)
@@ -54,7 +59,16 @@ const deleting = computed(() =>
   deletingId.value === null ? null : findChapter(tree.value, deletingId.value),
 )
 const deletingTitle = computed(() => deleting.value?.title ?? '')
-const deletingChildCount = computed(() => deleting.value?.children.length ?? 0)
+const deletingDescendantCount = computed(() =>
+  deletingId.value === null ? 0 : countDescendants(tree.value, deletingId.value),
+)
+const deletingHasContent = computed(() =>
+  deletingId.value === null ? false : chapterHasContent(deletingId.value),
+)
+
+function chapterHasContent(chapterId: ChapterId): boolean {
+  return props.hasContent ? props.hasContent(chapterId) : true
+}
 
 function clearError(): void {
   errorMessage.value = null
@@ -126,6 +140,11 @@ function requestDelete(chapterId: ChapterId): void {
   clearError()
   editingId.value = null
   deletingId.value = chapterId
+  // 没有子章节也没有正文：删除不会丢失任何内容，直接删除。
+  if (countDescendants(tree.value, chapterId) === 0 && !chapterHasContent(chapterId)) {
+    confirmDelete()
+    return
+  }
   void focusConfirmCancel()
 }
 
@@ -237,9 +256,13 @@ function messageForMove(reason: MoveReason): string {
     >
       <p class="chapter-manager__confirm-text">
         确定删除「{{ deletingTitle || '选中的章节' }}」吗？
-        <template v-if="deletingChildCount > 0">
-          该章节包含 {{ deletingChildCount }} 个子章节，删除后会一并移除。
+        <template v-if="deletingHasContent && deletingDescendantCount > 0">
+          该章节包含正文以及 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
         </template>
+        <template v-else-if="deletingDescendantCount > 0">
+          该章节包含 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
+        </template>
+        <template v-else>该章节包含正文，删除后无法恢复。</template>
       </p>
       <button type="button" @click="confirmDelete">确认删除</button>
       <button type="button" ref="confirmCancelButton" @click="cancelDelete">取消</button>
@@ -250,6 +273,7 @@ function messageForMove(reason: MoveReason): string {
     </p>
 
     <ChapterTree
+      v-model:collapsed-ids="collapsedIds"
       :tree="tree"
       :selected-id="selectedId"
       :editing-id="editingId"

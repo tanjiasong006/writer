@@ -617,3 +617,31 @@ fn shared_fixture_opens_and_survives_a_rename_save() {
         opened.contents
     );
 }
+
+#[test]
+fn ui_state_round_trip_and_is_independent_of_the_document() {
+    let dir = TempDir::new().unwrap();
+    let root = project_root(&dir);
+    assert_eq!(
+        read_ui_state(&RealFs, &root),
+        Err(StorageError::NotAProject)
+    );
+    assert_eq!(
+        write_ui_state(&RealFs, &root, "{}"),
+        Err(StorageError::NotAProject)
+    );
+
+    let state = State::new("论文", &[("a", "ch_1.md", "A")]);
+    state.write_to(&root);
+    assert_eq!(read_ui_state(&RealFs, &root), Ok(None));
+
+    write_ui_state(&RealFs, &root, r#"{"selectedId":"a"}"#).unwrap();
+    assert_eq!(
+        read_ui_state(&RealFs, &root).unwrap().as_deref(),
+        Some(r#"{"selectedId":"a"}"#)
+    );
+
+    fs::write(root.join(".writer/ui-state.json"), [0xff, 0xfe]).unwrap();
+    assert_eq!(read_ui_state(&RealFs, &root), Ok(None));
+    assert_disk_is(&root, &state);
+}

@@ -1,0 +1,46 @@
+import { findChapter, type ChapterId, type ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
+
+/**
+ * 项目的界面状态：选中章节与折叠状态，保存在 .writer/ui-state.json。
+ * 它只是便利：解析失败、引用了不存在的章节时悄悄丢弃对应部分，不影响文档。
+ */
+export interface UiState {
+  readonly selectedId: ChapterId | null
+  readonly collapsedIds: ReadonlySet<ChapterId>
+}
+
+const VERSION = 1
+
+export function serializeUiState(state: UiState): string {
+  return JSON.stringify({
+    version: VERSION,
+    selectedId: state.selectedId,
+    collapsedIds: [...state.collapsedIds],
+  })
+}
+
+/**
+ * 解析界面状态并对照当前章节树清理：已不存在的章节被忽略。
+ * 没有可恢复的选中章节时默认选中第一个章节，打开文档就能直接写作。
+ */
+export function restoreUiState(text: string | null, tree: ChapterTree): UiState {
+  let raw: unknown = null
+  try {
+    raw = text === null ? null : JSON.parse(text)
+  } catch {
+    raw = null
+  }
+  const record =
+    typeof raw === 'object' && raw !== null && (raw as { version?: unknown }).version === VERSION
+      ? (raw as Record<string, unknown>)
+      : {}
+
+  const exists = (id: unknown): id is ChapterId =>
+    typeof id === 'string' && findChapter(tree, id) !== null
+
+  const selectedId = exists(record.selectedId) ? record.selectedId : (tree[0]?.id ?? null)
+  const collapsedIds = new Set(
+    Array.isArray(record.collapsedIds) ? record.collapsedIds.filter(exists) : [],
+  )
+  return { selectedId, collapsedIds }
+}

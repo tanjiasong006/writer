@@ -116,6 +116,19 @@ export function findChapter(tree: ChapterTree, id: ChapterId): ChapterNode | nul
   return findNode(tree, id)
 }
 
+/** 章节的全部后代数量（不含自身）；找不到返回 0。只读查询。 */
+export function countDescendants(tree: ChapterTree, id: ChapterId): number {
+  const node = findNode(tree, id)
+  if (!node) return 0
+  let count = 0
+  const stack = [...node.children]
+  while (stack.length > 0) {
+    count += 1
+    stack.push(...stack.pop()!.children)
+  }
+  return count
+}
+
 export type MoveReason =
   | 'chapter-not-found'
   | 'target-not-found'

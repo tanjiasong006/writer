@@ -41,3 +41,13 @@ pub async fn project_open(path: PathBuf) -> Result<OpenedProject, StorageError> 
 pub async fn project_save(path: PathBuf, request: SaveRequest) -> Result<(), StorageError> {
     run_storage(move || storage::save_project(&RealFs, &path, &request)).await
 }
+
+#[tauri::command]
+pub async fn project_read_ui_state(path: PathBuf) -> Result<Option<String>, StorageError> {
+    run_storage(move || storage::read_ui_state(&RealFs, &path)).await
+}
+
+#[tauri::command]
+pub async fn project_write_ui_state(path: PathBuf, state: String) -> Result<(), StorageError> {
+    run_storage(move || storage::write_ui_state(&RealFs, &path, &state)).await
+}

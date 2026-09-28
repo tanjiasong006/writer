@@ -27,6 +27,8 @@ const STAGING_DIR: &str = "staging";
 const RECOVERED_DIR: &str = "recovered";
 const JOURNAL: &str = "journal.json";
 const JOURNAL_TMP: &str = "journal.json.tmp";
+const UI_STATE: &str = "ui-state.json";
+const UI_STATE_TMP: &str = "ui-state.json.tmp";
 const FORMAT: &str = "writer-project";
 const VERSION: u64 = 1;
 const JOURNAL_VERSION: u32 = 1;
@@ -204,6 +206,34 @@ pub fn save_project(fs: &dyn Fs, root: &Path, request: &SaveRequest) -> Result<(
     let new_files = manifest_files(&request.manifest)?;
     let old_files = manifest_files(&read_manifest(fs, &paths)?)?;
     transact(fs, &paths, &old_files, &new_files, request)
+}
+
+/// 读取界面状态（选中章节、折叠状态等）。不存在或无法解码时返回 None：界面状态丢失不影响文档。
+pub fn read_ui_state(fs: &dyn Fs, root: &Path) -> Result<Option<String>> {
+    let paths = Paths::new(root);
+    if !fs.exists(&paths.manifest) {
+        return Err(StorageError::NotAProject);
+    }
+    match fs.read(&paths.internal.join(UI_STATE)) {
+        Ok(bytes) => Ok(String::from_utf8(bytes).ok()),
+        Err(_) => Ok(None),
+    }
+}
+
+/// 写入界面状态：独立于保存事务，经临时文件原子替换，失败不影响文档数据。
+pub fn write_ui_state(fs: &dyn Fs, root: &Path, state: &str) -> Result<()> {
+    let paths = Paths::new(root);
+    if !fs.exists(&paths.manifest) {
+        return Err(StorageError::NotAProject);
+    }
+    fs.create_dir_all(&paths.internal)
+        .map_err(io_error("create-dir", &paths.internal))?;
+    let tmp = paths.internal.join(UI_STATE_TMP);
+    let target = paths.internal.join(UI_STATE);
+    fs.write_synced(&tmp, state.as_bytes())
+        .map_err(io_error("write", &tmp))?;
+    fs.rename(&tmp, &target)
+        .map_err(io_error("rename", &target))
 }
 
 fn read_manifest(fs: &dyn Fs, paths: &Paths) -> Result<Value> {

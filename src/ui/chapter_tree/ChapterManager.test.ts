@@ -18,13 +18,21 @@ const nested: ChapterTree = [
 
 const mounted: VueWrapper[] = []
 
+/** 受控挂载：像真实上层一样把 update:* 回写为新的 props。 */
 function mountManager(
   initialTree: ChapterTree = nested,
   initialSelectedId: string | null = null,
+  hasContent?: (id: string) => boolean,
 ): VueWrapper {
-  const wrapper = mount(ChapterManager, {
+  const wrapper: VueWrapper = mount(ChapterManager, {
     attachTo: document.body,
-    props: { initialTree, initialSelectedId },
+    props: {
+      tree: initialTree,
+      selectedId: initialSelectedId,
+      hasContent,
+      'onUpdate:tree': (tree: ChapterTree) => wrapper.setProps({ tree }),
+      'onUpdate:selectedId': (selectedId: string | null) => wrapper.setProps({ selectedId }),
+    },
   })
   mounted.push(wrapper)
   return wrapper
@@ -264,4 +272,48 @@ test('删除确认打开后焦点进入取消按钮，Esc 取消', async () => {
 
   await cancelButton.trigger('keydown', { key: 'Escape' })
   expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
+})
+
+// --- 删除确认规则（ui-spec §23）---
+
+test('没有子章节也没有正文：直接删除，不弹确认', async () => {
+  const wrapper = mountManager(nested, null, () => false)
+  await openMenu(wrapper, 4) // b
+  await menuItem(wrapper, '删除')
+
+  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
+  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X'])
+})
+
+test('有正文的叶子章节：需要确认，并提示包含正文', async () => {
+  const wrapper = mountManager(nested, null, (id) => id === 'b')
+  await openMenu(wrapper, 4) // b
+  await menuItem(wrapper, '删除')
+
+  const text = wrapper.find('.chapter-manager__confirm').text()
+  expect(text).toContain('包含正文')
+  expect(text).not.toContain('子章节')
+  expect(rowTexts(wrapper)).toHaveLength(5)
+})
+
+test('确认文案统计全部后代而不只是直接子章节', async () => {
+  const wrapper = mountManager(nested, null, () => false)
+  await openMenu(wrapper, 0) // a：a1、a2、a2x 共 3 个后代
+  await menuItem(wrapper, '删除')
+  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('3 个子章节')
+})
+
+test('既有正文又有子章节：文案同时说明两者', async () => {
+  const wrapper = mountManager(nested, null, () => true)
+  await openMenu(wrapper, 2) // a2：1 个后代
+  await menuItem(wrapper, '删除')
+  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('包含正文以及 1 个子章节')
+})
+
+test('折叠状态通过 update:collapsedIds 通知上层', async () => {
+  const wrapper = mountManager()
+  await wrapper.findAll('button.chapter-tree__toggle')[0].trigger('click')
+  const emitted = wrapper.emitted('update:collapsedIds')
+  expect(emitted).toHaveLength(1)
+  expect([...(emitted![0][0] as Set<string>)]).toEqual(['a'])
 })

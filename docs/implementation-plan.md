@@ -16,8 +16,8 @@
 | S1 | 文档模型 + 项目格式（manifest 解析/生成、文件名规则） | ✅ 完成 |
 | S2 | Rust 存储层：保存事务、恢复、打开/新建、Tauri command | ✅ 完成 |
 | S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | ✅ 完成 |
-| S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | ⏳ 进行中 |
-| S5 | CodeMirror 正文编辑、按内容决定删除确认 | 待开始 |
+| S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | ✅ 完成 |
+| S5 | CodeMirror 正文编辑 | ⏳ 进行中 |
 | S6 | 插入内容：工具栏、图片资源导入、表格等 | 待开始 |
 | S7 | 全文预览（Rust pulldown-cmark 渲染） | 待开始 |
 | S8 | Word 导出（docx-rs） | 待开始 |
@@ -55,7 +55,6 @@
 ## S5 正文编辑
 
 - CodeMirror 6 + Markdown；每章节独立 EditorState（保留撤销历史）；保留原换行符风格。
-- 删除确认按"有正文或有子章节"判断（ui-spec §23）。
 
 ## S6 插入内容
 
@@ -119,3 +118,16 @@
 - `testing/memory_project_storage.ts`：模拟"未报告变化的章节保留磁盘旧内容"，漏报变化会被测试发现；Storybook 也可用。
 - 共享格式契约：`src-tauri/fixtures/示例项目` 同时被 TS 与 Rust 测试读取，防止两侧格式漂移。
 - 验证：npm test 229/229，vue-tsc 通过，cargo test 24/24，clippy 无警告。
+
+### S4（完成）
+
+- App 状态机：启动重开上次项目 → 欢迎页 / 工作区；新建（标题取文件夹名）、打开、切换项目。
+- `releaseSession`（Application）：切换项目与关闭窗口共用——先保存，失败时由用户决定是否放弃，拒绝则会话保持可用。
+- `DesktopShell` 端口（Application）+ Tauri 实现 + 内存实现；UI 通过 provide/inject 取得服务。
+- 工作区：顶栏（可改文档标题、保存状态与失败原因、重试、新建/打开）、260px 章节栏与正文区独立滚动、Cmd/Ctrl+S。
+- ChapterManager 改为受控组件（v-model:tree / selected-id / collapsed-ids）；
+  删除确认按 ui-spec §23：无子章节且无正文直接删除，否则确认，文案统计全部后代并说明是否含正文。
+- 选中章节自动滚动可见（§28）；界面状态（选中、折叠）存 `.writer/ui-state.json`，失效章节被忽略（known-risks #3 关闭）。
+- Domain：新增 `countDescendants`、`hasContent`。
+- 验证：npm test 257/257，vue-tsc、vite build、build-storybook 通过；cargo test 25/25，clippy 无警告。
+- 未做（有意延后）：↑↓ 键盘导航（known-risks #2）、侧栏宽度拖动（spec P1）。

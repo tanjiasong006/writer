@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { MAX_CHAPTER_DEPTH, insertChapter, moveChapter, removeChapter, renameChapter, validateMove, validateTree } from './chapter_tree.ts'
+import { MAX_CHAPTER_DEPTH, countDescendants, insertChapter, moveChapter, removeChapter, renameChapter, validateMove, validateTree } from './chapter_tree.ts'
 import type { ChapterNode, ChapterTree, InsertReason, MoveReason, TreeIssue } from './chapter_tree.ts'
 
 const valid: ChapterTree = [
@@ -445,4 +445,11 @@ test('insertChapter：插入后超过层级上限时拒绝', () => {
     reason: 'depth-exceeded',
   })
   assert.equal(insertChapter(tree, `d${MAX_CHAPTER_DEPTH - 1}`, 0, leaf).ok, true)
+})
+
+test('countDescendants：统计全部后代，不含自身', () => {
+  assert.equal(countDescendants(valid, 'c1'), 3)
+  assert.equal(countDescendants(valid, 'c1-2'), 1)
+  assert.equal(countDescendants(valid, 'c2'), 0)
+  assert.equal(countDescendants(valid, 'ghost'), 0)
 })

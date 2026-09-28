@@ -28,7 +28,14 @@ function placeRow(element: Element, top: number): void {
 }
 
 function mountWithRows() {
-  const wrapper = mount(ChapterManager, { props: { initialTree: outline, initialSelectedId: null } })
+  const wrapper: ReturnType<typeof mount> = mount(ChapterManager, {
+    props: {
+      tree: outline,
+      selectedId: null,
+      'onUpdate:tree': (tree: ChapterTree) => wrapper.setProps({ tree }),
+      'onUpdate:selectedId': (selectedId: string | null) => wrapper.setProps({ selectedId }),
+    },
+  })
   const rows = wrapper.findAll('.chapter-tree__row')
   placeRow(rows[0].element, 0) // a
   placeRow(rows[1].element, 30) // b
@@ -62,8 +69,12 @@ test('拖拽移动不改变当前选择', async () => {
 })
 
 test('把选中章节拖入已折叠的父节点：父节点展开且选中章节可见', async () => {
-  const wrapper = mount(ChapterManager, {
-    props: { initialTree: outline, initialSelectedId: 'c' },
+  const wrapper: ReturnType<typeof mount> = mount(ChapterManager, {
+    props: {
+      tree: outline,
+      selectedId: 'c',
+      'onUpdate:tree': (tree: ChapterTree) => wrapper.setProps({ tree }),
+    },
   })
 
   // 折叠 a（它有子章节 b），此时可见行为 a、c。

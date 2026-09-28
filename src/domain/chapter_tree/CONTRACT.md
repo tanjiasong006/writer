@@ -63,6 +63,14 @@ findChapter(tree: ChapterTree, id: ChapterId): ChapterNode | null
 按 id 查找章节节点，找不到返回 `null`。只读查询，不修改树。
 Application 与 UI 都可用它读取节点（如标题、子节点数），避免各自重写树遍历。
 
+### countDescendants
+
+```ts
+countDescendants(tree: ChapterTree, id: ChapterId): number
+```
+
+章节全部后代的数量（不含自身），找不到返回 0。删除确认用它告诉用户会一并删除多少子章节。
+
 ### validateMove
 
 ```ts

@@ -22,7 +22,7 @@ interface WriterDocument {
 - `replaceTree(doc, tree)`：结构操作（在 chapter_tree 中完成）之后同步正文：
   删除的章节去掉正文，新章节补空正文，其余原样保留。
 - `setContent(doc, id, text)` / `setTitle(doc, title)`：内容不变时返回同一对象。
-- `isChapterBlank(doc, id)`：无子章节且正文只含空白；用于"空白章节删除无需确认"。
+- `hasContent(doc, id)`：正文是否有非空白内容；UI 据此决定删除是否需要确认（ui-spec §23）。
 
 ## 不变量
 

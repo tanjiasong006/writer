@@ -4,7 +4,7 @@ import type { ChapterTree } from '../chapter_tree/chapter_tree.ts'
 import {
   createDocument,
   emptyDocument,
-  isChapterBlank,
+  hasContent,
   replaceTree,
   setContent,
   setTitle,
@@ -110,12 +110,11 @@ test('setTitle：相同标题返回同一对象', () => {
   assert.equal(setTitle(original, '新标题').title, '新标题')
 })
 
-test('isChapterBlank：无子章节且正文仅空白才算空白', () => {
+test('hasContent：只含空白字符不算有正文', () => {
   const document = doc()
-  assert.equal(isChapterBlank(document, 'a1'), true)
-  assert.equal(isChapterBlank(document, 'a'), false, '有子章节')
-  assert.equal(isChapterBlank(document, 'b'), false, '有正文')
+  assert.equal(hasContent(document, 'a'), true)
+  assert.equal(hasContent(document, 'a1'), false)
   const whitespace = setContent(document, 'b', '  \n\t')
-  assert.equal(whitespace.ok && isChapterBlank(whitespace.document, 'b'), true)
-  assert.equal(isChapterBlank(document, 'ghost'), false)
+  assert.equal(whitespace.ok && hasContent(whitespace.document, 'b'), false)
+  assert.equal(hasContent(document, 'ghost'), false)
 })

@@ -1,4 +1,4 @@
-import { findChapter, type ChapterId, type ChapterTree } from '../chapter_tree/chapter_tree.ts'
+import type { ChapterId, ChapterTree } from '../chapter_tree/chapter_tree.ts'
 
 /**
  * 一份文档：标题、章节树与每个章节的正文。
@@ -82,14 +82,9 @@ export function setTitle(document: WriterDocument, title: string): WriterDocumen
   return title === document.title ? document : { ...document, title }
 }
 
-/**
- * 章节是否"空白"：没有子章节，且正文只含空白字符。
- * 空白章节删除时不需要确认（ui-spec §23）；找不到章节返回 false。
- */
-export function isChapterBlank(document: WriterDocument, chapterId: ChapterId): boolean {
-  const node = findChapter(document.tree, chapterId)
-  if (!node || node.children.length > 0) return false
-  return (document.contents.get(chapterId) ?? '').trim().length === 0
+/** 章节正文是否有实际内容（不只是空白字符）；找不到章节返回 false。 */
+export function hasContent(document: WriterDocument, chapterId: ChapterId): boolean {
+  return (document.contents.get(chapterId) ?? '').trim().length > 0
 }
 
 function collectIds(tree: ChapterTree): Set<ChapterId> {

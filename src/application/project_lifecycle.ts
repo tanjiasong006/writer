@@ -36,3 +36,20 @@ export async function createProject(
   if (!result.ok) return result
   return { ok: true, session: new ProjectSession(storage, path, document, options), orphanFiles: [] }
 }
+
+/**
+ * 结束一个会话（切换项目或关闭窗口前）：先尽力保存；保存失败时必须由用户决定是否丢弃，
+ * 绝不静默丢弃未保存的修改（docs/decisions.md 第 4 节）。
+ *
+ * 返回 true 表示会话已释放、可以继续；false 表示用户选择留下，会话保持可用。
+ */
+export async function releaseSession(
+  session: ProjectSession,
+  confirmDiscard: (error: StorageFailure | null) => Promise<boolean>,
+): Promise<boolean> {
+  if (!(await session.close())) {
+    if (!(await confirmDiscard(session.lastError))) return false
+  }
+  session.dispose()
+  return true
+}
