@@ -1,32 +1,21 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { EditorState, StateEffect } from '@codemirror/state'
-import { EditorView, drawSelection, keymap, placeholder } from '@codemirror/view'
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
-import { markdown, markdownKeymap } from '@codemirror/lang-markdown'
-import { searchKeymap } from '@codemirror/search'
-import { tags } from '@lezer/highlight'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { EditorView } from 'prosemirror-view'
+import type { Transaction } from 'prosemirror-state'
+import 'prosemirror-view/style/prosemirror.css'
+import 'prosemirror-gapcursor/style/gapcursor.css'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
-import { createChapterState, readText } from './editor_state.ts'
-import EditorToolbar, { type ToolbarCommand } from './EditorToolbar.vue'
-import {
-  insertCodeBlock,
-  insertImage,
-  insertTable,
-  toggleBold,
-  toggleBulletList,
-  toggleItalic,
-  toggleOrderedList,
-  toggleQuote,
-} from './markdown_commands.ts'
-import type { StateCommand } from '@codemirror/state'
+import EditorToolbar from './EditorToolbar.vue'
+import { ChapterDocuments } from './chapter_documents.ts'
+import { insertImage, toolbarCommands, toolbarState, type ToolbarCommand, type ToolbarState } from './commands.ts'
+import { imageNodeView, type ImageResolver } from './image_view.ts'
 
 /**
- * 章节正文编辑器：CodeMirror 6 Markdown 源码编辑（docs/decisions.md 第 2 节）。
+ * 章节正文编辑器：ProseMirror 结构化编辑，正文仍以 Markdown 保存（docs/decisions.md 第 2 节）。
  *
- * - 每个章节一个 EditorState 缓存，切换章节后撤销历史仍在。
- * - 只有用户真正编辑时才发出 change；change 携带编辑发生时的章节 id，切换章节后不会写错章节。
+ * - 整个组件只有一个 EditorView；切换章节时换入该章节缓存的 EditorState（撤销历史、选区仍在），不重建视图。
+ * - 只有文档真正改变时才发出 change；change 携带事务发生时的章节 id，切换章节后不会写错章节。
+ * - 父组件把 change 回传为 content 时不做任何事；只有与编辑器不一致的 content（外部修改）才替换文档。
  * - 章节标题与编号只显示在编辑器上方，不进入正文。
  */
 const props = defineProps<{
@@ -35,6 +24,8 @@ const props = defineProps<{
   /** 章节编号的显示文本，如 "2.1"。 */
   number: string
   title: string
+  /** 正文中图片引用的显示地址；不提供时图片显示为占位。 */
+  resolveImage?: ImageResolver
 }>()
 
 const emit = defineEmits<{
@@ -43,77 +34,35 @@ const emit = defineEmits<{
   'request-image': [chapterId: ChapterId]
 }>()
 
-const host = ref<HTMLElement | null>(null)
-let view: EditorView | null = null
-const states = new Map<ChapterId, EditorState>()
+/** 滚动容器（每个章节记住自己的滚动位置）。 */
+const scroller = ref<HTMLElement | null>(null)
+const mountPoint = ref<HTMLElement | null>(null)
+const toolbar = shallowRef<ToolbarState | null>(null)
+
+const documents = new ChapterDocuments()
 /** 每个章节离开时的滚动位置；回到该章节时恢复，继续在原处写作。 */
-const scrolls = new Map<ChapterId, StateEffect<unknown>>()
+const scrolls = new Map<ChapterId, number>()
+let view: EditorView | null = null
 let currentId = props.chapterId
-/** 最近一次与编辑器同步的正文，用来区分"自己发出的修改"和外部修改。 */
-let lastText = props.content
-let applyingExternal = false
 
-const highlight = HighlightStyle.define([
-  { tag: tags.heading, fontWeight: '700' },
-  { tag: tags.heading1, fontSize: '1.3em' },
-  { tag: tags.heading2, fontSize: '1.15em' },
-  { tag: tags.strong, fontWeight: '700' },
-  { tag: tags.emphasis, fontStyle: 'italic' },
-  { tag: tags.strikethrough, textDecoration: 'line-through' },
-  { tag: tags.link, color: '#2563eb' },
-  { tag: tags.url, color: '#6b7280' },
-  { tag: tags.quote, color: '#4b5563' },
-  { tag: tags.monospace, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: '#b45309' },
-  { tag: tags.processingInstruction, color: '#9ca3af' },
-  { tag: tags.meta, color: '#9ca3af' },
-])
-
-const theme = EditorView.theme({
-  '&': { height: '100%', fontSize: '16px' },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.8' },
-  '.cm-content': {
-    maxWidth: '760px',
-    margin: '0 auto',
-    padding: '8px 32px 40vh',
-    caretColor: '#111827',
-  },
-  '.cm-placeholder': { color: '#9ca3af' },
-})
-
-const extensions = [
-  history(),
-  drawSelection(),
-  EditorView.lineWrapping,
-  markdown(),
-  syntaxHighlighting(highlight),
-  keymap.of([
-    { key: 'Mod-b', run: toggleBold },
-    { key: 'Mod-i', run: toggleItalic },
-    ...markdownKeymap,
-    ...defaultKeymap,
-    ...historyKeymap,
-    ...searchKeymap,
-    indentWithTab,
-  ]),
-  placeholder('开始写作…'),
-  theme,
-  EditorView.updateListener.of((update) => {
-    if (!update.docChanged || applyingExternal) return
-    lastText = readText(update.state)
-    emit('change', currentId, lastText)
-  }),
-]
-
-/** 复用缓存状态（保留撤销历史），前提是它与当前正文一致。 */
-function stateFor(chapterId: ChapterId, text: string): EditorState {
-  const cached = states.get(chapterId)
-  if (cached && readText(cached) === text) return cached
-  return createChapterState(text, extensions)
+function dispatchTransaction(tr: Transaction): void {
+  if (!view) return
+  const { state } = view.state.applyTransaction(tr)
+  view.updateState(state)
+  toolbar.value = toolbarState(state)
+  const text = documents.update(currentId, state)
+  if (text !== null) emit('change', currentId, text)
 }
 
 onMounted(() => {
-  view = new EditorView({ state: stateFor(props.chapterId, props.content), parent: host.value! })
+  const state = documents.stateFor(currentId, props.content)
+  view = new EditorView(mountPoint.value!, {
+    state,
+    dispatchTransaction,
+    nodeViews: { image: imageNodeView(props.resolveImage ?? (() => null)) },
+    attributes: { class: 'chapter-editor__content', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '正文' },
+  })
+  toolbar.value = toolbarState(state)
 })
 
 onBeforeUnmount(() => {
@@ -124,41 +73,24 @@ onBeforeUnmount(() => {
 watch(
   () => [props.chapterId, props.content] as const,
   ([chapterId, text]) => {
-    if (!view) return
+    if (!view || !scroller.value) return
     if (chapterId !== currentId) {
-      states.set(currentId, view.state)
-      scrolls.set(currentId, view.scrollSnapshot())
-      currentId = chapterId
-      lastText = text
-      const next = stateFor(chapterId, text)
-      view.setState(next)
+      scrolls.set(currentId, scroller.value.scrollTop)
       // 只有沿用了缓存状态（正文未被外部修改）时，保存的滚动位置才仍然对应同一份内容。
-      const scroll = scrolls.get(chapterId)
-      if (scroll && next === states.get(chapterId)) view.dispatch({ effects: scroll })
-      else view.scrollDOM.scrollTop = 0
+      const reused = documents.isCurrent(chapterId, text)
+      currentId = chapterId
+      const next = documents.stateFor(chapterId, text)
+      view.updateState(next)
+      toolbar.value = toolbarState(next)
+      scroller.value.scrollTop = reused ? (scrolls.get(chapterId) ?? 0) : 0
       return
     }
-    if (text === lastText) return
-    // 外部修改了当前章节正文：整体替换，仍保留在撤销历史中。
-    lastText = text
-    applyingExternal = true
-    try {
-      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
-    } finally {
-      applyingExternal = false
-    }
+    if (documents.isCurrent(chapterId, text)) return
+    // 外部修改了当前章节正文：整体替换，仍保留在撤销历史中；以新正文为基准，不回发 change。
+    const doc = documents.rebase(chapterId, text)
+    view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, doc.content))
   },
 )
-
-const commands: Record<Exclude<ToolbarCommand, 'image'>, StateCommand> = {
-  bold: toggleBold,
-  italic: toggleItalic,
-  'bullet-list': toggleBulletList,
-  'ordered-list': toggleOrderedList,
-  quote: toggleQuote,
-  'code-block': insertCodeBlock,
-  table: insertTable,
-}
 
 function runCommand(command: ToolbarCommand): void {
   if (!view) return
@@ -166,24 +98,24 @@ function runCommand(command: ToolbarCommand): void {
     emit('request-image', currentId)
     return
   }
-  commands[command](view)
+  toolbarCommands[command](view.state, view.dispatch)
   view.focus()
 }
 
 /**
- * 在光标处插入图片引用。chapterId 是发起请求时的章节；
- * 若期间已切换到其他章节则不插入并返回 false，由调用方另行处理，避免插错章节。
+ * 在光标处插入图片。chapterId 是发起请求时的章节；
+ * 若期间已切换到其他章节（或光标处不能插入）则不插入并返回 false，由调用方另行处理，避免插错位置。
  */
 function insertImageAt(chapterId: ChapterId, reference: string, alt: string): boolean {
   if (!view || chapterId !== currentId) return false
-  insertImage(reference, alt)(view)
+  if (!insertImage(reference, alt)(view.state, view.dispatch)) return false
   view.focus()
   return true
 }
 
 defineExpose({
   insertImage: insertImageAt,
-  /** 供工具栏等在当前编辑器上执行命令。 */
+  /** 当前的 EditorView（测试与调试用）。 */
   getView: (): EditorView | null => view,
   focus: () => view?.focus(),
 })
@@ -195,8 +127,10 @@ defineExpose({
       <span class="chapter-editor__number">{{ number }}</span>
       <span class="chapter-editor__title">{{ title || '未命名章节' }}</span>
     </h2>
-    <EditorToolbar @command="runCommand" />
-    <div ref="host" class="chapter-editor__host"></div>
+    <EditorToolbar :state="toolbar" @command="runCommand" />
+    <div ref="scroller" class="chapter-editor__scroller">
+      <div ref="mountPoint" class="chapter-editor__body"></div>
+    </div>
   </div>
 </template>
 
@@ -224,8 +158,190 @@ defineExpose({
   font-variant-numeric: tabular-nums;
 }
 
-.chapter-editor__host {
+.chapter-editor__scroller {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * 正文排版与全文预览（DocumentPreview）一致：宽度、字号、行高、引用、代码、表格、图片。
+ * ProseMirror 生成的 DOM 不带 scoped 属性，因此用 :deep。
+ */
+.chapter-editor__body :deep(.chapter-editor__content) {
+  max-width: 760px;
+  min-height: 100%;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 8px 32px 40vh;
+  font-size: 16px;
+  line-height: 1.8;
+  color: #111827;
+  caret-color: #111827;
+  outline: none;
+  overflow-wrap: anywhere;
+}
+
+.chapter-editor__body :deep(p) {
+  margin: 0.6em 0;
+}
+
+.chapter-editor__body :deep(.is-empty::before) {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: #9ca3af;
+  pointer-events: none;
+}
+
+.chapter-editor__body :deep(h1),
+.chapter-editor__body :deep(h2),
+.chapter-editor__body :deep(h3),
+.chapter-editor__body :deep(h4),
+.chapter-editor__body :deep(h5),
+.chapter-editor__body :deep(h6) {
+  margin: 1.2em 0 0.4em;
+  font-size: 1em;
+  line-height: 1.4;
+}
+
+.chapter-editor__body :deep(h1) {
+  font-size: 1.3em;
+}
+
+.chapter-editor__body :deep(h2) {
+  font-size: 1.15em;
+}
+
+.chapter-editor__body :deep(blockquote) {
+  margin: 1em 0;
+  padding: 0 1em;
+  border-left: 3px solid #d1d5db;
+  color: #4b5563;
+}
+
+.chapter-editor__body :deep(ul),
+.chapter-editor__body :deep(ol) {
+  margin: 0.6em 0;
+  padding-left: 1.6em;
+}
+
+.chapter-editor__body :deep(li > ul),
+.chapter-editor__body :deep(li > ol) {
+  margin: 0;
+}
+
+/* 紧凑列表：列表项之间没有段落间距（与 Markdown 渲染一致）。 */
+.chapter-editor__body :deep(ul:not([data-loose]) > li > p),
+.chapter-editor__body :deep(ol:not([data-loose]) > li > p) {
+  margin: 0;
+}
+
+.chapter-editor__body :deep(li[data-task]) {
+  position: relative;
+  list-style: none;
+}
+
+.chapter-editor__body :deep(li[data-task]::before) {
+  position: absolute;
+  left: -1.3em;
+  content: '☐';
+  color: #6b7280;
+}
+
+.chapter-editor__body :deep(li[data-task='done']::before) {
+  content: '☑';
+}
+
+.chapter-editor__body :deep(pre) {
+  overflow-x: auto;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: #f3f4f6;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.chapter-editor__body :deep(code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.chapter-editor__body :deep(:not(pre) > code) {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: #f3f4f6;
+}
+
+.chapter-editor__body :deep(a[data-href]) {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.chapter-editor__body :deep(hr) {
+  margin: 1.2em 0;
+  border: none;
+  border-top: 1px solid #d1d5db;
+}
+
+.chapter-editor__body :deep(table) {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 15px;
+}
+
+.chapter-editor__body :deep(th),
+.chapter-editor__body :deep(td) {
+  position: relative;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  vertical-align: top;
+}
+
+.chapter-editor__body :deep(th) {
+  background: #f9fafb;
+  font-weight: 600;
+  text-align: left;
+}
+
+.chapter-editor__body :deep(.selectedCell::after) {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: rgba(37, 99, 235, 0.12);
+  pointer-events: none;
+}
+
+/* 独占一段的图片与预览 / 导出一样居中显示。 */
+.chapter-editor__body :deep(.is-figure) {
+  margin: 1.2em 0;
+  text-align: center;
+}
+
+/* 与 Word / PDF 导出相同的尺寸规则：不超过正文宽度，高度不超过 560px，保持比例。 */
+.chapter-editor__body :deep(.editor-image img) {
+  max-width: 100%;
+  max-height: 560px;
+  vertical-align: bottom;
+}
+
+.chapter-editor__body :deep(.editor-image.ProseMirror-selectednode img),
+.chapter-editor__body :deep(.editor-image.ProseMirror-selectednode .editor-image__missing) {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+.chapter-editor__body :deep(.editor-image__missing) {
+  display: inline-block;
+  padding: 8px 12px;
+  border: 1px dashed #f87171;
+  border-radius: 4px;
+  color: #b91c1c;
+  font-size: 14px;
+  line-height: 1.6;
 }
 </style>

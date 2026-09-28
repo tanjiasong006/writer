@@ -7,7 +7,12 @@ import type {
   StorageFailure,
   StorageResult,
 } from '../application/project_storage.ts'
-import { assetReference, buildManifest, parseManifest } from './project_format/project_format.ts'
+import {
+  assetReference,
+  buildManifest,
+  parseManifest,
+  resolveAssetReference,
+} from './project_format/project_format.ts'
 
 /**
  * ProjectStorage 的 Tauri 实现：磁盘事务由 Rust `storage` 模块完成，
@@ -51,6 +56,10 @@ export function createTauriProjectStorage(): ProjectStorage {
       const result = await call(() => invoke<string>('project_import_asset', { path, source: sourcePath }))
       if (!result.ok) return result
       return { ok: true, value: { fileName: result.value, reference: assetReference(result.value) } }
+    },
+
+    assetPath(path, reference) {
+      return resolveAssetReference(path, reference)
     },
   }
 }

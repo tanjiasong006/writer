@@ -1,0 +1,452 @@
+import { describe, expect, test } from 'vitest'
+import type { Node } from 'prosemirror-model'
+import { EditorState } from 'prosemirror-state'
+import { appendImage, parseChapter, parseMarkdown, serializeChapter } from './markdown.ts'
+import { marks, nodes, schema } from './schema.ts'
+
+const { doc, paragraph: p, heading, blockquote, code_block, bullet_list, ordered_list, list_item } = nodes
+const { table, table_row, table_header, table_cell, image, hard_break, horizontal_rule } = nodes
+
+function text(value: string, ...markNames: Array<keyof typeof marks>) {
+  return schema.text(value, markNames.map((name) => marks[name].create()))
+}
+
+function write(node: Node): string {
+  return serializeChapter(node)
+}
+
+/** 解析 → 序列化 → 再解析，结构不变；再序列化结果也不变。 */
+function expectRoundTrip(markdown: string): void {
+  const first = parseMarkdown(markdown)
+  const written = write(first)
+  const second = parseMarkdown(written)
+  expect(second.toJSON()).toEqual(first.toJSON())
+  expect(write(second)).toBe(written)
+}
+
+/** 编辑器中构造的文档：序列化后再解析得到同一结构。 */
+function expectStable(node: Node): string {
+  const written = write(node)
+  expect(parseMarkdown(written).toJSON()).toEqual(node.toJSON())
+  return written
+}
+
+describe('Markdown → 文档', () => {
+  test('段落、粗体、斜体、删除线、行内代码、链接', () => {
+    const parsed = parseMarkdown('普通**粗体***斜体*~~删除~~`代码`[链接](https://a.com "标题")')
+    expect(parsed.toJSON()).toEqual(
+      doc
+        .create(null, [
+          p.create(null, [
+            text('普通'),
+            text('粗体', 'strong'),
+            text('斜体', 'em'),
+            text('删除', 'strike'),
+            text('代码', 'code'),
+            schema.text('链接', [marks.link.create({ href: 'https://a.com', title: '标题' })]),
+          ]),
+        ])
+        .toJSON(),
+    )
+  })
+
+  test('空行分隔段落；多个空行与单个空行相同', () => {
+    expect(parseMarkdown('一\n\n\n\n二').toJSON()).toEqual(
+      doc.create(null, [p.create(null, text('一')), p.create(null, text('二'))]).toJSON(),
+    )
+  })
+
+  test('软换行：中文之间去掉，其他情况变成空格（与预览 / 导出一致）', () => {
+    expect(parseMarkdown('第一行\n第二行\nEnglish\nline').textContent).toBe('第一行第二行 English line')
+  })
+
+  test('嵌套列表、有序列表起始编号、紧凑与松散', () => {
+    const parsed = parseMarkdown('- a\n  - b\n- c\n\n3. x\n\n4. y\n')
+    const [bullets, ordered] = [parsed.child(0), parsed.child(1)]
+    expect(bullets.type).toBe(bullet_list)
+    expect(bullets.attrs.tight).toBe(true)
+    expect(bullets.child(0).child(1).type).toBe(bullet_list)
+    expect(ordered.type).toBe(ordered_list)
+    expect(ordered.attrs).toEqual({ order: 3, tight: false })
+  })
+
+  test('任务列表标记进入列表项属性；转义的方括号不是任务标记', () => {
+    const parsed = parseMarkdown('- [ ] 待办\n- [x] 完成\n- \\[ ] 普通\n')
+    const list = parsed.child(0)
+    expect([0, 1, 2].map((i) => list.child(i).attrs.checked)).toEqual([false, true, null])
+    expect(list.child(0).textContent).toBe('待办')
+    expect(list.child(2).textContent).toBe('[ ] 普通')
+  })
+
+  test('代码块保留语言与内容；缩进代码块也是代码块', () => {
+    const fenced = parseMarkdown('```python\nprint(1)\n\n  x\n```').child(0)
+    expect(fenced.type).toBe(code_block)
+    expect(fenced.attrs.params).toBe('python')
+    expect(fenced.textContent).toBe('print(1)\n\n  x')
+    expect(parseMarkdown('    缩进代码').child(0).type).toBe(code_block)
+  })
+
+  test('表格：表头、对齐、单元格中的行内格式与图片', () => {
+    const parsed = parseMarkdown('| 组别 | 样本数 |\n| :-- | --: |\n| **对照** | ![i](i.png) |\n')
+    const t = parsed.child(0)
+    expect(t.type).toBe(table)
+    expect(t.child(0).child(0).type).toBe(table_header)
+    expect(t.child(0).child(0).attrs.align).toBe('left')
+    expect(t.child(0).child(1).attrs.align).toBe('right')
+    expect(t.child(1).child(0).type).toBe(table_cell)
+    expect(t.child(1).child(0).firstChild!.marks[0].type).toBe(marks.strong)
+    expect(t.child(1).child(1).firstChild!.type).toBe(image)
+  })
+
+  test('图片保留原始引用（不做百分号编码），alt 合并全部文字', () => {
+    const img = parseMarkdown('![实验*装置*](../assets/实验装置.png "说明")').child(0).child(0)
+    expect(img.attrs).toEqual({ src: '../assets/实验装置.png', alt: '实验装置', title: '说明' })
+  })
+
+  test('原始 HTML 是文字（与 Rust 渲染器一致），不会成为结构', () => {
+    const parsed = parseMarkdown('<div>块</div>\n\n行内 <b>粗</b>')
+    expect(parsed.textContent).toBe('<div>块</div>行内 <b>粗</b>')
+    expect(parsed.child(1).child(0).marks).toEqual([])
+  })
+
+  test('标题、引用、分隔线、硬换行', () => {
+    const parsed = parseMarkdown('## 小节\n\n> 引用\n\n---\n\n甲  \n乙\\\n丙')
+    expect(parsed.child(0).type).toBe(heading)
+    expect(parsed.child(0).attrs.level).toBe(2)
+    expect(parsed.child(1).type).toBe(blockquote)
+    expect(parsed.child(2).type).toBe(horizontal_rule)
+    const breaks: string[] = []
+    parsed.child(3).forEach((child) => breaks.push(child.type.name))
+    expect(breaks).toEqual(['text', 'hard_break', 'text', 'hard_break', 'text'])
+  })
+
+  test('空正文与只有空白的正文得到一个空段落', () => {
+    for (const empty of ['', '\n\n', '   \n']) {
+      const parsed = parseMarkdown(empty)
+      expect(parsed.childCount).toBe(1)
+      expect(parsed.child(0).type).toBe(p)
+      expect(parsed.child(0).content.size).toBe(0)
+    }
+  })
+})
+
+describe('文档 → Markdown', () => {
+  test('常用结构的写法', () => {
+    const written = write(
+      doc.create(null, [
+        p.create(null, [text('本节介绍'), text('实验设计', 'strong'), text('与'), text('变量控制', 'em'), text('。')]),
+        heading.create({ level: 2 }, text('样本')),
+        bullet_list.create(null, [list_item.create(null, p.create(null, text('对照组'))), list_item.create(null, p.create(null, text('实验组')))]),
+        blockquote.create(null, p.create(null, text('所有数据均经过脱敏处理。'))),
+        code_block.create({ params: 'python' }, text('print("hello")')),
+      ]),
+    )
+    expect(written).toBe(
+      [
+        '本节介绍**实验设计**与*变量控制*。',
+        '',
+        '## 样本',
+        '',
+        '- 对照组',
+        '- 实验组',
+        '',
+        '> 所有数据均经过脱敏处理。',
+        '',
+        '```python',
+        'print("hello")',
+        '```',
+        '',
+      ].join('\n'),
+    )
+  })
+
+  test('表格：列对齐、竖线转义、合并单元格补齐列数', () => {
+    const cell = (type: typeof table_cell, content: string, attrs: Record<string, unknown> = {}) =>
+      type.create(attrs, content ? text(content) : null)
+    const written = write(
+      doc.create(
+        null,
+        table.create(null, [
+          table_row.create(null, [cell(table_header, '名称', { align: 'center' }), cell(table_header, '值', { align: 'right' }), cell(table_header, '备注')]),
+          table_row.create(null, [cell(table_cell, 'a|b', { colspan: 2 }), cell(table_cell, '')]),
+        ]),
+      ),
+    )
+    expect(written).toBe('| 名称 | 值 | 备注 |\n| :---: | ---: | --- |\n| a\\|b |  |  |\n')
+    const reparsed = parseMarkdown(written).child(0)
+    expect(reparsed.child(1).child(0).textContent).toBe('a|b')
+    expect(reparsed.child(1).childCount).toBe(3)
+  })
+
+  test('图片：含空格的引用用尖括号包裹，括号转义', () => {
+    const one = (src: string) => write(doc.create(null, p.create(null, image.create({ src, alt: '图' }))))
+    expect(one('../assets/实验 图.png')).toBe('![图](<../assets/实验 图.png>)\n')
+    expect(one('../assets/a(1).png')).toBe('![图](../assets/a\\(1\\).png)\n')
+    for (const src of ['../assets/实验 图.png', '../assets/a(1).png', '../assets/%E5%9B%BE.png']) {
+      expect(parseMarkdown(one(src)).child(0).child(0).attrs.src).toBe(src)
+    }
+  })
+
+  test('相邻的同类列表换用另一种标记，再次解析不会合并', () => {
+    const list = (type: typeof bullet_list, value: string) =>
+      type.create(null, list_item.create(null, p.create(null, text(value))))
+    const node = doc.create(null, [list(bullet_list, '一'), list(bullet_list, '二'), list(ordered_list, '三'), list(ordered_list, '四')])
+    expect(expectStable(node)).toBe('- 一\n\n\n* 二\n\n1. 三\n\n\n1) 四\n')
+  })
+
+  test('任务列表', () => {
+    const item = (checked: boolean | null, value: string) =>
+      list_item.create({ checked }, p.create(null, text(value)))
+    const node = doc.create(null, bullet_list.create(null, [item(false, '待办'), item(true, '完成'), item(null, '普通')]))
+    expect(expectStable(node)).toBe('- [ ] 待办\n- [x] 完成\n- 普通\n')
+  })
+
+  test('顶层空段落省略；空文档写成空正文', () => {
+    expect(write(doc.create(null, p.create()))).toBe('')
+    expect(write(doc.create(null, [p.create(), p.create(null, text('正文')), p.create()]))).toBe('正文\n')
+  })
+
+  test('对行首有特殊含义的文字转义（段落开头与硬换行之后）', () => {
+    for (const value of ['- 不是列表', '+ 不是列表', '* 不是列表', '1. 不是列表', '1) 不是列表', '# 不是标题', '> 不是引用', '===', '---', '```', '| a | b |']) {
+      expectStable(doc.create(null, p.create(null, text(value))))
+      expectStable(doc.create(null, p.create(null, [text('第一行'), hard_break.create(), text(value)])))
+    }
+  })
+
+  test('HTML、实体、强调符号等写成文字，再次解析仍是原文字', () => {
+    for (const value of ['<div>x</div>', '&amp; &#123;', 'a*b*c', 'snake_case_name', '[不是链接](x)', '`反引号`', 'a\\b', '~~不删除~~', '!不是图片']) {
+      expectStable(doc.create(null, p.create(null, text(value))))
+    }
+  })
+
+  test('行首空白在 Markdown 中不显示：写出时去掉，不会变成代码块', () => {
+    const written = write(doc.create(null, p.create(null, text('    缩进的文字'))))
+    expect(written).toBe('缩进的文字\n')
+    expect(parseMarkdown(written).child(0).type).toBe(p)
+  })
+
+  test('格式嵌套与空白', () => {
+    expectStable(
+      doc.create(null, p.create(null, [text('前'), text('粗', 'strong'), text('粗斜', 'strong', 'em'), text('后')])),
+    )
+    // 标记内的首尾空格移到标记外（CommonMark 不允许 ** 内侧紧挨空白）。
+    expect(write(doc.create(null, p.create(null, [text('a'), text(' b ', 'strong'), text('c')])))).toBe('a **b** c\n')
+  })
+
+  test('标记边界紧挨中文标点时，把标点移到标记外，保证格式不会变成字面的星号', () => {
+    const written = write(
+      doc.create(null, p.create(null, [text('这是'), text('“重要”', 'strong'), text('的，'), text('（注）', 'em'), text('后')])),
+    )
+    // 只调整不满足规则的一侧：（ 之前是标点，* 可以留在它前面。
+    expect(written).toBe('这是“**重要**”的，*（注*）后\n')
+    expect(parseMarkdown(written).toJSON()).toEqual(
+      doc
+        .create(null, p.create(null, [text('这是“'), text('重要', 'strong'), text('”的，'), text('（注', 'em'), text('）后')]))
+        .toJSON(),
+    )
+    // 外侧是空白或标点时标记本身就能生效，不做调整。
+    expect(write(doc.create(null, p.create(null, [text('“重要”', 'strong'), text('，')])))).toBe('**“重要”**，\n')
+    // 全是标点、无法表达的格式去掉，文字保留。
+    expect(write(doc.create(null, p.create(null, [text('甲'), text('“', 'strong'), text('乙')])))).toBe('甲“乙\n')
+  })
+
+  test('行内代码：内容含反引号或首尾空格时仍能原样读回', () => {
+    for (const code of ['a`b', '`x`', ' 两侧空格 ', '``', '  ']) {
+      expectStable(doc.create(null, p.create(null, [text('前'), text(code, 'code'), text('后')])))
+    }
+  })
+
+  test('代码块内容包含 ``` 时使用更长的围栏', () => {
+    expectStable(doc.create(null, code_block.create(null, text('```\ninner\n```'))))
+  })
+
+  test('列表中的多段、引用与代码块', () => {
+    expectStable(
+      doc.create(
+        null,
+        ordered_list.create({ order: 1, tight: false }, [
+          list_item.create(null, [p.create(null, text('第一段')), p.create(null, text('第二段'))]),
+          list_item.create(null, [blockquote.create(null, p.create(null, text('引用'))), code_block.create(null, text('code'))]),
+        ]),
+      ),
+    )
+  })
+})
+
+describe('往返', () => {
+  test('当前支持的各类结构往返后不丢失', () => {
+    for (const markdown of [
+      '本节介绍**实验设计**与*变量控制*。\n',
+      '一\n\n二\n',
+      '- a\n  - b\n    - c\n- d\n\n1. x\n2. y\n',
+      '5. 从五开始\n6. 六\n',
+      '- 松散\n\n- 列表\n',
+      '- [ ] 待办\n- [x] 完成\n',
+      '> 引用\n>\n> > 嵌套引用\n\n---\n',
+      '```js\nconst a = 1\n```\n',
+      '| 组别 | 样本数 |\n| --- | ---: |\n| 对照组 | 30 |\n| 实验组 |  |\n',
+      '![实验装置](../assets/实验装置.png)\n\n文字中的![图](a.png "标题")图片\n',
+      '[链接](https://example.com/a_(b) "标题") 与 <https://example.com>\n',
+      '甲  \n乙\n',
+      '~~删除~~ `a|b` ``含`反引号``\n',
+      '# 一级\n\n###### 六级\n',
+      '* 星号\n+ 加号\n',
+      'Setext 标题\n===\n',
+      '[引用式链接][r]\n\n[r]: https://example.com\n',
+    ]) {
+      expectRoundTrip(markdown)
+    }
+  })
+
+  test('解析 → 编辑 → 序列化：只有被编辑的部分改变', () => {
+    const { doc: parsed, format } = parseChapter('# 标题\n\n第一段\n\n- 列表\n')
+    const paragraphEnd = parsed.child(0).nodeSize + parsed.child(1).nodeSize - 1
+    const edited = EditorState.create({ doc: parsed }).tr.insert(paragraphEnd, text('补充', 'strong')).doc
+    expect(serializeChapter(edited, format)).toBe('# 标题\n\n第一段**补充**\n\n- 列表\n')
+  })
+
+  test('随机文档：写出后再次解析，结构与文字不变', () => {
+    const random = seededRandom(20260928)
+    const pick = <T,>(items: readonly T[]): T => items[Math.floor(random() * items.length)]
+    const pieces = ['中文', 'abc', ' ', '*', '_', '`', '[', ']', '\\', '#', '-', '1.', '1)', '+', '=', '|', '<a>', '&amp;', '!', '~', '>', '“', '”', '，', '    ', 'http://x.y', '](', '---']
+    const markSets: ReadonlyArray<ReadonlyArray<'strong' | 'em' | 'strike' | 'code' | 'link'>> = [[], ['strong'], ['em'], ['strong', 'em'], ['code'], ['strike'], ['link']]
+
+    const inline = (allowBreak: boolean): Node[] => {
+      const out: Node[] = []
+      const count = 1 + Math.floor(random() * 6)
+      for (let i = 0; i < count; i++) {
+        const roll = random()
+        if (roll < 0.08 && allowBreak && out.length > 0) out.push(hard_break.create())
+        else if (roll < 0.16) out.push(image.create({ src: pick(['a b.png', 'x(1).png']), alt: pick(pieces) }))
+        else {
+          const value = Array.from({ length: 1 + Math.floor(random() * 3) }, () => pick(pieces)).join('')
+          // 只有空白的行内代码 / 强调没有意义，不生成。
+          const names = /^\s*$/.test(value) ? [] : pick(markSets)
+          out.push(schema.text(value, names.map((name) => (name === 'link' ? marks.link.create({ href: 'http://e.com/a b' }) : marks[name].create()))))
+        }
+      }
+      if (!out.some((node) => node.type === image || /\S/.test(node.text ?? ''))) out.push(text('x'))
+      return out
+    }
+    const block = (depth: number): Node => {
+      const roll = depth > 3 ? 0 : Math.floor(random() * 8)
+      if (roll === 1) return blockquote.create(null, [block(depth + 1)])
+      if (roll === 2 || roll === 3) {
+        const item = () =>
+          list_item.create({ checked: pick([null, null, true, false]) }, [
+            p.create(null, inline(true)),
+            ...(random() < 0.3 ? [block(depth + 1)] : []),
+          ])
+        return (roll === 2 ? bullet_list : ordered_list).create({ tight: random() < 0.5 }, [item(), item()])
+      }
+      if (roll === 4) return code_block.create({ params: pick(['', 'js']) }, text('x = `a`\n```\n  y'))
+      if (roll === 5) {
+        const row = (type: typeof table_cell) =>
+          table_row.create(null, [type.create(null, inline(false)), type.create(null, inline(false))])
+        return table.create(null, [row(table_header), row(table_cell)])
+      }
+      if (roll === 6) return heading.create({ level: 1 + Math.floor(random() * 6) }, inline(false))
+      if (roll === 7) return horizontal_rule.create()
+      return p.create(null, inline(true))
+    }
+    const shape = (node: Node): unknown =>
+      node.isTextblock ? node.type.name : [node.type.name, ...Array.from({ length: node.childCount }, (_, i) => shape(node.child(i)))]
+    const visible = (node: Node) => node.textContent.replace(/\s+/g, '')
+
+    for (let round = 0; round < 1000; round++) {
+      const original = doc.create(null, Array.from({ length: 1 + Math.floor(random() * 4) }, () => block(0)))
+      const reparsed = parseMarkdown(write(original))
+      expect(shape(reparsed)).toEqual(shape(original))
+      expect(visible(reparsed)).toBe(visible(original))
+    }
+  })
+})
+
+/** 可复现的伪随机数（mulberry32）。 */
+function seededRandom(seed: number): () => number {
+  let state = seed
+  return () => {
+    state = (state + 0x6d2b79f5) | 0
+    let t = Math.imul(state ^ (state >>> 15), 1 | state)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+describe('章节正文格式', () => {
+  test('未编辑时 parse → serialize 不需要：CRLF、BOM、结尾换行在编辑后保持', () => {
+    const crlf = parseChapter('一\r\n\r\n二\r\n')
+    expect(crlf.format).toEqual({ crlf: true, bom: false, finalNewline: true })
+    expect(serializeChapter(crlf.doc, crlf.format)).toBe('一\r\n\r\n二\r\n')
+
+    const bom = parseChapter('﻿正文\n')
+    expect(bom.doc.textContent).toBe('正文')
+    expect(serializeChapter(bom.doc, bom.format)).toBe('﻿正文\n')
+
+    const noNewline = parseChapter('正文')
+    expect(serializeChapter(noNewline.doc, noNewline.format)).toBe('正文')
+
+    const mixed = parseChapter('一\r\n\r\n二\n')
+    expect(serializeChapter(mixed.doc, mixed.format)).toBe('一\n\n二\n')
+  })
+
+  test('空章节写入内容后以换行结尾', () => {
+    const empty = parseChapter('')
+    expect(serializeChapter(doc.create(null, p.create(null, text('新内容'))), empty.format)).toBe('新内容\n')
+  })
+})
+
+describe('异常与遗留内容', () => {
+  test('任何输入都能解析，不抛出', () => {
+    for (const markdown of [
+      '- ',
+      '-\n  ```\n  code\n  ```',
+      '> ',
+      '|',
+      '| a |\n| - |',
+      '![](',
+      '[](',
+      '```',
+      '<!-- 注释 -->',
+      '\u0000\u0001控制字符',
+      '[^1]\n\n[^1]: 脚注',
+      '$$\nmath\n$$',
+      '# \n\n#',
+      '1. \n2. ',
+    ]) {
+      const parsed = parseMarkdown(markdown)
+      expect(parsed.type).toBe(doc)
+      parsed.check()
+    }
+  })
+
+  test('列表项以代码块开头时不插入多余的空段落', () => {
+    const item = parseMarkdown('- ```\n  code\n  ```\n').child(0).child(0)
+    expect(item.childCount).toBe(1)
+    expect(item.child(0).type).toBe(code_block)
+  })
+
+  test('深层嵌套（32 层引用与列表，超过 Rust 渲染器的上限）不丢内容', () => {
+    const quotes = `${'> '.repeat(32)}深处的文字\n`
+    expect(parseMarkdown(quotes).textContent).toBe('深处的文字')
+    expectRoundTrip(quotes)
+    const lists = Array.from({ length: 32 }, (_, i) => `${'  '.repeat(i)}- 第 ${i + 1} 层`).join('\n')
+    expect(parseMarkdown(lists).textContent).toContain('第 32 层')
+    expectRoundTrip(lists)
+  })
+})
+
+describe('appendImage', () => {
+  test('把图片作为新的一段追加，保留原有正文的每一个字节', () => {
+    expect(appendImage('', '../assets/a.png', 'a')).toBe('![a](../assets/a.png)\n')
+    expect(appendImage('正文', '../assets/a.png', 'a')).toBe('正文\n\n![a](../assets/a.png)\n')
+    expect(appendImage('正文\n', '../assets/a.png', 'a')).toBe('正文\n\n![a](../assets/a.png)\n')
+    expect(appendImage('正文\n\n', '../assets/a.png', 'a')).toBe('正文\n\n![a](../assets/a.png)\n')
+  })
+
+  test('替代文字中的方括号被转义，引用中的空格用尖括号包裹', () => {
+    const appended = appendImage('', '../assets/实验 图.png', '图[1]')
+    expect(appended).toBe('![图\\[1\\]](<../assets/实验 图.png>)\n')
+    expect(parseMarkdown(appended).child(0).child(0).attrs).toMatchObject({ src: '../assets/实验 图.png', alt: '图[1]' })
+  })
+})

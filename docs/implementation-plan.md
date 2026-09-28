@@ -17,7 +17,7 @@
 | S2 | Rust 存储层：保存事务、恢复、打开/新建、Tauri command | ✅ 完成 |
 | S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | ✅ 完成 |
 | S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | ✅ 完成 |
-| S5 | CodeMirror 正文编辑 | ✅ 完成 |
+| S5 | 正文编辑（初版 CodeMirror，后迁移到 ProseMirror，见"正文编辑器迁移"） | ✅ 完成 |
 | S6 | 插入内容：工具栏、图片资源导入、表格等 | ✅ 完成 |
 | S7 | 全文预览（Rust pulldown-cmark 渲染） | ✅ 完成 |
 | S8 | Word 导出（docx-rs） | ✅ 完成 |
@@ -305,7 +305,40 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   → 中性的占位图标（源文件 `src-tauri/icons/app-icon.png`，替换后运行 `npx tauri icon src-tauri/icons/app-icon.png`）；删除未使用资源。
 - ✅ P3 窗口最小宽度（720px）下顶栏挤压："保存失败"折成两行、按钮文字竖排。→ 按钮与状态不换行，只有说明文字截断（悬停显示全文）。
 
+## 正文编辑器迁移：CodeMirror → ProseMirror（完成）
+
+正文从 Markdown 源码编辑改为 ProseMirror 结构化编辑（docs/decisions.md 第 2 节）。存储格式、Domain、Application
+的保存语义与 Rust 预览 / 导出均未改变：编辑器在 UI 层把 Markdown 解析为 ProseMirror 文档，编辑后再写回 Markdown。
+
+- `ui/editor/schema.ts`：正文结构的权威定义（段落、标题、引用、列表 / 任务列表、代码块、分隔线、GFM 表格、图片、硬换行；
+  粗体、斜体、删除线、行内代码、链接）。
+- `ui/editor/markdown.ts`：markdown-it（与 pulldown-cmark 相同方言）→ 文档；文档 → Markdown（prosemirror-markdown + 表格、
+  任务列表、行首转义、图片地址等补充）。写出前保证每个文本块能被 Markdown 原样读回：强调边界紧挨中文标点时把标点移到标记外，
+  仍不能读回时去掉无法表达的格式，文字永远不被破坏。软换行按渲染规则处理（中文之间去掉）。
+- `ui/editor/chapter_documents.ts`：应用状态与编辑器状态的适配：每章节一个 EditorState（切换后撤销历史仍在）；
+  只有文档改变才生成正文；撤销回载入时的文档时给出原文。
+- `ui/editor/commands.ts` / `plugins.ts`：工具栏命令与按钮状态（全部由 EditorState 推导）；快捷键、输入规则、撤销历史、
+  表格编辑（Tab / Enter 在单元格间移动）、占位提示、剪贴板（复制出 Markdown、粘贴的纯文本按 Markdown 解析）。
+- `ui/editor/image_view.ts`：图片按项目内资源显示（`ProjectSession.assetPath`，规则与 Rust `resolve_image` 一致），
+  远程地址与项目外路径不加载，显示占位；链接在编辑器中不可点击打开。
+- `ChapterEditor.vue`：整个组件只有一个 EditorView，切换章节换入缓存的 EditorState，不重建视图；每个章节记住滚动位置。
+- 删除：CodeMirror 全部依赖（@codemirror/*、@lezer/highlight）、`editor_state.ts`、`markdown_commands.ts` 及其测试。
+- 验证：markdown 往返（逐项结构 + 1000 份随机文档：结构与文字不变）、命令、快捷键 / 输入规则、适配器、组件与 App 级测试
+  （切换章节写入正确章节、自动保存、插入图片）；npm test、vue-tsc、vite build、build-storybook 通过。
+- 已知限制见 docs/known-risks.md 第 7 节。
+- 最终验收（Playwright + WebKit 驱动 Storybook 中的 App，与 macOS Tauri webview 同一引擎；真实 Rust 渲染 / 导出）：
+  快速切换章节输入不串章、未编辑章节字节不变；长章节切换后滚动 / 光标 / 撤销历史保留；图片与表格前后的光标；
+  模拟组字（段首、粗体中、列表项、单元格、空章节，以及组字中切换章节）；Word / WPS / 网页 / Markdown 纯文本粘贴；
+  中文强调、表格、任务列表在预览 / Word / PDF 中与编辑器一致。修复：
+  - 表格位于章节首尾时方向键无法离开表格（单元格是文本块，gapcursor 把单元格之间当作可放光标的位置）→ 表格行禁用 gapcursor。
+  - Word / WPS 表格粘贴后被拆散（单元格内容总是包在 <p> 中）→ 粘贴的单元格内容压成一行。
+  - 粘贴网页 / Word 内容会把 data: 图片（base64）、远程图片、本机临时文件写进正文 → 只接受正文中的相对图片引用。
+- 未在真实 Tauri 窗口中完成：真实中文输入法（需在真实桌面环境中按手动验收清单确认）。
+
 ## 后续（MVP 之外，按价值排序）
+
+0. 富文本粘贴的后续能力（不是迁移回归）：识别 Word / WPS 的列表段落（目前是带 · 的普通段落）；
+   粘贴 / 拖入的图片自动导入项目资源（目前被忽略，只能通过"插入图片"）。
 
 1. 手动验收清单全部走一遍（需要真实桌面环境与 Word / WPS）。
 2. ~~章节树键盘导航与键盘移动章节（ui-spec §29、known-risks #2）~~ 已完成。

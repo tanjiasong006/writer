@@ -52,6 +52,36 @@ export function assetReference(fileName: string): string {
   return `../assets/${fileName}`
 }
 
+/**
+ * 正文中的图片引用（相对 content/，可含 %XX 编码）对应的项目内文件路径。
+ * 远程地址、绝对路径、非法编码、以及跳出项目目录的引用返回 null。
+ * 与 Rust `render::resolve_image` 规则一致（Rust 另外比较规范化路径以防符号链接逃逸）。
+ */
+export function resolveAssetReference(projectPath: string, reference: string): string | null {
+  if (reference.length === 0 || reference.includes('://') || reference.startsWith('data:')) return null
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(reference)
+  } catch {
+    // 非法的 %XX 编码：与 Rust 一样视为无法解析。
+    return null
+  }
+  if (/^([\\/]|[A-Za-z]:)/.test(decoded)) return null
+  const separator = projectPath.includes('\\') && !projectPath.includes('/') ? '\\' : '/'
+  const parts = ['content']
+  for (const part of decoded.split(/[\\/]/)) {
+    if (part === '' || part === '.') continue
+    if (part === '..') {
+      if (parts.length === 0) return null
+      parts.pop()
+    } else {
+      parts.push(part)
+    }
+  }
+  if (parts.length === 0) return null
+  return [projectPath.replace(/[\\/]+$/, ''), ...parts].join(separator)
+}
+
 /** 由文档生成 manifest；文件名总是按当前编号重新推导。 */
 export function buildManifest(document: WriterDocument): Manifest {
   return {

@@ -7,6 +7,7 @@ import type {
   StorageFailure,
   StorageResult,
 } from '../application/project_storage.ts'
+import { resolveAssetReference } from '../infrastructure/project_format/project_format.ts'
 
 /**
  * 内存版项目存储，用于测试与 Storybook（没有 Tauri 的环境）。
@@ -81,6 +82,10 @@ export class MemoryProjectStorage implements ProjectStorage {
     this.importedAssets.push({ path, sourcePath })
     const fileName = sourcePath.split(/[\\/]/).pop() ?? 'image.png'
     return { ok: true, value: { fileName, reference: `../assets/${fileName}` } }
+  }
+
+  assetPath(path: string, reference: string): string | null {
+    return resolveAssetReference(path, reference)
   }
 
   async save(

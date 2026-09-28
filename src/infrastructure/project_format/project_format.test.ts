@@ -9,6 +9,7 @@ import {
   contentFiles,
   isContentFileName,
   parseManifest,
+  resolveAssetReference,
   type ManifestIssue,
 } from './project_format.ts'
 
@@ -173,4 +174,30 @@ test('parseManifest：中文标题与特殊 id 原样保留', () => {
   if (!result.ok) return
   assert.equal(result.manifest.title, '论文 🎓')
   assert.equal(result.manifest.files.get('__proto__'), 'ch_1.md')
+})
+
+test('resolveAssetReference：正文中的资源引用解析为项目内路径', () => {
+  assert.equal(resolveAssetReference('/文稿/论文', '../assets/实验 图.png'), '/文稿/论文/assets/实验 图.png')
+  assert.equal(
+    resolveAssetReference('/文稿/论文/', '../assets/%E5%AE%9E%E9%AA%8C%20%E5%9B%BE.png'),
+    '/文稿/论文/assets/实验 图.png',
+  )
+  assert.equal(resolveAssetReference('/文稿/论文', './图.png'), '/文稿/论文/content/图.png')
+  assert.equal(resolveAssetReference('C:\\文稿\\论文', '../assets/a.png'), 'C:\\文稿\\论文\\assets\\a.png')
+})
+
+test('resolveAssetReference：项目外、远程、绝对路径与非法编码返回 null', () => {
+  for (const reference of [
+    '../../secret.png',
+    '../assets/../../x.png',
+    '/etc/hosts',
+    'C:/Windows/a.png',
+    '\\\\server\\a.png',
+    'https://example.com/a.png',
+    'data:image/png;base64,AAAA',
+    '../assets/%E5%',
+    '',
+  ]) {
+    assert.equal(resolveAssetReference('/文稿/论文', reference), null, reference)
+  }
 })

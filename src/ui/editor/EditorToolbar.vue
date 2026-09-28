@@ -1,20 +1,18 @@
 <script setup lang="ts">
+import type { ToolbarCommand, ToolbarState } from './commands.ts'
+
 /**
- * 正文工具栏：常用 Markdown 内容的插入入口（docs/decisions.md 第 2 节）。
- * 只发出命令名，具体文本变换由 markdown_commands 完成。
+ * 正文工具栏：常用格式与插入入口（docs/decisions.md 第 2 节）。
+ * 只发出命令名，具体编辑由 commands 中的 ProseMirror 命令完成；
+ * 按钮的可用 / 激活状态来自编辑器当前状态（state），不提供时全部可用。
  * 按钮在 mousedown 时阻止默认行为，点击后焦点仍留在编辑器中。
  */
-export type ToolbarCommand =
-  | 'bold'
-  | 'italic'
-  | 'bullet-list'
-  | 'ordered-list'
-  | 'quote'
-  | 'code-block'
-  | 'table'
-  | 'image'
+const props = defineProps<{ state?: ToolbarState | null }>()
 
 const emit = defineEmits<{ command: [command: ToolbarCommand] }>()
+
+/** 插入类按钮不是开关，没有按下状态。 */
+const INSERTS: ReadonlySet<ToolbarCommand> = new Set(['table', 'image'])
 
 const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
 const mod = isMac ? '⌘' : 'Ctrl+'
@@ -72,8 +70,13 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
         :key="item.command"
         type="button"
         class="editor-toolbar__button"
-        :class="`editor-toolbar__button--${item.command}`"
+        :class="[
+          `editor-toolbar__button--${item.command}`,
+          { 'editor-toolbar__button--active': props.state?.[item.command].active },
+        ]"
         :aria-label="item.label"
+        :aria-pressed="props.state && !INSERTS.has(item.command) ? props.state[item.command].active : undefined"
+        :disabled="props.state ? !props.state[item.command].enabled : false"
         :title="item.title"
         @mousedown.prevent
         @click="emit('command', item.command)"
@@ -133,8 +136,19 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
   stroke-linejoin: round;
 }
 
-.editor-toolbar__button:hover {
+.editor-toolbar__button:hover:not(:disabled) {
   background: rgba(15, 23, 42, 0.06);
+}
+
+.editor-toolbar__button--active,
+.editor-toolbar__button--active:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
+
+.editor-toolbar__button:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .editor-toolbar__button--bold {

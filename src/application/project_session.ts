@@ -116,6 +116,11 @@ export class ProjectSession {
     return this.storage.close(this.path)
   }
 
+  /** 正文中资源引用对应的项目内文件路径；项目外或无法解析时返回 null。 */
+  assetPath(reference: string): string | null {
+    return this.storage.assetPath(this.path, reference)
+  }
+
   /** 把外部图片导入项目资源目录，得到正文可用的引用路径。不改变文档。 */
   importAsset(sourcePath: string): Promise<StorageResult<ImportedAsset>> {
     return this.storage.importAsset(this.path, sourcePath)

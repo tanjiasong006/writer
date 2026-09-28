@@ -64,6 +64,8 @@ export interface ProjectStorage {
    * 资源独立于保存事务：复制成功即落盘，不影响文档 dirty 状态。
    */
   importAsset(path: string, sourcePath: string): Promise<StorageResult<ImportedAsset>>
+  /** 正文中的资源引用（如 ../assets/图.png）对应的项目内文件路径；项目外或无法解析时返回 null。 */
+  assetPath(path: string, reference: string): string | null
   /** 关闭项目，释放打开时取得的独占锁（同一项目同一时间只能被一个 Writer 打开）。尽力而为。 */
   close(path: string): Promise<void>
 }

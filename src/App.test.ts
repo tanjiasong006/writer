@@ -5,7 +5,8 @@ import { APP_SERVICES } from './ui/services.ts'
 import { createMemoryServices } from './testing/memory_services.ts'
 import { createDocument } from './domain/document/document.ts'
 import type { ChapterTree } from './domain/chapter_tree/chapter_tree.ts'
-import type { EditorView } from '@codemirror/view'
+import { Selection, TextSelection } from 'prosemirror-state'
+import type { EditorView } from 'prosemirror-view'
 import ChapterEditor from './ui/editor/ChapterEditor.vue'
 
 const PATH = '/文稿/毕业论文'
@@ -372,7 +373,12 @@ function editorView(wrapper: VueWrapper): EditorView {
 }
 
 function typeAtEnd(view: EditorView, text: string): void {
-  view.dispatch({ changes: { from: view.state.doc.length, insert: text } })
+  view.dispatch(view.state.tr.insertText(text, Selection.atEnd(view.state.doc).from))
+}
+
+/** 编辑器中的可见文字。 */
+function editorText(wrapper: VueWrapper): string {
+  return editorView(wrapper).state.doc.textContent
 }
 
 test('编辑正文：选中章节的正文显示在编辑器中，修改后保存到该章节', async () => {
@@ -382,7 +388,7 @@ test('编辑正文：选中章节的正文显示在编辑器中，修改后保�
   await flushPromises()
 
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('1绪论')
-  expect(editorView(wrapper).state.doc.toString()).toBe('引言')
+  expect(editorText(wrapper)).toBe('引言')
 
   typeAtEnd(editorView(wrapper), '：长文档写作')
   await flushPromises()
@@ -403,7 +409,7 @@ test('切换章节后编辑只写入当前章节', async () => {
   typeAtEnd(editorView(wrapper), '1')
   await wrapper.findAll('.chapter-tree__row')[2].trigger('click') // 方法
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('2方法')
-  expect(editorView(wrapper).state.doc.toString()).toBe('方法正文')
+  expect(editorText(wrapper)).toBe('方法正文')
   typeAtEnd(editorView(wrapper), '2')
 
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
@@ -435,7 +441,7 @@ test('新建章节后编辑器切换到新章节', async () => {
   await button(wrapper, '+').trigger('click')
   await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Escape' })
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('2未命名章节')
-  expect(editorView(wrapper).state.doc.toString()).toBe('')
+  expect(editorText(wrapper)).toBe('')
 })
 
 test('键盘：↓ 切换章节，Enter 进入正文（预览中也回到编辑），Alt+Shift+↑ 移动章节并保存', async () => {
@@ -453,7 +459,7 @@ test('键盘：↓ 切换章节，Enter 进入正文（预览中也回到编辑�
   await button(wrapper, '预览').trigger('click')
   await label('b').trigger('keydown', { key: 'Enter' })
   await flushPromises()
-  expect(editorView(wrapper).hasFocus).toBe(true)
+  expect(editorView(wrapper).hasFocus()).toBe(true)
 
   await label('b').trigger('keydown', { key: 'ArrowUp', altKey: true, shiftKey: true })
   await flushPromises()
@@ -470,10 +476,10 @@ test('工具栏：粗体作用于编辑器选区并进入正文', async () => {
   const wrapper = await mountApp(services)
   await flushPromises()
   const view = editorView(wrapper)
-  view.dispatch({ selection: { anchor: 0, head: 2 } })
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 3)))
 
   await wrapper.find('button[aria-label="粗体"]').trigger('click')
-  expect(view.state.doc.toString()).toBe('**引言**')
+  expect(view.dom.querySelector('strong')?.textContent).toBe('引言')
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
   await flushPromises()
   expect(services.storage.committed(PATH)!.contents.get('a')).toBe('**引言**')
@@ -485,7 +491,8 @@ test('插入图片：复制进项目并在光标处插入引用', async () => {
   services.shell.imagePath = '/Users/我/图片/实验装置.png'
   const wrapper = await mountApp(services)
   await flushPromises()
-  editorView(wrapper).dispatch({ selection: { anchor: 2 } })
+  const view = editorView(wrapper)
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
 
   await wrapper.find('button[aria-label="图片"]').trigger('click')
   await flushPromises()
@@ -493,7 +500,13 @@ test('插入图片：复制进项目并在光标处插入引用', async () => {
   expect(services.storage.importedAssets).toEqual([
     { path: PATH, sourcePath: '/Users/我/图片/实验装置.png' },
   ])
-  expect(editorView(wrapper).state.doc.toString()).toBe('引言\n\n![实验装置](../assets/实验装置.png)\n')
+  // 图片按项目内的文件显示。
+  expect(view.dom.querySelector('.editor-image img')?.getAttribute('src')).toBe(
+    'file:///文稿/毕业论文/assets/实验装置.png',
+  )
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言\n\n![实验装置](../assets/实验装置.png)')
 })
 
 test('插入图片：取消选择不做任何事；导入失败显示原因', async () => {
@@ -511,7 +524,7 @@ test('插入图片：取消选择不做任何事；导入失败显示原因', as
   await wrapper.find('button[aria-label="图片"]').trigger('click')
   await flushPromises()
   expect(wrapper.find('.workspace__error').text()).toContain('PNG、JPG 或 GIF')
-  expect(editorView(wrapper).state.doc.toString()).toBe('引言')
+  expect(editorText(wrapper)).toBe('引言')
 })
 
 test('插入图片期间切换了章节：图片追加到发起请求的章节，不插错位置', async () => {
@@ -527,7 +540,7 @@ test('插入图片期间切换了章节：图片追加到发起请求的章节�
   await wrapper.find('button[aria-label="图片"]').trigger('click')
   await flushPromises()
 
-  expect(editorView(wrapper).state.doc.toString()).toBe('方法正文')
+  expect(editorText(wrapper)).toBe('方法正文')
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
   await flushPromises()
   const contents = services.storage.committed(PATH)!.contents

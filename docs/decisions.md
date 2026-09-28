@@ -10,9 +10,18 @@
 
 ## 2. 编辑器
 
-- MVP 使用 CodeMirror 6 做 Markdown 源码编辑，不做完整 WYSIWYG。
-- 提供常用操作入口：图片、表格、列表、粗体、斜体、引用、代码块，用户不必完全手写 Markdown。
-- 编辑器不得对未编辑的正文做任何规范化；只有用户真正修改的章节才会被写回。
+- 用户编辑的是结构化正文，而不是 Markdown 源码。不以"源码编辑器"为产品方向，也不要求用户理解 Markdown。
+  （早期 MVP 使用 CodeMirror 6 做 Markdown 源码编辑，已整体迁移到 ProseMirror，不保留源码编辑模式。）
+- ProseMirror 是正文编辑器的内部文档模型和交互内核；schema（`ui/editor/schema.ts`）是正文结构的权威定义。
+- 后续正文编辑能力优先基于 ProseMirror schema / command / plugin 扩展，而不是通过 Markdown 文本操作实现。
+- Markdown 继续作为正文的持久化格式；领域模型（正文是 Markdown 字符串）、磁盘格式以及 Rust 预览 / 导出链路保持不变。
+  Markdown ⇄ ProseMirror 文档的转换只发生在编辑器层（`ui/editor/markdown.ts`）。
+- Markdown 方言与预览 / 导出的 pulldown-cmark 一致：CommonMark + GFM 表格、删除线、任务列表；原始 HTML 视为文字。
+- schema 只包含 Markdown 能保存、且 Rust 渲染器能渲染的结构；不能用 Markdown 保存的能力（合并单元格、
+  单元格内多段落、列宽等）不进入编辑器。需要新增此类能力时，先与产品负责人确认是否调整持久化格式。
+- 提供常用操作入口：图片、表格、列表、粗体、斜体、引用、代码块；另有 Markdown 风格的输入规则作为快捷输入。
+- 编辑器不得对未编辑的正文做任何规范化；只有用户真正修改的章节才会被写回（编辑后又撤销回原样时写回原文）。
+  被修改的章节按统一风格整体重新写出，渲染结果不变；CRLF、BOM、结尾是否换行保持原文件的风格。
 
 ## 3. 章节标题与正文
 

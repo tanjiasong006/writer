@@ -21,7 +21,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** 常见 Markdown 内容：标题、强调、列表、引用、表格、代码。 */
+/** 常见结构：标题、强调、列表（含嵌套与任务列表）、引用、表格、代码、分隔线。 */
 export const Markdown: Story = {
   args: {
     chapterId: 'ch-1',
@@ -34,18 +34,46 @@ export const Markdown: Story = {
       '',
       '- 对照组',
       '- 实验组',
+      '  - 子组 A',
+      '',
+      '1. 招募',
+      '2. 分组',
+      '',
+      '- [x] 伦理审批',
+      '- [ ] 数据采集',
       '',
       '> 所有数据均经过脱敏处理。',
       '',
       '| 组别 | 样本数 |',
-      '| --- | --- |',
+      '| --- | ---: |',
       '| 对照组 | 30 |',
+      '| **实验组** | 32 |',
+      '',
+      '---',
+      '',
+      '行内 `代码`、~~删除线~~ 与[链接](https://example.com)。',
       '',
       '```python',
       'print("hello")',
       '```',
       '',
     ].join('\n'),
+  },
+}
+
+/** 图片：项目内的图片正常显示（这里用内嵌 SVG 模拟），无法显示的引用显示占位。 */
+export const Images: Story = {
+  args: {
+    chapterId: 'ch-4',
+    number: '2.2',
+    title: '实验装置',
+    content: '装置示意：\n\n![装置](../assets/装置.svg)\n\n![缺失的图](../assets/缺失.png)\n',
+    resolveImage: (reference: string) =>
+      reference.endsWith('装置.svg')
+        ? `data:image/svg+xml,${encodeURIComponent(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="200"><rect width="480" height="200" fill="#e5e7eb"/><text x="240" y="108" font-size="20" text-anchor="middle" fill="#374151">实验装置</text></svg>',
+          )}`
+        : null,
   },
 }
 

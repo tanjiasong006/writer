@@ -12,7 +12,7 @@ import { useServices } from '../services.ts'
 import { useSession } from './use_session.ts'
 import { restoreUiState, serializeUiState } from './ui_state.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
-import { appendImage } from '../editor/markdown_commands.ts'
+import { appendImage } from '../editor/markdown.ts'
 import DocumentPreview from '../preview/DocumentPreview.vue'
 import {
   exportDocument,
@@ -198,6 +198,12 @@ async function insertImage(chapterId: ChapterId): Promise<void> {
   if (text !== undefined) props.session.setContent(chapterId, appendImage(text, reference, alt))
 }
 
+/** 正文中的图片引用 → 编辑器中可显示的地址（只显示项目内的文件）。 */
+function resolveImage(reference: string): string | null {
+  const path = props.session.assetPath(reference)
+  return path === null ? null : shell.toDisplayUrl(path)
+}
+
 /** 章节树中按 Enter：回到编辑模式并把焦点交给正文编辑器。 */
 async function openChapter(): Promise<void> {
   mode.value = 'edit'
@@ -318,6 +324,7 @@ const selectedNumber = computed(() =>
           :content="document.contents.get(selectedId) ?? ''"
           :number="selectedNumber"
           :title="selectedChapter.title"
+          :resolve-image="resolveImage"
           @change="updateContent"
           @request-image="insertImage"
         />
@@ -470,7 +477,7 @@ const selectedNumber = computed(() =>
   border-right: 1px solid #e5e7eb;
 }
 
-/* 编辑器自身滚动（CodeMirror scroller），与章节栏互不影响。 */
+/* 编辑器自身滚动（正文区内的滚动容器），与章节栏互不影响。 */
 .workspace__main {
   flex: 1;
   min-width: 0;
