@@ -53,13 +53,21 @@ function confirmDiscard(failure: StorageFailure | null): Promise<boolean> {
   })
 }
 
+/** 正在进行的释放；关闭窗口与退出应用可能同时触发，只执行一次、共享结果。 */
+let leaving: Promise<boolean> | null = null
+
 /** 释放当前项目；返回 false 表示用户选择留下。 */
-async function leaveCurrent(): Promise<boolean> {
-  const current = view.value
-  if (current.kind !== 'open') return true
-  if (!(await releaseSession(current.session, confirmDiscard))) return false
-  view.value = { kind: 'welcome' }
-  return true
+function leaveCurrent(): Promise<boolean> {
+  leaving ??= (async () => {
+    const current = view.value
+    if (current.kind !== 'open') return true
+    if (!(await releaseSession(current.session, confirmDiscard))) return false
+    view.value = { kind: 'welcome' }
+    return true
+  })().finally(() => {
+    leaving = null
+  })
+  return leaving
 }
 
 async function enter(load: () => Promise<OpenSessionResult>): Promise<void> {

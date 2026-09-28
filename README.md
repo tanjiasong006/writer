@@ -1,14 +1,39 @@
 # Writer
 
-结构化写作工具，让用户专注写作。
+专注长文档的组织、写作与输出：章节树 + Markdown 正文 + 自动编号 + 全文预览 + Word / PDF 导出。
 
-技术栈：Tauri 2 + Vue 3 + Vite，Rust 侧代码在 `src-tauri/`。
+技术栈：Tauri 2 + Vue 3 + TypeScript + Rust。
 
-```
+## 开发
+
+```bash
 npm install
-npm run tauri dev
+npm run tauri dev        # 启动桌面应用
+npm run storybook        # 独立查看各 UI 组件
 ```
 
-## Recommended IDE Setup
+## 验证
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+```bash
+npm test                 # Vitest（Domain / Application / UI）
+npm run typecheck        # vue-tsc
+cd src-tauri
+cargo test               # 存储事务（含崩溃矩阵）、渲染、导出
+cargo clippy --all-targets
+```
+
+手动核对导出样例：
+
+```bash
+cd src-tauri
+WRITER_SAMPLE_DIR=/tmp/writer-sample cargo test write_sample -- --ignored
+# 生成 /tmp/writer-sample/sample.docx 与 sample.pdf
+```
+
+## 文档
+
+- `AGENTS.md`：架构分层与开发规则。
+- `docs/decisions.md`：已确定的产品与技术决策。
+- `docs/project-format.md`：项目磁盘格式、正文文件命名、保存事务与恢复。
+- `docs/implementation-plan.md`：MVP 实施计划、进度与手动验收清单。
+- `docs/known-risks.md`：已知风险与结论。

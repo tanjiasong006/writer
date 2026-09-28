@@ -30,6 +30,17 @@ pub fn run() {
             commands::export_pdf,
             commands::reveal_in_file_manager,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Cmd+Q / 菜单"退出"会直接请求退出应用，绕过窗口的关闭流程。
+            // 主窗口还在时先阻止退出，改走窗口关闭：前端保存未保存的修改、失败时询问用户，
+            // 由它决定是否真正关闭窗口；窗口销毁后再次到来的退出请求正常放行。
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if let Some(window) = app.get_webview_window("main") {
+                    api.prevent_exit();
+                    let _ = window.close();
+                }
+            }
+        });
 }

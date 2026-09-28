@@ -532,3 +532,22 @@ test('项目已在另一个 Writer 中打开：说明原因', async () => {
   const wrapper = await mountApp(services)
   expect(wrapper.find('.welcome__error').text()).toContain('另一个 Writer 窗口中打开')
 })
+
+test('关闭窗口与退出应用同时触发：只保存一次、只询问一次', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await button(wrapper, '+').trigger('click')
+  services.storage.failNext(
+    { code: 'io', operation: 'write', path: 'x', message: '磁盘已满' },
+    { code: 'io', operation: 'write', path: 'x', message: '磁盘已满' },
+  )
+  services.shell.confirmAnswer = false
+
+  const [first, second] = await Promise.all([
+    services.shell.requestClose(),
+    services.shell.requestClose(),
+  ])
+  expect([first, second]).toEqual([false, false])
+  expect(services.shell.confirmations).toHaveLength(1)
+})

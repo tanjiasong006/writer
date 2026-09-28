@@ -203,4 +203,8 @@
 4. 把项目文件夹设为只读 → 编辑 → 状态显示"保存失败"；关闭窗口时出现确认。
 5. 导出 Word 后用 Word / WPS 打开：标题层级出现在导航窗格；有序列表显示为 1. 2.（macOS textutil 会把所有列表显示成圆点，属于 textutil 限制）；
    表格、图片、代码块、引用样式正确；中文字体为宋体 / 黑体。
-   样例生成：`WRITER_SAMPLE_DIR=<目录> cargo test write_sample_docx -- --ignored`。
+   样例生成：`WRITER_SAMPLE_DIR=<目录> cargo test write_sample -- --ignored`（同时生成 docx 与 pdf）。
+6. 导出 PDF 后打开：书签与章节结构一致、中文字体正常、图片与表格正确、页脚页码。
+7. 编辑正文后立即 Cmd+Q（Windows：关闭窗口）→ 修改已保存；保存失败时出现确认而不是直接退出。
+8. 同一项目在第二个 Writer 实例中打开 → 提示"已在另一个 Writer 窗口中打开"。
+9. 在 content/ 中放一张损坏的图片并引用 → 预览显示占位、导出成功并提示图片无法嵌入。
