@@ -5,6 +5,8 @@ import { APP_SERVICES } from './ui/services.ts'
 import { createMemoryServices } from './testing/memory_services.ts'
 import { createDocument } from './domain/document/document.ts'
 import type { ChapterTree } from './domain/chapter_tree/chapter_tree.ts'
+import type { EditorView } from '@codemirror/view'
+import ChapterEditor from './ui/editor/ChapterEditor.vue'
 
 const PATH = '/文稿/毕业论文'
 
@@ -252,4 +254,77 @@ test('孤儿文件：打开后提示已原样保留', async () => {
   }
   const wrapper = await mountApp(services)
   expect(wrapper.find('.app__notice').text()).toContain('1 个未被文档引用的文件')
+})
+
+function editorView(wrapper: VueWrapper): EditorView {
+  const view = (wrapper.findComponent(ChapterEditor).vm as unknown as { getView(): EditorView | null }).getView()
+  if (!view) throw new Error('editor not mounted')
+  return view
+}
+
+function typeAtEnd(view: EditorView, text: string): void {
+  view.dispatch({ changes: { from: view.state.doc.length, insert: text } })
+}
+
+test('编辑正文：选中章节的正文显示在编辑器中，修改后保存到该章节', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('1绪论')
+  expect(editorView(wrapper).state.doc.toString()).toBe('引言')
+
+  typeAtEnd(editorView(wrapper), '：长文档写作')
+  await flushPromises()
+  expect(wrapper.find('.save-status').text()).toBe('未保存')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+
+  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言：长文档写作')
+  expect([...services.storage.saves[0].changed]).toEqual(['a'])
+})
+
+test('切换章节后编辑只写入当前章节', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  typeAtEnd(editorView(wrapper), '1')
+  await wrapper.findAll('.chapter-tree__row')[2].trigger('click') // 方法
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('2方法')
+  expect(editorView(wrapper).state.doc.toString()).toBe('方法正文')
+  typeAtEnd(editorView(wrapper), '2')
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  const contents = services.storage.committed(PATH)!.contents
+  expect(contents.get('a')).toBe('引言1')
+  expect(contents.get('b')).toBe('方法正文2')
+  expect(contents.get('a1')).toBe('')
+})
+
+test('自动保存：停止输入后自动写盘', async () => {
+  vi.useFakeTimers()
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await vi.advanceTimersByTimeAsync(0)
+
+  typeAtEnd(editorView(wrapper), '！')
+  await vi.advanceTimersByTimeAsync(1500)
+  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言！')
+  expect(wrapper.find('.save-status').text()).toBe('已保存')
+})
+
+test('新建章节后编辑器切换到新章节', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Escape' })
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('2未命名章节')
+  expect(editorView(wrapper).state.doc.toString()).toBe('')
 })

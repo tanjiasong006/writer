@@ -17,8 +17,8 @@
 | S2 | Rust 存储层：保存事务、恢复、打开/新建、Tauri command | ✅ 完成 |
 | S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | ✅ 完成 |
 | S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | ✅ 完成 |
-| S5 | CodeMirror 正文编辑 | ⏳ 进行中 |
-| S6 | 插入内容：工具栏、图片资源导入、表格等 | 待开始 |
+| S5 | CodeMirror 正文编辑 | ✅ 完成 |
+| S6 | 插入内容：工具栏、图片资源导入、表格等 | ⏳ 进行中 |
 | S7 | 全文预览（Rust pulldown-cmark 渲染） | 待开始 |
 | S8 | Word 导出（docx-rs） | 待开始 |
 | S9 | PDF 导出（Typst）+ 字体 fallback | 待开始 |
@@ -131,3 +131,22 @@
 - Domain：新增 `countDescendants`、`hasContent`。
 - 验证：npm test 257/257，vue-tsc、vite build、build-storybook 通过；cargo test 25/25，clippy 无警告。
 - 未做（有意延后）：↑↓ 键盘导航（known-risks #2）、侧栏宽度拖动（spec P1）。
+
+### S5（完成）
+
+- `ui/editor/ChapterEditor.vue`：CodeMirror 6 Markdown 源码编辑，自动换行、列表续行（markdownKeymap）、搜索、Tab 缩进、占位提示；
+  章节编号与标题显示在编辑器上方，不进入正文。
+- 每章节缓存 EditorState，切换后撤销历史仍在；change 携带编辑发生时的章节 id。
+- 字节保真：纯 CRLF 文件显式使用 CRLF 行分隔符，读回用 `sliceDoc()`；未编辑的章节永不写回。
+- 工作区接入：编辑 → session.setContent → 自动保存 / Cmd+S。
+- 验证：npm test 272/272（含 App 级：编辑保存、切换章节写入正确章节、自动保存、新建章节后编辑器切换），
+  vue-tsc、vite build、build-storybook 通过。
+- 真实应用：Tauri 调试版可启动，dev server 能编译全部模块，无运行时错误日志。
+  **限制**：本环境没有屏幕录制权限，无法截图或操作原生对话框；手动验收清单见文末。
+
+## 手动验收清单（需要在真实桌面环境执行）
+
+1. 新建文档 → 选择位置 → 出现空状态；新建章节、子章节，输入正文。
+2. 拖动章节改变结构 → 等待"已保存" → 在 Finder 中确认 `content/ch_*.md` 文件名随编号变化、内容正确。
+3. 退出应用重开 → 自动打开上次项目，选中章节与折叠状态恢复。
+4. 把项目文件夹设为只读 → 编辑 → 状态显示"保存失败"；关闭窗口时出现确认。

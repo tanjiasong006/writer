@@ -7,6 +7,7 @@ import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_nu
 import { hasContent } from '../../domain/document/document.ts'
 import ChapterManager from '../chapter_tree/ChapterManager.vue'
 import SaveStatus from './SaveStatus.vue'
+import ChapterEditor from '../editor/ChapterEditor.vue'
 import { useServices } from '../services.ts'
 import { useSession } from './use_session.ts'
 import { restoreUiState, serializeUiState } from './ui_state.ts'
@@ -74,6 +75,10 @@ function applyTree(tree: ChapterTree): void {
   props.session.applyTree(tree)
 }
 
+function updateContent(chapterId: ChapterId, text: string): void {
+  props.session.setContent(chapterId, text)
+}
+
 function chapterHasContent(chapterId: ChapterId): boolean {
   return hasContent(document.value, chapterId)
 }
@@ -128,15 +133,15 @@ const selectedNumber = computed(() => {
       </aside>
 
       <main class="workspace__main">
-        <slot name="editor" :chapter-id="selectedId" :number="selectedNumber">
-          <div v-if="selectedChapter" class="workspace__chapter">
-            <h2 class="workspace__chapter-title">
-              <span class="workspace__chapter-number">{{ selectedNumber }}</span>
-              {{ selectedChapter.title }}
-            </h2>
-          </div>
-          <p v-else class="workspace__placeholder">选择或新建一个章节开始写作。</p>
-        </slot>
+        <ChapterEditor
+          v-if="selectedChapter && selectedId !== null"
+          :chapter-id="selectedId"
+          :content="document.contents.get(selectedId) ?? ''"
+          :number="selectedNumber"
+          :title="selectedChapter.title"
+          @change="updateContent"
+        />
+        <p v-else class="workspace__placeholder">选择或新建一个章节开始写作。</p>
       </main>
     </div>
   </div>
@@ -211,24 +216,11 @@ const selectedNumber = computed(() => {
   border-right: 1px solid #e5e7eb;
 }
 
+/* 编辑器自身滚动（CodeMirror scroller），与章节栏互不影响。 */
 .workspace__main {
   flex: 1;
   min-width: 0;
-  overflow-y: auto;
-}
-
-.workspace__chapter {
-  padding: 24px 32px;
-}
-
-.workspace__chapter-title {
-  margin: 0;
-  font-size: 20px;
-}
-
-.workspace__chapter-number {
-  margin-right: 8px;
-  color: #6b7280;
+  overflow: hidden;
 }
 
 .workspace__placeholder {
