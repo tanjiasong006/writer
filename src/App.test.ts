@@ -524,3 +524,11 @@ test('大文档：1000 个章节、多级嵌套可以打开、编辑、保存', 
   // 宽松上限，只用于发现数量级的退化（happy-dom 比真实浏览器慢）。
   expect(performance.now() - started).toBeLessThan(10_000)
 })
+
+test('项目已在另一个 Writer 中打开：说明原因', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.storage.failNext({ code: 'project-locked' })
+  const wrapper = await mountApp(services)
+  expect(wrapper.find('.welcome__error').text()).toContain('另一个 Writer 窗口中打开')
+})

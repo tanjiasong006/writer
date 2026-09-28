@@ -309,6 +309,7 @@ test('releaseSession：保存成功直接释放，不询问', async () => {
   expect(await releaseSession(session, confirm)).toBe(true)
   expect(confirm).not.toHaveBeenCalled()
   expect(storage.committed(PATH)!.contents.get('a')).toBe('1')
+  expect(storage.closed).toEqual([PATH])
 })
 
 test('releaseSession：保存失败时询问；用户拒绝丢弃则会话保留且仍可保存', async () => {
@@ -319,6 +320,7 @@ test('releaseSession：保存失败时询问；用户拒绝丢弃则会话保留
   expect(await releaseSession(session, confirm)).toBe(false)
   expect(confirm).toHaveBeenCalledWith({ code: 'io', operation: 'write', path: 'x', message: 'x' })
   expect(session.isDirty).toBe(true)
+  expect(storage.closed).toEqual([])
   expect(await session.save()).toBe(true)
 })
 

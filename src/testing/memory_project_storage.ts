@@ -64,6 +64,13 @@ export class MemoryProjectStorage implements ProjectStorage {
     return { ok: true, value: { document, orphanFiles: [] } }
   }
 
+  /** 被关闭（释放）的项目。 */
+  readonly closed: string[] = []
+
+  async close(path: string): Promise<void> {
+    this.closed.push(path)
+  }
+
   /** 导入过的资源：项目路径 → 源路径列表。 */
   readonly importedAssets: Array<{ path: string; sourcePath: string }> = []
 

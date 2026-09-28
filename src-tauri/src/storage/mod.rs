@@ -6,6 +6,7 @@
 
 pub mod assets;
 pub mod fs;
+pub mod lock;
 mod names;
 #[cfg(test)]
 mod tests;
@@ -60,6 +61,8 @@ pub enum StorageError {
     ContentRequired { chapter_id: String },
     /// 提供了不属于任何章节的正文。
     ContentOrphan { chapter_id: String },
+    /// 项目已被另一个 Writer 进程打开。
+    ProjectLocked,
     /// 不支持的资源格式。
     AssetUnsupported,
     /// 资源文件超过大小上限。

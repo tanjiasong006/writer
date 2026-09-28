@@ -17,6 +17,7 @@ export type StorageFailure =
   | { readonly code: 'content-not-utf8'; readonly chapterId: ChapterId; readonly file: string }
   | { readonly code: 'content-required'; readonly chapterId: ChapterId }
   | { readonly code: 'content-orphan'; readonly chapterId: ChapterId }
+  | { readonly code: 'project-locked' }
   | { readonly code: 'asset-unsupported' }
   | { readonly code: 'asset-too-large' }
   | { readonly code: 'asset-not-found' }
@@ -52,6 +53,8 @@ export interface ProjectStorage {
    * 资源独立于保存事务：复制成功即落盘，不影响文档 dirty 状态。
    */
   importAsset(path: string, sourcePath: string): Promise<StorageResult<ImportedAsset>>
+  /** 关闭项目，释放打开时取得的独占锁（同一项目同一时间只能被一个 Writer 打开）。尽力而为。 */
+  close(path: string): Promise<void>
 }
 
 export interface ImportedAsset {

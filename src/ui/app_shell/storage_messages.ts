@@ -20,6 +20,8 @@ export function messageForStorageFailure(failure: StorageFailure): string {
     case 'content-required':
     case 'content-orphan':
       return '保存数据不完整，已停止保存以保护现有文件。'
+    case 'project-locked':
+      return '该文档已在另一个 Writer 窗口中打开。请先在那里关闭，避免两处编辑互相覆盖。'
     case 'asset-unsupported':
       return '暂不支持该图片格式，请使用 PNG、JPG 或 GIF。'
     case 'asset-too-large':

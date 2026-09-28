@@ -51,5 +51,6 @@ export async function releaseSession(
     if (!(await confirmDiscard(session.lastError))) return false
   }
   session.dispose()
+  await session.releaseStorage()
   return true
 }

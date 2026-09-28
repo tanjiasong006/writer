@@ -1,6 +1,6 @@
 //! 暴露给前端的 Tauri command。只做参数转换与线程调度，业务规则在各模块内。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tauri::Manager;
@@ -33,12 +33,59 @@ async fn run_storage<T: Send + 'static>(
 
 #[tauri::command]
 pub async fn project_create(path: PathBuf, request: SaveRequest) -> Result<(), StorageError> {
-    run_storage(move || storage::create_project(&RealFs, &path, &request)).await
+    run_storage(move || {
+        storage::create_project(&RealFs, &path, &request)?;
+        let lock = lock_project(&path)?;
+        hold_lock(path, lock);
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn project_open(path: PathBuf) -> Result<OpenedProject, StorageError> {
-    run_storage(move || storage::open_project(&RealFs, &path)).await
+    run_storage(move || {
+        let lock = lock_project(&path)?;
+        let opened = storage::open_project(&RealFs, &path)?;
+        hold_lock(path, lock);
+        Ok(opened)
+    })
+    .await
+}
+
+/// 当前打开项目的独占锁。应用一次只打开一个项目，切换项目时替换。
+static PROJECT_LOCK: Mutex<Option<(PathBuf, storage::lock::ProjectLock)>> = Mutex::new(None);
+
+/// 为 path 取得独占锁；本进程已持有同一项目的锁时直接复用。
+fn lock_project(path: &Path) -> Result<Option<storage::lock::ProjectLock>, StorageError> {
+    let held = PROJECT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.as_ref().is_some_and(|(locked, _)| locked == path) {
+        return Ok(None);
+    }
+    drop(held);
+    storage::lock::acquire(path).map(Some)
+}
+
+/// 打开成功后才替换持有的锁：打开失败时保留原项目的锁。
+fn hold_lock(path: PathBuf, lock: Option<storage::lock::ProjectLock>) {
+    if let Some(lock) = lock {
+        *PROJECT_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((path, lock));
+    }
+}
+
+/// 关闭项目时释放独占锁。
+#[tauri::command]
+pub fn project_close(path: PathBuf) {
+    let mut held = PROJECT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if held.as_ref().is_some_and(|(locked, _)| *locked == path) {
+        *held = None;
+    }
 }
 
 #[tauri::command]

@@ -225,8 +225,9 @@ impl Writer<'_> {
         section: &Section,
         context: BlockContext,
     ) {
+        // 编号定义只有 0..=8 级；更深的嵌套列表停留在第 8 级，避免引用未定义的级别。
         let level = if context.in_list {
-            context.list_level
+            context.list_level.min(MAX_HEADING - 1)
         } else {
             0
         };
@@ -789,6 +790,19 @@ mod tests {
         let xml = part(&bytes, "word/document.xml");
         assert!(xml.contains(r#"<w:pStyle w:val="Heading9" />"#));
         assert!(!xml.contains("Heading10"));
+    }
+
+    #[test]
+    fn deeply_nested_lists_stay_within_defined_levels() {
+        let dir = project();
+        let markdown: String = (0..20)
+            .map(|i| format!("{}- 第 {i} 层\n", "  ".repeat(i)))
+            .collect();
+        let (bytes, _) = export_ok(&dir, &[("a", vec![1], "列表", &markdown)]);
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains(r#"<w:ilvl w:val="8" />"#));
+        assert!(!xml.contains(r#"<w:ilvl w:val="9" />"#));
+        assert!(xml.contains("第 19 层"));
     }
 
     #[test]

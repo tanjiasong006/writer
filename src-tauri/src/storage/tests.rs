@@ -653,23 +653,54 @@ fn ui_state_round_trip_and_is_independent_of_the_document() {
 fn bench_insert_at_top_of_500_chapters() {
     let dir = TempDir::new().unwrap();
     let root = project_root(&dir);
-    let ids: Vec<&'static str> = (1..=500).map(|i| &*Box::leak(format!("c{i}").into_boxed_str())).collect();
+    let ids: Vec<&'static str> = (1..=500)
+        .map(|i| &*Box::leak(format!("c{i}").into_boxed_str()))
+        .collect();
     let text = "长文档正文。".repeat(200);
     let old = State {
         title: "大文档",
-        files: ids.iter().enumerate().map(|(i, id)| (*id, format!("ch_{}.md", i + 1))).collect(),
+        files: ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (*id, format!("ch_{}.md", i + 1)))
+            .collect(),
         contents: ids.iter().map(|id| (*id, text.clone())).collect(),
     };
     old.write_to(&root);
-    let mut new = State { title: "大文档", files: vec![("x", "ch_1.md".into())], contents: vec![("x", String::new())] };
-    new.files.extend(ids.iter().enumerate().map(|(i, id)| (*id, format!("ch_{}.md", i + 2))));
-    new.contents.extend(ids.iter().map(|id| (*id, text.clone())));
+    let mut new = State {
+        title: "大文档",
+        files: vec![("x", "ch_1.md".into())],
+        contents: vec![("x", String::new())],
+    };
+    new.files.extend(
+        ids.iter()
+            .enumerate()
+            .map(|(i, id)| (*id, format!("ch_{}.md", i + 2))),
+    );
+    new.contents
+        .extend(ids.iter().map(|id| (*id, text.clone())));
 
     let started = std::time::Instant::now();
     save_project(&RealFs, &root, &new.request(&["x"])).unwrap();
     let rename_all = started.elapsed();
 
-    let edit = State { contents: new.contents.iter().map(|(id, t)| (*id, if *id == "c250" { format!("{t}!") } else { t.clone() })).collect(), ..new.clone() };
+    let edit = State {
+        contents: new
+            .contents
+            .iter()
+            .map(|(id, t)| {
+                (
+                    *id,
+                    if *id == "c250" {
+                        format!("{t}!")
+                    } else {
+                        t.clone()
+                    },
+                )
+            })
+            .collect(),
+        ..new.clone()
+    };
     let started = std::time::Instant::now();
     save_project(&RealFs, &root, &edit.request(&["c250"])).unwrap();
     let single_edit = started.elapsed();

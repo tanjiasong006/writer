@@ -111,6 +111,11 @@ export class ProjectSession {
     this.commit(setTitle(this.current, title))
   }
 
+  /** 释放存储层为本项目持有的资源（如独占锁）。 */
+  releaseStorage(): Promise<void> {
+    return this.storage.close(this.path)
+  }
+
   /** 把外部图片导入项目资源目录，得到正文可用的引用路径。不改变文档。 */
   importAsset(sourcePath: string): Promise<StorageResult<ImportedAsset>> {
     return this.storage.importAsset(this.path, sourcePath)

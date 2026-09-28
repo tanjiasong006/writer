@@ -39,6 +39,14 @@ export function createTauriProjectStorage(): ProjectStorage {
       ).then(toVoid)
     },
 
+    async close(path) {
+      try {
+        await invoke('project_close', { path })
+      } catch {
+        // 释放失败时，进程退出时操作系统也会释放锁。
+      }
+    },
+
     async importAsset(path, sourcePath) {
       const result = await call(() => invoke<string>('project_import_asset', { path, source: sourcePath }))
       if (!result.ok) return result
@@ -69,6 +77,7 @@ const KNOWN_CODES = new Set<StorageFailure['code']>([
   'content-not-utf8',
   'content-required',
   'content-orphan',
+  'project-locked',
   'asset-unsupported',
   'asset-too-large',
   'asset-not-found',
