@@ -97,6 +97,7 @@ function selectNumber(field: keyof StyleOverrides, event: Event): void {
           v-for="font in FONTS"
           :key="font.value"
           type="button"
+          tabindex="0"
           :class="{ 'style-panel__option--active': theme.body.font === font.value }"
           :aria-pressed="theme.body.font === font.value"
           :title="font.title"
@@ -131,6 +132,7 @@ function selectNumber(field: keyof StyleOverrides, event: Event): void {
           v-for="font in FONTS"
           :key="font.value"
           type="button"
+          tabindex="0"
           :class="{ 'style-panel__option--active': theme.heading1.font === font.value }"
           :aria-pressed="theme.heading1.font === font.value"
           :title="font.title"
@@ -151,102 +153,139 @@ function selectNumber(field: keyof StyleOverrides, event: Event): void {
 
     <div class="style-panel__footer">
       <span class="style-panel__hint">{{ adjusted ? '已在主题基础上调整' : '使用主题默认设置' }}</span>
-      <button v-if="adjusted" type="button" class="style-panel__reset" @click="emit('reset')">恢复主题默认</button>
+      <button v-if="adjusted" type="button" class="style-panel__reset" tabindex="0" @click="emit('reset')">恢复主题默认</button>
     </div>
   </section>
 </template>
 
 <style scoped>
 .style-panel {
-  width: 272px;
-  padding: 12px 14px;
-  font-size: 13px;
-  color: #111827;
+  width: 280px;
+  box-sizing: border-box;
+  padding: var(--space-5) var(--space-6) var(--space-6);
+  color: var(--color-text);
+  font-size: var(--text-m);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .style-panel__title {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-m);
+  font-weight: var(--weight-semibold);
 }
 
 .style-panel__section {
-  margin: 14px 0 6px;
-  color: #6b7280;
-  font-size: 12px;
-  font-weight: 600;
+  margin: var(--space-6) 0 var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-s);
+  font-weight: var(--weight-medium);
 }
 
 .style-panel__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 30px;
+  gap: var(--space-5);
+  min-height: var(--control-h-l);
 }
 
 .style-panel__label {
   flex: none;
-  color: #374151;
+  color: var(--color-text-secondary);
 }
 
+/* 自绘下拉框外观：与分段控件同宽同高，右侧一个小箭头。 */
 .style-panel__select {
-  width: 150px;
-  padding: 3px 6px;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  background: #ffffff;
+  width: 156px;
+  height: var(--control-h-s);
+  padding: 0 22px 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-m);
+  background: var(--color-bg)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M5 6.5 8 9.5l3-3' fill='none' stroke='%238a8a8f' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    no-repeat right 5px center / 14px;
+  box-shadow: inset 0 0 0 1px var(--color-control-border);
   color: inherit;
   font: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.style-panel__select:hover {
+  box-shadow: inset 0 0 0 1px var(--color-separator-strong), 0 0 0 0 transparent;
+  background-color: var(--color-bg);
+}
+
+.style-panel__select:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 0 3px var(--color-accent-fill-strong);
 }
 
 .style-panel__segmented {
   display: flex;
-  width: 150px;
+  width: 156px;
+  height: var(--control-h-s);
+  box-sizing: border-box;
   padding: 2px;
-  border: 1px solid #d1d5db;
-  border-radius: 5px;
+  border-radius: var(--radius-m);
+  background: var(--color-fill-pressed);
 }
 
 .style-panel__segmented button {
   flex: 1;
-  padding: 2px 0;
+  padding: 0;
   border: none;
-  border-radius: 3px;
+  border-radius: var(--radius-s);
   background: none;
-  color: inherit;
+  color: var(--color-text-secondary);
   font: inherit;
-  cursor: pointer;
+  font-size: var(--text-s);
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.style-panel__segmented button:hover:not(.style-panel__option--active) {
+  color: var(--color-text);
 }
 
 .style-panel__segmented .style-panel__option--active {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: var(--color-bg);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.1);
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
 }
 
 .style-panel__hint {
-  margin: 2px 0 0;
-  color: #6b7280;
-  font-size: 12px;
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-s);
+  line-height: var(--leading-tight);
 }
 
 .style-panel__footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-top: 14px;
-  padding-top: 10px;
-  border-top: 1px solid #f3f4f6;
+  gap: var(--space-4);
+  min-height: var(--control-h-s);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-separator);
 }
 
 .style-panel__reset {
-  padding: 3px 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  background: #ffffff;
-  color: inherit;
+  height: var(--control-h-s);
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--color-accent-text);
   font: inherit;
-  font-size: 12px;
-  cursor: pointer;
+  font-size: var(--text-s);
+  font-weight: var(--weight-medium);
+}
+
+.style-panel__reset:hover {
+  background: var(--color-accent-fill);
 }
 </style>

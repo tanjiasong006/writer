@@ -1,0 +1,128 @@
+/*
+ * 界面 token（docs/ui-design-principles.md 第 5 节）。
+ *
+ * 所有界面组件的颜色、字号、间距、尺寸、圆角、阴影与动画都从这里取值；新增视觉参数前先看这里能否表达。
+ * 文档主题（字体、字号、行距等排版语义）不在这里，见 ui/document_style/theme_css.ts。
+ * MVP 只提供浅色外观。
+ */
+:root {
+  /* 字体 */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans CJK SC', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* 字号：界面以 13px 为基准，章节树 14px（ui-spec §32）。 */
+  --text-xs: 11px;
+  --text-s: 12px;
+  --text-m: 13px;
+  --text-l: 14px;
+  --text-xl: 20px;
+  --leading-tight: 18px;
+  --leading-normal: 20px;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* 前景层级 */
+  --color-text: #1d1d1f;
+  --color-text-secondary: #5c5c61;
+  --color-text-tertiary: #8a8a8f;
+  --color-text-disabled: #b4b4b8;
+  --color-text-on-accent: #ffffff;
+
+  /* 表面 */
+  --color-bg: #ffffff;
+  --color-bg-sidebar: #f6f6f4;
+  --color-bg-raised: #ffffff;
+  --color-scrim: rgba(24, 24, 27, 0.2);
+
+  /* 分隔与边框 */
+  --color-separator: rgba(0, 0, 0, 0.08);
+  --color-separator-strong: rgba(0, 0, 0, 0.14);
+  --color-control-border: rgba(0, 0, 0, 0.16);
+
+  /* 交互填充：hover 弱于 selected，pressed 介于二者之间。 */
+  --color-fill-hover: rgba(0, 0, 0, 0.045);
+  --color-fill-pressed: rgba(0, 0, 0, 0.08);
+
+  /* 强调色：只用于"当前"与"焦点"，不做大面积装饰。 */
+  --color-accent: #2f66d0;
+  --color-accent-hover: #2758b8;
+  --color-accent-text: #2455b5;
+  --color-accent-fill: rgba(47, 102, 208, 0.1);
+  --color-accent-fill-strong: rgba(47, 102, 208, 0.16);
+  --color-focus-ring: rgba(47, 102, 208, 0.5);
+
+  /* 状态色 */
+  --color-danger: #c42b25;
+  --color-danger-hover: #a8231e;
+  --color-danger-text: #b3261e;
+  --color-danger-fill: #fdf1f0;
+  --color-success-text: #2c6e3f;
+
+  /* 正文与预览中非主题的中性色（引用线、代码底色、表格线、选区）。 */
+  --color-doc-text: #1f1f21;
+  --color-doc-muted: #55555a;
+  --color-doc-rule: #d8d8d4;
+  --color-doc-fill: #f3f3f1;
+  --color-doc-header-fill: #f8f8f6;
+  --color-doc-selection: #bcd6fb;
+  --color-doc-selection-inactive: #e3e3e6;
+
+  /* 间距 */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 48px;
+
+  /* 尺寸 */
+  --control-h-s: 24px;
+  --control-h-m: 28px;
+  --control-h-l: 32px;
+  --header-h: 44px;
+  --icon-s: 14px;
+  --icon-m: 16px;
+
+  /* 章节树（ui-spec §2–§4、§31） */
+  --tree-row-h: 32px;
+  --tree-indent: 16px;
+  --tree-toggle: 20px;
+  --sidebar-w: 260px;
+
+  /* 正文版心 */
+  --doc-column: 760px;
+  --doc-gutter: 32px;
+
+  /* 圆角 */
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --radius-l: 10px;
+
+  /* 阴影：只用于浮在内容之上的层（菜单、弹出面板、对话框、提示）。 */
+  --shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.06), 0 10px 28px rgba(0, 0, 0, 0.12);
+  --shadow-dialog: 0 0 0 0.5px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08), 0 24px 56px rgba(0, 0, 0, 0.18);
+
+  /* 动画：只解释变化（第 8 节）。 */
+  --duration-fast: 100ms;
+  --duration-base: 150ms;
+  --duration-slow: 220ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* 层级 */
+  --z-popover: 20;
+  --z-dialog: 40;
+  --z-toast: 50;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}

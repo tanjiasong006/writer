@@ -47,6 +47,11 @@ const props = defineProps<{
   theme?: DocumentTheme
   /** 图片文件键 → 布局；不提供时所有图片跟随主题。 */
   imageLayouts?: ImageLayouts
+  /**
+   * 工具栏由上层放在自己的界面中（工作区顶栏）：编辑器不显示工具栏，改为发出 tools 并通过
+   * runCommand / changeFigureLayout 接受命令。默认在编辑器上方显示。
+   */
+  externalToolbar?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -55,6 +60,8 @@ const emit = defineEmits<{
   'request-image': [chapterId: ChapterId]
   /** 用户（或撤销 / 重做）修改了一张图片的布局；null 表示跟随主题。 */
   'image-layout': [key: string, layout: ImageOverride | null]
+  /** 工具栏状态与选中的图片（externalToolbar 时由上层显示）。 */
+  tools: [state: ToolbarState, figure: SelectedFigure | null]
 }>()
 
 /** 滚动容器（每个章节记住自己的滚动位置）。 */
@@ -94,9 +101,28 @@ function dispatchTransaction(tr: Transaction): void {
 }
 
 function showState(state: EditorState): void {
-  toolbar.value = toolbarState(state)
-  figure.value = selectedFigure(state)
+  const tools = toolbarState(state)
+  const selected = selectedFigure(state)
+  // 只在变化时更新：输入文字时工具栏状态通常不变，上层不必每次按键都重新渲染。
+  let changed = false
+  if (!sameTools(toolbar.value, tools)) {
+    toolbar.value = tools
+    changed = true
+  }
+  if (JSON.stringify(figure.value) !== JSON.stringify(selected)) {
+    figure.value = selected
+    changed = true
+  }
+  if (changed && props.externalToolbar) emit('tools', tools, selected)
 }
+
+function sameTools(a: ToolbarState | null, b: ToolbarState): boolean {
+  if (a === null) return false
+  return (Object.keys(b) as ToolbarCommand[]).every(
+    (key) => a[key].enabled === b[key].enabled && a[key].active === b[key].active,
+  )
+}
+
 
 /** 章节的编辑器状态，并同步当前的图片布局（缓存的状态可能是在其他章节修改布局之前的）。 */
 function stateFor(chapterId: ChapterId, text: string): EditorState {
@@ -196,6 +222,8 @@ function focus(): void {
 
 defineExpose({
   insertImage: insertImageAt,
+  runCommand,
+  changeFigureLayout,
   /** 当前的 EditorView（测试与调试用）。 */
   getView: (): EditorView | null => view,
   focus,
@@ -204,16 +232,18 @@ defineExpose({
 
 <template>
   <div class="chapter-editor" :style="themeStyle">
-    <h2 class="chapter-editor__heading">
-      <span class="chapter-editor__number">{{ number }}</span>
-      <span class="chapter-editor__title">{{ title || '未命名章节' }}</span>
-    </h2>
-    <EditorToolbar :state="toolbar" @command="runCommand">
+    <EditorToolbar v-if="!externalToolbar" class="chapter-editor__toolbar" :state="toolbar" @command="runCommand">
       <template v-if="figure" #context>
         <ImageLayoutControls :layout="figure.layout" @change="changeFigureLayout" />
       </template>
     </EditorToolbar>
     <div ref="scroller" class="chapter-editor__scroller">
+      <h1 class="chapter-editor__heading">
+        <span class="chapter-editor__number">{{ number }}</span>
+        <span class="chapter-editor__title" :class="{ 'chapter-editor__title--untitled': !title }">
+          {{ title || '未命名章节' }}
+        </span>
+      </h1>
       <div ref="mountPoint" class="chapter-editor__body"></div>
     </div>
   </div>
@@ -224,25 +254,12 @@ defineExpose({
   display: flex;
   flex-direction: column;
   height: 100%;
+  background: var(--color-bg);
 }
 
-.chapter-editor__heading {
+.chapter-editor__toolbar {
   flex: none;
-  width: 100%;
-  max-width: 760px;
-  box-sizing: border-box;
-  margin: 0 auto;
-  padding: 24px 32px 8px;
-  /* 章节标题按它在文档中的层级使用主题的标题样式（与预览 / 导出一致）。 */
-  font-family: var(--heading-font);
-  font-size: var(--heading-size);
-  line-height: 1.4;
-}
-
-.chapter-editor__number {
-  margin-right: 10px;
-  color: #6b7280;
-  font-variant-numeric: tabular-nums;
+  padding: var(--space-2) var(--space-5);
 }
 
 .chapter-editor__scroller {
@@ -251,6 +268,35 @@ defineExpose({
   overflow-y: auto;
 }
 
+/*
+ * 章节标题是这一页的开头，随正文一起滚动，不占用固定的界面区域。
+ * 它按在文档中的层级使用主题的标题样式（与预览 / 导出一致），与正文共用版心。
+ */
+.chapter-editor__heading {
+  max-width: var(--doc-column);
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: var(--space-10) var(--doc-gutter) 0;
+  font-family: var(--heading-font);
+  font-size: var(--heading-size);
+  font-weight: bold;
+  line-height: 1.4;
+  color: var(--color-doc-text);
+  overflow-wrap: anywhere;
+  /* 标题只能在章节树中修改，这里不可选中编辑，避免被误认为正文的一部分。 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.chapter-editor__number {
+  margin-right: 0.6em;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.chapter-editor__title--untitled {
+  color: var(--color-text-tertiary);
+}
 
 /*
  * 正文排版与全文预览（DocumentPreview）一致：宽度相同，字体、字号、行距、段距、标题、引用、代码、
@@ -258,15 +304,15 @@ defineExpose({
  * ProseMirror 生成的 DOM 不带 scoped 属性，因此用 :deep。
  */
 .chapter-editor__body :deep(.chapter-editor__content) {
-  max-width: 760px;
-  min-height: 100%;
+  max-width: var(--doc-column);
   box-sizing: border-box;
   margin: 0 auto;
-  padding: 8px 32px 40vh;
+  /* 下方留出大段空白：写到最后一段时仍可以把它滚到视线高度，而不是贴着窗口底边。 */
+  padding: var(--space-5) var(--doc-gutter) 40vh;
   font-family: var(--doc-body-font);
   font-size: var(--doc-body-size);
   line-height: var(--doc-line-height);
-  color: #111827;
+  color: var(--color-doc-text);
   /* 应用界面关闭了字体合成（App.vue）；正文要像 Word / PDF 一样为没有斜体、粗体字形的中文字体合成斜体与粗体。 */
   font-synthesis: weight style;
   /* 文字光标由 caret.ts 自绘（WebKit 的原生光标在段落第二行起高度不对）；输入法组字期间用原生光标。 */
@@ -276,7 +322,7 @@ defineExpose({
 }
 
 .chapter-editor__body :deep(.chapter-editor__content.is-composing) {
-  caret-color: #111827;
+  caret-color: var(--color-doc-text);
 }
 
 .chapter-editor__body {
@@ -286,7 +332,7 @@ defineExpose({
 .chapter-editor__body :deep(.editor-caret) {
   position: absolute;
   width: 1.5px;
-  background: #111827;
+  background: var(--color-doc-text);
   pointer-events: none;
   animation: editor-caret-blink 1.1s steps(1) infinite;
 }
@@ -304,13 +350,13 @@ defineExpose({
 
 .chapter-editor__body :deep(.editor-selection__box) {
   position: absolute;
-  background: #b4d5fe;
+  background: var(--color-doc-selection);
   mix-blend-mode: multiply;
   pointer-events: none;
 }
 
 .chapter-editor__body :deep(.editor-selection.is-inactive .editor-selection__box) {
-  background: #e2e4e8;
+  background: var(--color-doc-selection-inactive);
 }
 
 .chapter-editor__body :deep(p) {
@@ -321,7 +367,7 @@ defineExpose({
   content: attr(data-placeholder);
   float: left;
   height: 0;
-  color: #9ca3af;
+  color: var(--color-text-tertiary);
   pointer-events: none;
 }
 
@@ -374,8 +420,8 @@ defineExpose({
 .chapter-editor__body :deep(blockquote) {
   margin: 1em 0;
   padding: 0 1em;
-  border-left: 3px solid #d1d5db;
-  color: #4b5563;
+  border-left: 3px solid var(--color-doc-rule);
+  color: var(--color-doc-muted);
   font-family: var(--doc-quote-font);
   font-size: var(--doc-quote-size);
 }
@@ -406,7 +452,7 @@ defineExpose({
   position: absolute;
   left: -1.3em;
   content: '☐';
-  color: #6b7280;
+  color: var(--color-text-tertiary);
 }
 
 .chapter-editor__body :deep(li[data-task='done']::before) {
@@ -416,8 +462,8 @@ defineExpose({
 .chapter-editor__body :deep(pre) {
   overflow-x: auto;
   padding: 12px 14px;
-  border-radius: 6px;
-  background: #f3f4f6;
+  border-radius: var(--radius-m);
+  background: var(--color-doc-fill);
   font-size: var(--doc-code-size);
   line-height: 1.6;
   white-space: pre;
@@ -425,7 +471,7 @@ defineExpose({
 }
 
 .chapter-editor__body :deep(code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .chapter-editor__body :deep(:not(pre) > code) {
@@ -435,18 +481,20 @@ defineExpose({
 .chapter-editor__body :deep(:not(pre) > code) {
   padding: 0.1em 0.3em;
   border-radius: 3px;
-  background: #f3f4f6;
+  background: var(--color-doc-fill);
 }
 
 .chapter-editor__body :deep(a[data-href]) {
-  color: #2563eb;
+  color: var(--color-accent-text);
   text-decoration: underline;
+  text-decoration-color: var(--color-accent-fill-strong);
+  text-underline-offset: 0.18em;
 }
 
 .chapter-editor__body :deep(hr) {
   margin: 1.2em 0;
   border: none;
-  border-top: 1px solid #d1d5db;
+  border-top: 1px solid var(--color-doc-rule);
 }
 
 .chapter-editor__body :deep(table) {
@@ -461,12 +509,12 @@ defineExpose({
 .chapter-editor__body :deep(td) {
   position: relative;
   padding: 6px 10px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--color-doc-rule);
   vertical-align: top;
 }
 
 .chapter-editor__body :deep(th) {
-  background: #f9fafb;
+  background: var(--color-doc-header-fill);
   font-weight: 600;
   text-align: left;
 }
@@ -475,7 +523,7 @@ defineExpose({
   position: absolute;
   inset: 0;
   content: '';
-  background: rgba(37, 99, 235, 0.12);
+  background: var(--color-accent-fill);
   pointer-events: none;
 }
 
@@ -535,16 +583,16 @@ defineExpose({
 
 .chapter-editor__body :deep(.editor-image.ProseMirror-selectednode img),
 .chapter-editor__body :deep(.editor-image.ProseMirror-selectednode .editor-image__missing) {
-  outline: 2px solid #93c5fd;
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
 .chapter-editor__body :deep(.editor-image__missing) {
   display: inline-block;
   padding: 8px 12px;
-  border: 1px dashed #f87171;
-  border-radius: 4px;
-  color: #b91c1c;
+  border: 1px dashed var(--color-danger);
+  border-radius: var(--radius-s);
+  color: var(--color-danger-text);
   font-size: 14px;
   line-height: 1.6;
 }

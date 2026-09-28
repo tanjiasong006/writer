@@ -1,0 +1,46 @@
+/*
+ * 全局基础样式：界面 token 与桌面应用的默认外观。应用入口（App.vue）与 Storybook（.storybook/preview.ts）共用，
+ * 单独查看组件时看到的与应用中一致。
+ */
+@import './tokens.css';
+
+:root {
+  font-family: var(--font-ui);
+  font-size: var(--text-m);
+  line-height: var(--leading-normal);
+  font-weight: 400;
+  /* MVP 只提供浅色外观，组件配色都按浅色设计（ui/tokens.css）。 */
+  color-scheme: light;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+/* WebKit 中表单控件默认使用系统控件字体，不继承界面字体（中文字形会不一致）。 */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* 桌面应用的控件使用箭头光标，不像网页链接那样显示手形。 */
+button {
+  cursor: default;
+}
+
+/* 键盘焦点统一可见；组件可以在自己的范围内给出更贴合的表现（如章节树整行描边）。 */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}

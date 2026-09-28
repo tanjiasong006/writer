@@ -19,7 +19,7 @@
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |
 | `image_view.ts` | 图片节点视图（figure 与行内图片）：按项目资源显示，无法显示时占位。 |
 | `image_layout.ts` | 图片布局：插件状态（图片文件键 → 布局、主题默认）、figure 装饰、可撤销的 `ImageLayoutStep`。 |
-| `ChapterEditor.vue` / `EditorToolbar.vue` / `ImageLayoutControls.vue` | 挂载 EditorView、响应章节切换、发出 change / image-layout、展示工具栏与图片布局按钮。 |
+| `ChapterEditor.vue` / `EditorToolbar.vue` / `ImageLayoutControls.vue` | 挂载 EditorView、响应章节切换、发出 change / image-layout、展示工具栏与图片布局按钮。`externalToolbar` 时工具栏由上层（工作区顶栏）显示：编辑器发出 `tools`（工具栏状态 + 选中的图片），通过 `runCommand` / `changeFigureLayout` 接受命令。 |
 
 ## 数据流
 

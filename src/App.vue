@@ -12,6 +12,8 @@ import WelcomeView from './ui/app_shell/WelcomeView.vue'
 import Workspace from './ui/app_shell/Workspace.vue'
 import { messageForStorageFailure } from './ui/app_shell/storage_messages.ts'
 import { useServices } from './ui/services.ts'
+import Toast from './ui/common/Toast.vue'
+import './ui/base.css'
 
 /**
  * 应用入口：管理"当前打开的项目"。
@@ -60,16 +62,28 @@ function blockReload(event: KeyboardEvent): void {
   if (reload) event.preventDefault()
 }
 
+/** 文档级快捷键：Cmd/Ctrl+N 新建文档、Cmd/Ctrl+O 打开文档（欢迎页与工作区都可用）。 */
+function onShortcut(event: KeyboardEvent): void {
+  if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || busy.value) return
+  const key = event.key.toLowerCase()
+  if (key !== 'n' && key !== 'o') return
+  event.preventDefault()
+  if (view.value.kind === 'starting') return
+  void (key === 'n' ? newProject() : openExisting())
+}
+
 onMounted(() => {
   window.addEventListener('dragover', blockFileDragOver)
   window.addEventListener('drop', blockFileDrop)
   window.addEventListener('keydown', blockReload)
+  window.addEventListener('keydown', onShortcut)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('dragover', blockFileDragOver)
   window.removeEventListener('drop', blockFileDrop)
   window.removeEventListener('keydown', blockReload)
+  window.removeEventListener('keydown', onShortcut)
 })
 
 onMounted(async () => {
@@ -167,85 +181,33 @@ function titleFromPath(path: string): string {
 
 <template>
   <div class="app">
-    <p v-if="notice" class="app__notice" role="status">
-      {{ notice }}
-      <button type="button" aria-label="关闭提示" @click="notice = null">×</button>
-    </p>
     <Workspace
       v-if="view.kind === 'open'"
       :key="view.key"
       :session="view.session"
+      :notice="notice"
+      @dismiss-notice="notice = null"
       @new-project="newProject"
       @open-project="openExisting"
     />
-    <WelcomeView
-      v-else-if="view.kind === 'welcome'"
-      :error="error"
-      :busy="busy"
-      @new-project="newProject"
-      @open-project="openExisting"
-    />
+    <template v-else-if="view.kind === 'welcome'">
+      <WelcomeView :error="error" :busy="busy" @new-project="newProject" @open-project="openExisting" />
+      <div v-if="notice" class="app__toasts">
+        <Toast class="app__notice" @dismiss="notice = null">{{ notice }}</Toast>
+      </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.app {
-  position: relative;
-}
-
-.app__notice {
+.app__toasts {
   position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 30;
+  right: 0;
+  bottom: var(--space-6);
+  left: 0;
+  z-index: var(--z-toast);
   display: flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 28rem;
-  margin: 0;
-  padding: 8px 12px;
-  border: 1px solid #fde68a;
-  border-radius: 6px;
-  background: #fffbeb;
-  font-size: 13px;
-}
-
-.app__notice button {
-  border: none;
-  background: none;
-  font-size: 16px;
-  cursor: pointer;
-}
-</style>
-
-<style>
-:root {
-  font-family: Inter, -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-  /* MVP 只提供浅色主题，组件配色都按浅色设计。 */
-  color-scheme: light;
-  color: #0f0f0f;
-  background-color: #ffffff;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-body {
-  margin: 0;
-  overflow: hidden;
-}
-
-/* WebKit 中表单控件默认使用系统控件字体，不继承界面字体（中文字形会不一致）。 */
-button,
-input,
-select,
-textarea {
-  font-family: inherit;
+  justify-content: center;
+  pointer-events: none;
 }
 </style>

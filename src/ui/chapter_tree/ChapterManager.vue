@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import ChapterTree from './ChapterTree.vue'
+import Toast from '../common/Toast.vue'
 import {
   appendChapter,
   createChapterAfter,
@@ -61,6 +62,8 @@ const editingNew = ref(false)
 const deletingId = ref<ChapterId | null>(null)
 const errorMessage = ref<string | null>(null)
 const confirmCancelButton = ref<HTMLButtonElement | null>(null)
+const confirmDialog = ref<HTMLElement | null>(null)
+const treeView = ref<InstanceType<typeof ChapterTree> | null>(null)
 
 const deleting = computed(() =>
   deletingId.value === null ? null : findChapter(tree.value, deletingId.value),
@@ -181,10 +184,33 @@ function confirmDelete(): void {
   editingId.value = null
   deletingId.value = null
   errorMessage.value = null
+  // 焦点留在章节树中：落在删除后选中的章节上，可以继续用键盘操作。
+  const focusTarget = selectedId.value === id ? next : selectedId.value
+  if (focusTarget !== null) void treeView.value?.focusRow(focusTarget)
 }
 
+/** 取消删除：焦点回到要删除的那一行。 */
 function cancelDelete(): void {
+  const id = deletingId.value
   deletingId.value = null
+  if (id !== null) void treeView.value?.focusRow(id)
+}
+
+/** 删除确认是模态对话框：Esc 取消，Tab 只在两个按钮之间循环。 */
+function onConfirmKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    cancelDelete()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const buttons = [...(confirmDialog.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+  if (buttons.length === 0) return
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  const next = event.shiftKey ? index - 1 : index + 1
+  event.preventDefault()
+  buttons[(next + buttons.length) % buttons.length].focus()
 }
 
 function select(chapterId: ChapterId): void {
@@ -258,42 +284,8 @@ function messageForMove(reason: MoveReason): string {
 
 <template>
   <section class="chapter-manager">
-    <div
-      v-if="deletingId !== null"
-      class="chapter-manager__confirm"
-      role="alertdialog"
-      aria-label="确认删除章节"
-      @keydown.esc="cancelDelete"
-    >
-      <p class="chapter-manager__confirm-text">
-        确定删除「{{ deletingTitle || '选中的章节' }}」吗？
-        <template v-if="deletingHasContent && deletingDescendantCount > 0">
-          该章节包含正文以及 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
-        </template>
-        <template v-else-if="deletingDescendantCount > 0">
-          该章节包含 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
-        </template>
-        <template v-else>该章节包含正文，删除后无法恢复。</template>
-      </p>
-      <div class="chapter-manager__confirm-actions">
-        <button type="button" ref="confirmCancelButton" class="chapter-manager__button" @click="cancelDelete">
-          取消
-        </button>
-        <button
-          type="button"
-          class="chapter-manager__button chapter-manager__button--danger"
-          @click="confirmDelete"
-        >
-          确认删除
-        </button>
-      </div>
-    </div>
-
-    <p v-if="errorMessage !== null" class="chapter-manager__error" role="alert">
-      {{ errorMessage }}
-    </p>
-
     <ChapterTree
+      ref="treeView"
       v-model:collapsed-ids="collapsedIds"
       :tree="tree"
       :selected-id="selectedId"
@@ -310,58 +302,158 @@ function messageForMove(reason: MoveReason): string {
       @delete="requestDelete"
       @open="emit('open', $event)"
     />
+
+    <div v-if="errorMessage !== null" class="chapter-manager__notice">
+      <Toast class="chapter-manager__error" tone="error" @dismiss="clearError">{{ errorMessage }}</Toast>
+    </div>
+
+    <div v-if="deletingId !== null" class="chapter-manager__scrim" @mousedown.self="cancelDelete">
+      <div
+        ref="confirmDialog"
+        class="chapter-manager__confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="chapter-manager-confirm-title"
+        aria-describedby="chapter-manager-confirm-text"
+        @keydown="onConfirmKeydown"
+      >
+        <h2 id="chapter-manager-confirm-title" class="chapter-manager__confirm-title">
+          删除「{{ deletingTitle || '选中的章节' }}」？
+        </h2>
+        <p id="chapter-manager-confirm-text" class="chapter-manager__confirm-text">
+          <template v-if="deletingHasContent && deletingDescendantCount > 0">
+            该章节包含正文以及 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
+          </template>
+          <template v-else-if="deletingDescendantCount > 0">
+            该章节包含 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
+          </template>
+          <template v-else>该章节包含正文，删除后无法恢复。</template>
+        </p>
+        <div class="chapter-manager__confirm-actions">
+          <button type="button" ref="confirmCancelButton" class="chapter-manager__button" tabindex="0" @click="cancelDelete">
+            取消
+          </button>
+          <button
+            type="button"
+            class="chapter-manager__button chapter-manager__button--danger"
+            tabindex="0"
+            @click="confirmDelete"
+          >
+            删除
+          </button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
 <style scoped>
+.chapter-manager {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.chapter-manager > :first-child {
+  flex: 1;
+}
+
+/* 操作失败的说明浮在侧栏底部，不推动章节树。 */
+.chapter-manager__notice {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  left: var(--space-4);
+  z-index: var(--z-toast);
+  display: flex;
+  justify-content: center;
+}
+
+.chapter-manager__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18vh;
+  background: var(--color-scrim);
+  animation: chapter-manager-fade var(--duration-base) var(--ease-out);
+}
+
+@keyframes chapter-manager-fade {
+  from {
+    opacity: 0;
+  }
+}
+
 .chapter-manager__confirm {
-  margin: 0 4px 8px;
-  padding: 10px 12px;
-  border: 1px solid #fecaca;
-  border-radius: 6px;
-  background: #fef2f2;
-  font-size: 13px;
-  line-height: 1.6;
+  width: 360px;
+  max-width: calc(100vw - 2 * var(--space-8));
+  box-sizing: border-box;
+  padding: var(--space-7) var(--space-7) var(--space-6);
+  border-radius: var(--radius-l);
+  background: var(--color-bg-raised);
+  box-shadow: var(--shadow-dialog);
+  color: var(--color-text);
+  font-size: var(--text-m);
+  line-height: var(--leading-normal);
+  -webkit-user-select: none;
+  user-select: none;
+  animation: chapter-manager-dialog-in var(--duration-slow) var(--ease-out);
+}
+
+@keyframes chapter-manager-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+.chapter-manager__confirm-title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-l);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
 }
 
 .chapter-manager__confirm-text {
-  margin: 0 0 8px;
-  color: #111827;
+  margin: 0 0 var(--space-7);
+  color: var(--color-text-secondary);
 }
 
 .chapter-manager__confirm-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--space-4);
 }
 
 .chapter-manager__button {
-  padding: 4px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  background: #ffffff;
-  color: #111827;
-  font-size: 13px;
-  cursor: pointer;
+  min-width: 72px;
+  height: var(--control-h-m);
+  padding: 0 var(--space-5);
+  border: none;
+  border-radius: var(--radius-m);
+  background: var(--color-fill-hover);
+  box-shadow: inset 0 0 0 1px var(--color-separator);
+  color: var(--color-text);
+  font: inherit;
+  font-weight: var(--weight-medium);
 }
 
 .chapter-manager__button:hover {
-  background: #f9fafb;
+  background: var(--color-fill-pressed);
 }
 
 .chapter-manager__button--danger {
-  border-color: #dc2626;
-  background: #dc2626;
-  color: #ffffff;
+  background: var(--color-danger);
+  box-shadow: none;
+  color: var(--color-text-on-accent);
 }
 
 .chapter-manager__button--danger:hover {
-  background: #b91c1c;
-}
-
-.chapter-manager__error {
-  margin: 0 4px 8px;
-  color: #b91c1c;
-  font-size: 13px;
+  background: var(--color-danger-hover);
 }
 </style>

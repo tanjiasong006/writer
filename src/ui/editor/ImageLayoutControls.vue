@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { ImageAlign, ImageLayout, ImageOverride, ImageSize } from '../../domain/document_style/document_style.ts'
+import Icon from '../common/Icon.vue'
+import type { IconName } from '../common/icons.ts'
 
 /**
  * 选中独立成段的图片时显示的布局按钮：语义化尺寸与对齐，不提供任意像素输入。
@@ -17,11 +19,10 @@ const sizes: ReadonlyArray<{ readonly value: ImageSize; readonly label: string; 
   { value: 'full', label: '通栏', title: '与正文同宽' },
 ]
 
-/** 对齐用线条图标：16×16，颜色跟随文字。 */
-const aligns: ReadonlyArray<{ readonly value: ImageAlign; readonly label: string; readonly icon: string }> = [
-  { value: 'left', label: '靠左', icon: 'M2.5 3v10M5 5.5h6v5H5z' },
-  { value: 'center', label: '居中', icon: 'M8 3v2.5M8 10.5V13M5 5.5h6v5H5z' },
-  { value: 'right', label: '靠右', icon: 'M13.5 3v10M5 5.5h6v5H5z' },
+const aligns: ReadonlyArray<{ readonly value: ImageAlign; readonly label: string; readonly icon: IconName }> = [
+  { value: 'left', label: '靠左', icon: 'align-left' },
+  { value: 'center', label: '居中', icon: 'align-center' },
+  { value: 'right', label: '靠右', icon: 'align-right' },
 ]
 </script>
 
@@ -55,61 +56,50 @@ const aligns: ReadonlyArray<{ readonly value: ImageAlign; readonly label: string
         @mousedown.prevent
         @click="emit('change', { align: align.value })"
       >
-        <svg class="image-controls__icon" viewBox="0 0 16 16" aria-hidden="true"><path :d="align.icon" /></svg>
+        <Icon :name="align.icon" />
       </button>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* 与正文工具栏同一套按钮：尺寸是一组文字按钮，对齐是一组图标按钮。 */
 .image-controls {
   display: inline-flex;
-  gap: 8px;
+  align-items: center;
+  gap: var(--space-5);
 }
 
 .image-controls__group {
   display: flex;
-  gap: 2px;
-}
-
-.image-controls__group + .image-controls__group {
-  padding-left: 8px;
-  border-left: 1px solid #f3f4f6;
+  gap: var(--space-1);
 }
 
 .image-controls__button {
-  min-width: 28px;
-  height: 28px;
-  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-h-m);
+  height: var(--control-h-m);
+  padding: 0 var(--space-3);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-m);
   background: none;
-  color: #374151;
+  color: var(--color-text-secondary);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-m);
   white-space: nowrap;
-  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .image-controls__button:hover {
-  background: rgba(15, 23, 42, 0.06);
+  background: var(--color-fill-hover);
+  color: var(--color-text);
 }
 
 .image-controls__button--active,
 .image-controls__button--active:hover {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
-}
-
-.image-controls__icon {
-  display: block;
-  width: 16px;
-  height: 16px;
-  margin: 0 auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  background: var(--color-accent-fill);
+  color: var(--color-accent-text);
 }
 </style>

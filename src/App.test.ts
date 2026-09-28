@@ -54,6 +54,18 @@ function rowTexts(wrapper: VueWrapper): string[] {
   return wrapper.findAll('.chapter-tree__row').map((row) => row.text())
 }
 
+/** 打开菜单（文档菜单、节点菜单）中的一项；菜单项旁可能显示快捷键，按名称查找。 */
+function menuItem(wrapper: VueWrapper, label: string) {
+  const found = wrapper.findAll('[role="menu"] button').find((b) => b.find('.popup-menu__label').text() === label)
+  if (!found) throw new Error(`找不到菜单项：${label}`)
+  return found
+}
+
+async function documentMenu(wrapper: VueWrapper, label: string) {
+  await wrapper.find('button[aria-label="文档菜单"]').trigger('click')
+  await menuItem(wrapper, label).trigger('click')
+}
+
 function button(wrapper: VueWrapper, label: string) {
   const found = wrapper.findAll('button').find((candidate) => candidate.text() === label)
   if (!found) throw new Error(`找不到按钮：${label}`)
@@ -70,7 +82,7 @@ test('新建文档：在所选位置创建空项目，标题取文件夹名，�
   services.shell.newProjectPath = '/文稿/我的小说'
   const wrapper = await mountApp(services)
 
-  await button(wrapper, '新建文档').trigger('click')
+  await wrapper.findAll('.welcome__button').find((b) => b.text().startsWith('新建文档'))!.trigger('click')
   await flushPromises()
 
   expect(wrapper.find('.workspace').exists()).toBe(true)
@@ -82,7 +94,7 @@ test('新建文档：在所选位置创建空项目，标题取文件夹名，�
 
 test('取消新建对话框：什么也不发生', async () => {
   const wrapper = await mountApp()
-  await button(wrapper, '新建文档').trigger('click')
+  await wrapper.findAll('.welcome__button').find((b) => b.text().startsWith('新建文档'))!.trigger('click')
   await flushPromises()
   expect(wrapper.find('.welcome').exists()).toBe(true)
 })
@@ -108,7 +120,7 @@ test('打开失败的原因对用户可见', async () => {
   services.shell.projectPath = PATH
   services.storage.failNext({ code: 'content-missing', chapterId: 'b', file: 'ch_2.md' })
   const wrapper = await mountApp(services)
-  await button(wrapper, '打开文档').trigger('click')
+  await wrapper.findAll('.welcome__button').find((b) => b.text().startsWith('打开文档'))!.trigger('click')
   await flushPromises()
   expect(wrapper.find('.welcome__error').text()).toContain('content/ch_2.md')
 })
@@ -146,7 +158,7 @@ test('Cmd/Ctrl+S 保存结构修改', async () => {
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
 
-  await button(wrapper, '+').trigger('click') // 在选中章节（绪论）之后新建
+  await wrapper.find('.chapter-tree__add').trigger('click') // 在选中章节（绪论）之后新建
   await wrapper.find('.chapter-tree__rename-input').setValue('相关工作')
   await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Enter' })
   expect(wrapper.find('.save-status').text()).toBe('未保存')
@@ -163,7 +175,7 @@ test('保存失败：状态显示失败原因并可重试', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
-  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
   services.storage.failNext({ code: 'io', operation: 'write', path: 'x', message: '磁盘已满' })
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }))
   await flushPromises()
@@ -199,12 +211,12 @@ test('删除正在编辑的章节：编辑器切到相邻章节，之后新建�
 
   await wrapper.findAll('.chapter-tree__row')[0].find('.chapter-tree__more').trigger('click')
   await button(wrapper, '删除').trigger('click')
-  await button(wrapper, '确认删除').trigger('click')
+  await button(wrapper, '删除').trigger('click')
   await flushPromises()
   expect(rowTexts(wrapper)).toEqual(['1方法'])
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('1方法')
 
-  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
   await flushPromises()
   expect(wrapper.find('.chapter-manager__error').exists()).toBe(false)
   await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Escape' })
@@ -243,7 +255,7 @@ test('关闭窗口：未保存的修改先保存再关闭', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
-  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
 
   expect(await services.shell.requestClose()).toBe(true)
   expect(services.storage.committed(PATH)!.tree).toHaveLength(3)
@@ -254,7 +266,7 @@ test('关闭窗口：保存失败时询问，用户选择返回则不关闭且�
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
-  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
 
   services.storage.failNext({ code: 'io', operation: 'write', path: 'x', message: '磁盘已满' })
   services.shell.confirmAnswer = false
@@ -272,10 +284,10 @@ test('切换项目：先保存当前项目，再打开新项目', async () => {
   if (!other.ok) throw new Error('fixture')
   services.storage.seed('/文稿/另一篇', other.document)
   const wrapper = await mountApp(services)
-  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
 
   services.shell.projectPath = '/文稿/另一篇'
-  await button(wrapper, '打开').trigger('click')
+  await documentMenu(wrapper, '打开文档…')
   await flushPromises()
 
   expect(services.storage.committed(PATH)!.tree).toHaveLength(3)
@@ -287,12 +299,12 @@ test('打开或新建失败时回到原来的项目，并说明原因', async ()
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
-  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
   await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Escape' })
 
   // 选错了文件夹（不是 Writer 文档）。
   services.shell.projectPath = '/文稿'
-  await button(wrapper, '打开').trigger('click')
+  await documentMenu(wrapper, '打开文档…')
   await flushPromises()
   expect(wrapper.find('.workspace').exists()).toBe(true)
   expect(wrapper.find<HTMLInputElement>('.workspace__title').element.value).toBe('毕业论文')
@@ -304,7 +316,7 @@ test('打开或新建失败时回到原来的项目，并说明原因', async ()
 
   // 新建到已有内容的位置。
   services.shell.newProjectPath = PATH
-  await button(wrapper, '新建').trigger('click')
+  await documentMenu(wrapper, '新建文档…')
   await flushPromises()
   expect(wrapper.find<HTMLInputElement>('.workspace__title').element.value).toBe('毕业论文')
   expect(wrapper.find('.app__notice').text()).toContain('已存在且不为空')
@@ -439,7 +451,7 @@ test('新建章节后编辑器切换到新章节', async () => {
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
   await flushPromises()
-  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
   await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Escape' })
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('2未命名章节')
   expect(editorText(wrapper)).toBe('')
@@ -671,7 +683,7 @@ test('全文预览：显示所有章节，编辑后刷新，点击章节同步�
 
   // 在章节树中重命名，预览随之刷新。
   await wrapper.findAll('.chapter-tree__row')[2].find('.chapter-tree__more').trigger('click')
-  await button(wrapper, '重命名').trigger('click')
+  await menuItem(wrapper, '重命名').trigger('click')
   await wrapper.find('.chapter-tree__rename-input').setValue('研究方法')
   await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Enter' })
   await vi.advanceTimersByTimeAsync(500)
@@ -680,7 +692,7 @@ test('全文预览：显示所有章节，编辑后刷新，点击章节同步�
   await wrapper.find('section[data-chapter-id="b"]').trigger('click')
   expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('2研究方法')
 
-  await button(wrapper, '返回编辑').trigger('click')
+  await button(wrapper, '预览').trigger('click') // 再次点击回到编辑
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('2研究方法')
 })
 
@@ -789,7 +801,7 @@ test('关闭窗口与退出应用同时触发：只保存一次、只询问一�
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
-  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__add').trigger('click')
   services.storage.failNext(
     { code: 'io', operation: 'write', path: 'x', message: '磁盘已满' },
     { code: 'io', operation: 'write', path: 'x', message: '磁盘已满' },
@@ -802,4 +814,63 @@ test('关闭窗口与退出应用同时触发：只保存一次、只询问一�
   ])
   expect([first, second]).toEqual([false, false])
   expect(services.shell.confirmations).toHaveLength(1)
+})
+
+test('全文预览中按 Esc 回到编辑，焦点回到正文', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await button(wrapper, '预览').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.document-preview').exists()).toBe(true)
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+  await flushPromises()
+  expect(wrapper.find('.document-preview').exists()).toBe(false)
+  expect(document.activeElement?.classList.contains('chapter-editor__content')).toBe(true)
+})
+
+test('Cmd/Ctrl+O 打开文档（先保存当前项目）', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const other = createDocument('另一篇', [], new Map())
+  if (!other.ok) throw new Error('fixture')
+  services.storage.seed('/文稿/另一篇', other.document)
+  const wrapper = await mountApp(services)
+
+  services.shell.projectPath = '/文稿/另一篇'
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', metaKey: true, cancelable: true }))
+  await flushPromises()
+  expect(wrapper.find<HTMLInputElement>('.workspace__title').element.value).toBe('另一篇')
+})
+
+test('侧栏宽度：分隔线可用方向键调整，限制在 180–480px', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  const resizer = wrapper.find('.workspace__resizer')
+  const width = () => Number(resizer.attributes('aria-valuenow'))
+  const start = width()
+  await resizer.trigger('keydown', { key: 'ArrowRight' })
+  expect(width()).toBe(start + 16)
+  await resizer.trigger('keydown', { key: 'Home' })
+  expect(width()).toBe(180)
+  await resizer.trigger('keydown', { key: 'ArrowLeft' })
+  expect(width()).toBe(180)
+  await resizer.trigger('dblclick')
+  expect(width()).toBe(260)
+})
+
+test('顶栏的正文工具反映编辑器状态：在代码块中粗体不可用', async () => {
+  const services = createMemoryServices()
+  const doc = createDocument('代码', [{ id: 'a', title: '代码', children: [] }], new Map([['a', '```\ncode\n```\n']]))
+  if (!doc.ok) throw new Error('fixture')
+  services.storage.seed(PATH, doc.document)
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  const view = wrapper.findComponent(ChapterEditor).vm.getView() as EditorView
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2)))
+  await flushPromises()
+  expect(wrapper.find('.workspace__bar button[aria-label="粗体"]').attributes('disabled')).toBeDefined()
+  expect(wrapper.find('.workspace__bar button[aria-label="代码块"]').attributes('aria-pressed')).toBe('true')
 })

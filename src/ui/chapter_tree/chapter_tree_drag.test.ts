@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ChapterTree from './ChapterTree.vue'
 import type { ChapterTree as ChapterTreeModel } from '../../domain/chapter_tree/chapter_tree.ts'
@@ -243,6 +243,7 @@ test('拖拽与落点反馈不修改章节树', async () => {
 
 // --- 插入线按最终层级缩进 ---
 
+// 插入线从落点层级的编号处开始：行首留白 4px + 每级 16px + 箭头 20px。
 test('before 插入线按目标层级缩进，显示最终落点层级', async () => {
   const { rows } = mountWithRows()
   await rows[2].trigger('dragstart') // c（根层）
@@ -250,7 +251,7 @@ test('before 插入线按目标层级缩进，显示最终落点层级', async (
 
   const line = rows[1].find('.chapter-tree__drop-line')
   expect(line.classes()).toContain('chapter-tree__drop-line--before')
-  expect(line.attributes('style')).toContain('left: 16px')
+  expect(line.attributes('style')).toContain('left: 40px')
 })
 
 test('after 插入线与目标层级对齐', async () => {
@@ -260,7 +261,7 @@ test('after 插入线与目标层级对齐', async () => {
 
   const line = rows[1].find('.chapter-tree__drop-line')
   expect(line.classes()).toContain('chapter-tree__drop-line--after')
-  expect(line.attributes('style')).toContain('left: 16px')
+  expect(line.attributes('style')).toContain('left: 40px')
 })
 
 test('inside 不显示插入线，只高亮整行', async () => {
@@ -272,11 +273,68 @@ test('inside 不显示插入线，只高亮整行', async () => {
   expect(dropClasses(rows[2])).toEqual(['chapter-tree__row--drop-inside'])
 })
 
-test('根层插入线从行首开始，不缩进', async () => {
+test('根层插入线从一级章节的编号处开始', async () => {
   const { rows } = mountWithRows()
   await rows[1].trigger('dragstart') // b（第 1 层）
   await rows[2].trigger('dragover', { clientY: 65 }) // c（根层）上 1/4 → before
 
   const line = rows[2].find('.chapter-tree__drop-line')
-  expect(line.attributes('style')).toContain('left: 0px')
+  expect(line.attributes('style')).toContain('left: 24px')
+})
+
+// --- 松手前说明最终位置 ---
+
+test('落点旁显示松手后章节的新编号（由 Application 执行同一次移动得到）', async () => {
+  const { rows } = mountWithRows()
+  await rows[2].trigger('dragstart') // c
+  await rows[1].trigger('dragover', { clientY: 55 }) // b 之后 → 成为 1.2
+  expect(rows[1].find('.chapter-tree__drop-badge').text()).toBe('→ 1.2')
+
+  await rows[1].trigger('dragover', { clientY: 45 }) // b 中间 → 成为 1.1.1
+  expect(rows[1].find('.chapter-tree__drop-badge').text()).toBe('→ 1.1.1')
+})
+
+test('无效落点不接受放下（不 preventDefault），也不显示编号', async () => {
+  const { rows } = mountWithRows()
+  await rows[0].trigger('dragstart') // a
+  const event = new Event('dragover', { cancelable: true, bubbles: true })
+  Object.assign(event, { clientY: 45 })
+  rows[1].element.dispatchEvent(event) // b 是 a 的后代
+  expect(event.defaultPrevented).toBe(false)
+  expect(rows[1].find('.chapter-tree__drop-badge').exists()).toBe(false)
+})
+
+test('拖到树下方的空白：成为最后一个一级章节', async () => {
+  const { wrapper, rows } = mountWithRows()
+  await rows[1].trigger('dragstart') // b（a 的子章节）
+  const tail = wrapper.find('.chapter-tree__tail')
+  await tail.trigger('dragover')
+  expect(tail.find('.chapter-tree__drop-line--tail').exists()).toBe(true)
+  expect(tail.find('.chapter-tree__drop-badge').text()).toBe('→ 3')
+  await tail.trigger('drop')
+  expect(wrapper.emitted('move')).toEqual([[{ chapterId: 'b', targetChapterId: 'c', position: 'after' }]])
+})
+
+test('拖动有子章节的章节时，子章节一起变淡', async () => {
+  const { rows } = mountWithRows()
+  await rows[0].trigger('dragstart') // a（含 b）
+  expect(rows[1].classes()).toContain('chapter-tree__row--dragging-child')
+  expect(rows[2].classes()).not.toContain('chapter-tree__row--dragging-child')
+})
+
+test('拖入折叠章节的中部并停留，自动展开它', async () => {
+  vi.useFakeTimers()
+  const wrapper = mount(ChapterTree, {
+    props: { tree: outline, selectedId: null, collapsedIds: new Set(['a']), 'onUpdate:collapsedIds': (ids: ReadonlySet<string>) => wrapper.setProps({ collapsedIds: ids }) },
+  })
+  const rows = wrapper.findAll('.chapter-tree__row')
+  placeRow(rows[0].element, 0)
+  placeRow(rows[1].element, 30)
+  await rows[1].trigger('dragstart') // c
+  await rows[0].trigger('dragover', { clientY: 15 }) // a 中间 → inside
+  expect(wrapper.findAll('.chapter-tree__row')).toHaveLength(2)
+  vi.advanceTimersByTime(600)
+  await wrapper.vm.$nextTick()
+  expect(wrapper.findAll('.chapter-tree__row')).toHaveLength(3)
+  vi.useRealTimers()
 })

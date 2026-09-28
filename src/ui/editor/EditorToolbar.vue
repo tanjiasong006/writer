@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { ToolbarCommand, ToolbarState } from './commands.ts'
+import Icon from '../common/Icon.vue'
+import type { IconName } from '../common/icons.ts'
 
 /**
  * 正文工具栏：常用格式与插入入口（docs/decisions.md 第 2 节）。
@@ -20,15 +22,14 @@ const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
 const mod = isMac ? '⌘' : 'Ctrl+'
 
 /**
- * 按钮内容：粗体 / 斜体用字母，其余用 16×16 的单色线条图标（SVG path，颜色跟随文字）。
- * 不用 emoji 或符号字符：它们在不同系统上字形、大小和颜色都不一致。
+ * 按钮内容：粗体 / 斜体用字母，其余用界面的线条图标（ui/common/icons.ts）。
  */
 interface ToolbarItem {
   readonly command: ToolbarCommand
   readonly label: string
   readonly title: string
   readonly text?: string
-  readonly icon?: string
+  readonly icon?: IconName
 }
 
 const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
@@ -41,24 +42,24 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
       command: 'bullet-list',
       label: '无序列表',
       title: '无序列表',
-      icon: 'M6 4h8M6 8h8M6 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01',
+      icon: 'bullet-list',
     },
     {
       command: 'ordered-list',
       label: '有序列表',
       title: '有序列表',
-      icon: 'M7 4h7M7 8h7M7 12h7M2 3l1-.5V6M2 9.5c.5-.6 2-.6 2 .3 0 .8-2 1.2-2 2.2h2',
+      icon: 'ordered-list',
     },
-    { command: 'quote', label: '引用', title: '引用', icon: 'M3 3v10M6.5 5h7M6.5 8h7M6.5 11h5' },
+    { command: 'quote', label: '引用', title: '引用', icon: 'quote' },
   ],
   [
-    { command: 'code-block', label: '代码块', title: '代码块', icon: 'M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5' },
-    { command: 'table', label: '表格', title: '插入表格', icon: 'M2.5 3h11v10h-11zM2.5 6.5h11M2.5 9.8h11M6.2 3v10M9.8 3v10' },
+    { command: 'code-block', label: '代码块', title: '代码块', icon: 'code-block' },
+    { command: 'table', label: '表格', title: '插入表格', icon: 'table' },
     {
       command: 'image',
       label: '图片',
       title: '插入图片',
-      icon: 'M2.5 3h11v10h-11zM2.5 11l3.2-3.2 2.3 2.3 2-2 3.5 3.4M10.5 6h.01',
+      icon: 'image',
     },
   ],
 ]
@@ -88,14 +89,7 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
         @mousedown.prevent
         @click="emit('command', item.command)"
       >
-        <svg
-          v-if="item.icon"
-          class="editor-toolbar__icon"
-          viewBox="0 0 16 16"
-          aria-hidden="true"
-        >
-          <path :d="item.icon" />
-        </svg>
+        <Icon v-if="item.icon" :name="item.icon" />
         <template v-else>{{ item.text }}</template>
       </button>
     </div>
@@ -106,72 +100,77 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
 </template>
 
 <style scoped>
+/*
+ * 工具栏是一行安静的图标按钮：默认次级前景色，没有边框和底色；
+ * hover 出现浅底，当前格式（按下）用强调色的浅底与文字。
+ */
 .editor-toolbar {
   container-type: inline-size;
   display: flex;
-  gap: 12px;
-  width: 100%;
-  max-width: 760px;
-  box-sizing: border-box;
-  margin: 0 auto;
-  padding: 4px 28px 8px;
-  border-bottom: 1px solid #f3f4f6;
+  align-items: center;
+  gap: var(--space-5);
+  min-width: 0;
 }
 
 .editor-toolbar__group {
   display: flex;
-  gap: 2px;
+  flex: none;
+  gap: var(--space-1);
 }
 
 .editor-toolbar__context {
   display: flex;
-  margin-left: auto;
+  flex: none;
+  margin-left: var(--space-2);
+  padding-left: var(--space-5);
+  border-left: 1px solid var(--color-separator);
 }
 
-/* 格式按钮与 context 按钮并排需要约 600px（含左右内边距）。 */
-@container (max-width: 620px) {
+/* 格式按钮与图片布局按钮并排需要约 560px；更窄时图片布局按钮出现期间暂时代替格式按钮，工具栏仍只有一行。 */
+@container (max-width: 560px) {
   .editor-toolbar--context .editor-toolbar__group {
     display: none;
+  }
+
+  .editor-toolbar--context .editor-toolbar__context {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
   }
 }
 
 .editor-toolbar__button {
-  min-width: 28px;
-  height: 28px;
-  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-h-m);
+  height: var(--control-h-m);
+  padding: 0 var(--space-3);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-m);
   background: none;
-  color: #374151;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.editor-toolbar__icon {
-  display: block;
-  width: 16px;
-  height: 16px;
-  margin: 0 auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  color: var(--color-text-secondary);
+  font-size: var(--text-l);
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
 }
 
 .editor-toolbar__button:hover:not(:disabled) {
-  background: rgba(15, 23, 42, 0.06);
+  background: var(--color-fill-hover);
+  color: var(--color-text);
+}
+
+.editor-toolbar__button:active:not(:disabled) {
+  background: var(--color-fill-pressed);
 }
 
 .editor-toolbar__button--active,
 .editor-toolbar__button--active:hover:not(:disabled) {
-  background: rgba(37, 99, 235, 0.12);
-  color: #1d4ed8;
+  background: var(--color-accent-fill);
+  color: var(--color-accent-text);
 }
 
 .editor-toolbar__button:disabled {
-  opacity: 0.35;
-  cursor: default;
+  color: var(--color-text-disabled);
 }
 
 .editor-toolbar__button--bold {
@@ -179,7 +178,8 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
 }
 
 .editor-toolbar__button--italic {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 15px;
   font-style: italic;
-  font-family: Georgia, serif;
 }
 </style>

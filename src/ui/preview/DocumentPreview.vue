@@ -84,13 +84,16 @@ function onClick(event: MouseEvent): void {
  * 标题标签与层级：h2 = 第 1 级，h3 = 第 2 级，h4 及更深 = 第 3 级（与 Rust render::html 的输出一致）。
  */
 .document-preview {
-  max-width: 760px;
+  max-width: var(--doc-column);
+  box-sizing: border-box;
   margin: 0 auto;
-  padding: 32px 32px 40vh;
+  padding: var(--space-10) var(--doc-gutter) 40vh;
   font-family: var(--doc-body-font);
   font-size: var(--doc-body-size);
   line-height: var(--doc-line-height);
-  color: #111827;
+  color: var(--color-doc-text);
+  -webkit-user-select: text;
+  user-select: text;
   /* 应用界面关闭了字体合成（App.vue）；正文要像 Word / PDF 一样为没有斜体、粗体字形的中文字体合成斜体与粗体。 */
   font-synthesis: weight style;
   /* 过长的 URL、路径与导出一致地在任意字符处折行，不撑出横向滚动。 */
@@ -138,8 +141,8 @@ function onClick(event: MouseEvent): void {
 }
 
 .document-preview :deep(.chapter-number) {
-  margin-right: 10px;
-  color: #6b7280;
+  margin-right: 0.6em;
+  color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -150,8 +153,8 @@ function onClick(event: MouseEvent): void {
 .document-preview :deep(blockquote) {
   margin: 1em 0;
   padding: 0 1em;
-  border-left: 3px solid #d1d5db;
-  color: #4b5563;
+  border-left: 3px solid var(--color-doc-rule);
+  color: var(--color-doc-muted);
   font-family: var(--doc-quote-font);
   font-size: var(--doc-quote-size);
 }
@@ -159,14 +162,14 @@ function onClick(event: MouseEvent): void {
 .document-preview :deep(pre) {
   overflow-x: auto;
   padding: 12px 14px;
-  border-radius: 6px;
-  background: #f3f4f6;
+  border-radius: var(--radius-m);
+  background: var(--color-doc-fill);
   font-size: var(--doc-code-size);
   line-height: 1.6;
 }
 
 .document-preview :deep(code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .document-preview :deep(:not(pre) > code) {
@@ -183,11 +186,11 @@ function onClick(event: MouseEvent): void {
 .document-preview :deep(th),
 .document-preview :deep(td) {
   padding: 6px 10px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--color-doc-rule);
 }
 
 .document-preview :deep(th) {
-  background: #f9fafb;
+  background: var(--color-doc-header-fill);
 }
 
 /* 图片尺寸规则与编辑器、Word / PDF 导出相同（见 ChapterEditor 与 export::images::display_size_pt）。 */
@@ -235,8 +238,8 @@ function onClick(event: MouseEvent): void {
 }
 
 .document-preview :deep(figcaption) {
-  margin-top: 4px;
-  color: #6b7280;
+  margin-top: var(--space-2);
+  color: var(--color-doc-muted);
   font-family: var(--doc-caption-font);
   font-size: var(--doc-caption-size);
 }
@@ -244,13 +247,13 @@ function onClick(event: MouseEvent): void {
 .document-preview :deep(.missing-image) {
   display: inline-block;
   padding: 8px 12px;
-  border: 1px dashed #f87171;
-  border-radius: 4px;
-  color: #b91c1c;
+  border: 1px dashed var(--color-danger);
+  border-radius: var(--radius-s);
+  color: var(--color-danger-text);
   font-size: 14px;
 }
 
 .document-preview :deep(.link) {
-  color: #2563eb;
+  color: var(--color-accent-text);
 }
 </style>

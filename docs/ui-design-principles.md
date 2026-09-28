@@ -43,7 +43,7 @@ Writer 首先是一款成熟的桌面写作工具，不是网页后台或 SaaS D
 focus / disabled、动画时长与缓动，不应由各组件随意定义孤立数值。
 
 - 新增视觉参数前，先检查现有 token 和周围组件已使用的值能否表达。
-- 当前状况：界面基础样式在 `src/App.vue` 的 `:root`，组件多为硬编码数值，尚无集中的界面 token；
+- 当前状况：界面 token 集中在 `src/ui/tokens.css`，全局基础样式在 `src/ui/base.css`（应用与 Storybook 共用）；
   文档主题的 CSS 变量（`ui/document_style/theme_css.ts`）只用于正文排版，不是界面 token。
 - 可以在触及相关区域时逐步把重复数值收拢为共享 token；不要为了"建立设计系统"大规模重写稳定代码。
 

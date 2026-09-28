@@ -41,17 +41,20 @@ const detail = computed(() =>
 </template>
 
 <style scoped>
+/* 次级信息：平时只是一行很弱的文字，失败时变为危险色并提供重试。 */
 .save-status {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  column-gap: var(--space-3);
   min-width: 0;
-  font-size: 12px;
-  color: #6b7280;
+  min-height: var(--control-h-s);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-s);
 }
 
 .save-status--failed {
-  color: #b91c1c;
+  color: var(--color-danger-text);
 }
 
 .save-status__label {
@@ -59,21 +62,30 @@ const detail = computed(() =>
   white-space: nowrap;
 }
 
+/* 失败原因是用户需要据此处理的信息：完整显示在状态下面一行，不截断。 */
 .save-status__detail {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  order: 3;
+  flex-basis: 100%;
+  padding-bottom: var(--space-2);
+  line-height: var(--leading-tight);
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .save-status__retry {
   flex: none;
-  padding: 2px 8px;
-  border: 1px solid currentColor;
-  border-radius: 4px;
+  height: var(--control-h-s);
+  margin-left: auto;
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-s);
   background: none;
-  color: inherit;
-  font-size: 12px;
-  cursor: pointer;
+  color: var(--color-accent-text);
+  font: inherit;
+  font-weight: var(--weight-medium);
+}
+
+.save-status__retry:hover {
+  background: var(--color-accent-fill);
 }
 </style>

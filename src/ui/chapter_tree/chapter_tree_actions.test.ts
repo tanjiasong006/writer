@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import ChapterTree from './ChapterTree.vue'
 import type { ChapterTree as ChapterTreeModel } from '../../domain/chapter_tree/chapter_tree.ts'
 
@@ -45,7 +45,7 @@ test('节点菜单包含新建、移动、重命名、删除，点击后关闭',
 
   const labels = wrapper
     .findAll('.chapter-tree__menu button')
-    .map((b) => b.text().replace(/(⌥⇧|Alt\+Shift\+).$/, ''))
+    .map((b) => b.find('.popup-menu__label').text())
   expect(labels).toEqual(['新建同级章节', '新建子章节', '上移', '下移', '升级', '降级', '重命名', '删除'])
 
   await clickMenu(wrapper, '新建同级章节')
@@ -164,4 +164,26 @@ test('F2 发出 start-rename', async () => {
   const label = wrapper.findAll('.chapter-tree__row')[1].find('.chapter-tree__label')
   await label.trigger('keydown', { key: 'F2' })
   expect(wrapper.emitted('start-rename')).toEqual([['b']])
+})
+
+test('右键打开节点菜单，不改变选中章节，只标出菜单作用的行', async () => {
+  const wrapper = mountTree()
+  const row = wrapper.findAll('.chapter-tree__row')[1]
+  await row.trigger('contextmenu', { clientX: 40, clientY: 50 })
+  expect(wrapper.find('.chapter-tree__menu').exists()).toBe(true)
+  expect(row.classes()).toContain('chapter-tree__row--menu-target')
+  expect(wrapper.emitted('select')).toBeUndefined()
+})
+
+test('Shift+F10 打开节点菜单，第一项获得焦点；↓ 移到下一项；Esc 关闭', async () => {
+  const wrapper = mount(ChapterTree, { props: { tree: outline, selectedId: null }, attachTo: document.body })
+  await wrapper.findAll('.chapter-tree__label')[0].trigger('keydown', { key: 'F10', shiftKey: true })
+  await flushPromises()
+  const items = wrapper.findAll('.chapter-tree__menu button')
+  expect(document.activeElement).toBe(items[0].element)
+  await wrapper.find('.chapter-tree__menu').trigger('keydown', { key: 'ArrowDown' })
+  expect(document.activeElement).toBe(items[1].element)
+  await wrapper.find('.chapter-tree__menu').trigger('keydown', { key: 'Escape' })
+  expect(wrapper.find('.chapter-tree__menu').exists()).toBe(false)
+  wrapper.unmount()
 })

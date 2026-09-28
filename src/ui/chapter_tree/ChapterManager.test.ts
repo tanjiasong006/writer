@@ -67,8 +67,11 @@ async function openMenu(wrapper: VueWrapper, rowIndex: number): Promise<void> {
   await rows(wrapper)[rowIndex].find('.chapter-tree__more').trigger('click')
 }
 
+/** 菜单项旁可能显示快捷键，按菜单项的名称查找。 */
 async function menuItem(wrapper: VueWrapper, label: string): Promise<void> {
-  await button(wrapper, label).trigger('click')
+  const item = wrapper.findAll('.chapter-tree__menu button').find((b) => b.find('.popup-menu__label').text() === label)
+  if (!item) throw new Error(`菜单项不存在：${label}`)
+  await item.trigger('click')
 }
 
 function renameInput(wrapper: VueWrapper) {
@@ -88,7 +91,7 @@ test('空树显示空状态与新建入口', () => {
   const wrapper = mountManager([])
   expect(rowTexts(wrapper)).toEqual([])
   expect(wrapper.find('.chapter-tree__empty').text()).toContain('暂无章节')
-  expect(button(wrapper, '+ 新建第一个章节').exists()).toBeTruthy()
+  expect(button(wrapper, '新建第一个章节').exists()).toBeTruthy()
 })
 
 // --- 新建 ---
@@ -247,7 +250,7 @@ test('删除确认：整棵子树被删除，改为选中相邻章节', async ()
   await rows(wrapper)[0].trigger('click') // a
   await openMenu(wrapper, 0)
   await menuItem(wrapper, '删除')
-  await button(wrapper, '确认删除').trigger('click')
+  await button(wrapper, '删除').trigger('click')
   await flushPromises()
 
   expect(rowTexts(wrapper)).toEqual(['1B'])
@@ -260,7 +263,7 @@ test('选中章节在被删除的子树中：改为选中被删章节的相邻�
   await rows(wrapper)[1].trigger('click') // a1
   await openMenu(wrapper, 0) // a
   await menuItem(wrapper, '删除')
-  await button(wrapper, '确认删除').trigger('click')
+  await button(wrapper, '删除').trigger('click')
   await flushPromises()
 
   expect(rowTexts(wrapper)).toEqual(['1B'])
@@ -271,7 +274,7 @@ test('删除唯一的章节后没有选中章节', async () => {
   const wrapper = mountManager([{ id: 'only', title: '唯一', children: [] }], 'only')
   await openMenu(wrapper, 0)
   await menuItem(wrapper, '删除')
-  await button(wrapper, '确认删除').trigger('click')
+  await button(wrapper, '删除').trigger('click')
   await flushPromises()
   expect(wrapper.props('selectedId' as never)).toBeNull()
 })
@@ -307,6 +310,37 @@ test('删除确认打开后焦点进入取消按钮，Esc 取消', async () => {
 
   await cancelButton.trigger('keydown', { key: 'Escape' })
   expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
+})
+
+test('删除确认是模态的：Tab 只在两个按钮之间循环；取消后焦点回到该章节', async () => {
+  const wrapper = mountManager()
+  await openMenu(wrapper, 0)
+  await menuItem(wrapper, '删除')
+  await nextTick()
+
+  const cancelButton = button(wrapper, '取消')
+  const deleteButton = button(wrapper, '删除')
+  await cancelButton.trigger('keydown', { key: 'Tab' })
+  expect(document.activeElement).toBe(deleteButton.element)
+  await deleteButton.trigger('keydown', { key: 'Tab' })
+  expect(document.activeElement).toBe(cancelButton.element)
+  await cancelButton.trigger('keydown', { key: 'Tab', shiftKey: true })
+  expect(document.activeElement).toBe(deleteButton.element)
+
+  await cancelButton.trigger('click')
+  await flushPromises()
+  expect(document.activeElement).toBe(wrapper.find('.chapter-tree__label[data-chapter-id="a"]').element)
+})
+
+test('确认删除后焦点落在删除后选中的章节上', async () => {
+  const wrapper = mountManager(nested, 'b')
+  await openMenu(wrapper, 4) // b
+  await menuItem(wrapper, '删除')
+  await nextTick()
+  await button(wrapper, '删除').trigger('click')
+  await flushPromises()
+  const selected = wrapper.find('.chapter-tree__row--selected .chapter-tree__label')
+  expect(document.activeElement).toBe(selected.element)
 })
 
 // --- 删除确认规则（ui-spec §23）---

@@ -21,6 +21,13 @@ import {
 } from '../../application/document_output.ts'
 import { messageForOutputFailure } from './output_messages.ts'
 import DocumentStylePanel from '../document_style/DocumentStylePanel.vue'
+import EditorToolbar from '../editor/EditorToolbar.vue'
+import ImageLayoutControls from '../editor/ImageLayoutControls.vue'
+import type { ToolbarCommand, ToolbarState } from '../editor/commands.ts'
+import type { SelectedFigure } from '../editor/image_layout.ts'
+import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
+import Toast from '../common/Toast.vue'
+import Icon from '../common/Icon.vue'
 import {
   resolveTheme,
   type ImageOverride,
@@ -29,16 +36,23 @@ import {
 } from '../../domain/document_style/document_style.ts'
 
 /**
- * 已打开项目的工作区：顶栏（标题、保存状态、项目操作）+ 左侧章节树 + 右侧正文区。
- * 两侧独立滚动（ui-spec §27）。文档修改一律经 ProjectSession。
+ * 已打开项目的工作区。
+ *
+ * - 左侧栏：文档名与保存状态（文档菜单：新建 / 打开）、章节树；宽度可拖动调整。
+ * - 右侧：一行顶栏（左边是正文工具，右边是样式 / 预览 / 导出）+ 正文编辑器或全文预览。
+ *   正文工具由编辑器提供状态与命令，放在顶栏里，正文上方不再叠加第二条工具栏。
+ * - 两侧独立滚动（ui-spec §27）。提示浮在正文区底部，不挤压布局。文档修改一律经 ProjectSession。
  */
 const props = defineProps<{
   session: ProjectSession
+  /** 应用层的提示（如打开项目时的说明），与工作区自己的提示显示在同一处。 */
+  notice?: string | null
 }>()
 
 const emit = defineEmits<{
   'new-project': []
   'open-project': []
+  'dismiss-notice': []
 }>()
 
 const { shell, output } = useServices()
@@ -81,6 +95,12 @@ function onKeydown(event: KeyboardEvent): void {
   if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 's') {
     event.preventDefault()
     void props.session.save()
+    return
+  }
+  // 全文预览中按 Esc 回到编辑（菜单、面板、对话框、重命名自己处理的 Esc 不会走到这里）。
+  if (event.key === 'Escape' && !event.defaultPrevented && mode.value === 'preview') {
+    event.preventDefault()
+    void setMode('edit')
   }
 }
 
@@ -127,12 +147,22 @@ async function refreshPreview(): Promise<void> {
   }
 }
 
-function togglePreview(): void {
-  mode.value = mode.value === 'edit' ? 'preview' : 'edit'
-  if (mode.value === 'preview') {
+async function setMode(next: 'edit' | 'preview'): Promise<void> {
+  if (mode.value === next) return
+  mode.value = next
+  scrolled.value = false
+  if (next === 'preview') {
     previewHtml.value = ''
     void refreshPreview()
+    return
   }
+  // 从预览回到编辑：继续在当前章节写作。
+  await nextTick()
+  editor.value?.focus()
+}
+
+function togglePreview(): void {
+  void setMode(mode.value === 'edit' ? 'preview' : 'edit')
 }
 
 // 预览打开时，文档变化后防抖刷新。
@@ -149,7 +179,38 @@ onBeforeUnmount(() => {
   if (previewTimer !== null) clearTimeout(previewTimer)
 })
 
-const exportMenuOpen = ref(false)
+const exportMenu = ref<(MenuAnchor & { keyboard: boolean }) | null>(null)
+const EXPORT_ITEMS: readonly MenuEntry[] = [
+  { id: 'docx', label: '导出 Word（.docx）' },
+  { id: 'pdf', label: '导出 PDF' },
+]
+
+function toggleExportMenu(event: MouseEvent): void {
+  exportMenu.value = exportMenu.value ? null : anchorOf(event, 'end')
+}
+
+/** 菜单按钮的位置；由键盘（Enter / Space，detail 为 0）打开时第一项获得焦点。 */
+function anchorOf(event: MouseEvent, align: 'start' | 'end'): MenuAnchor & { keyboard: boolean } {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  return { rect, align, keyboard: event.detail === 0 }
+}
+
+/** 导出成功的提示在一段时间后自动消失；错误一直显示到用户关闭。 */
+const NOTICE_DURATION_MS = 8000
+let noticeTimer: ReturnType<typeof setTimeout> | null = null
+
+function showExportNotice(notice: { readonly message: string; readonly path: string }): void {
+  exportNotice.value = notice
+  if (noticeTimer !== null) clearTimeout(noticeTimer)
+  noticeTimer = setTimeout(() => {
+    noticeTimer = null
+    exportNotice.value = null
+  }, NOTICE_DURATION_MS)
+}
+
+onBeforeUnmount(() => {
+  if (noticeTimer !== null) clearTimeout(noticeTimer)
+})
 /** 正在导出的格式；导出期间禁用导出菜单，避免重复写同一文件。 */
 const exporting = ref<ExportFormat | null>(null)
 const exportNotice = ref<{ readonly message: string; readonly path: string } | null>(null)
@@ -161,7 +222,7 @@ function exportBaseName(title: string): string {
 }
 
 async function exportAs(format: ExportFormat): Promise<void> {
-  exportMenuOpen.value = false
+  exportMenu.value = null
   actionError.value = null
   exportNotice.value = null
   const target = await shell.pickExportPath(format, exportBaseName(document.value.title))
@@ -175,13 +236,13 @@ async function exportAs(format: ExportFormat): Promise<void> {
     }
     const fileName = target.split(/[\\/]/).pop() ?? target
     const missing = result.value.missingImages.length
-    exportNotice.value = {
+    showExportNotice({
       message:
         missing > 0
           ? `已导出 ${fileName}，其中 ${missing} 张图片无法嵌入，已用文字占位。`
           : `已导出 ${fileName}`,
       path: target,
-    }
+    })
   } finally {
     exporting.value = null
   }
@@ -213,7 +274,10 @@ function resolveImage(reference: string): string | null {
 
 /** 章节树中按 Enter：回到编辑模式并把焦点交给正文编辑器。 */
 async function openChapter(): Promise<void> {
-  mode.value = 'edit'
+  if (mode.value !== 'edit') {
+    await setMode('edit')
+    return
+  }
   await nextTick()
   editor.value?.focus()
 }
@@ -221,6 +285,8 @@ async function openChapter(): Promise<void> {
 function chapterHasContent(chapterId: ChapterId): boolean {
   return hasContent(document.value, chapterId)
 }
+
+const titleInput = ref<HTMLInputElement | null>(null)
 
 function commitTitle(event: Event): void {
   const input = event.target as HTMLInputElement
@@ -254,6 +320,22 @@ const selectedNumber = computed(() =>
 const documentStyle = computed(() => document.value.style)
 const theme = computed(() => resolveTheme(documentStyle.value))
 const stylePanelOpen = ref(false)
+const styleButton = ref<HTMLButtonElement | null>(null)
+const stylePanel = ref<HTMLElement | null>(null)
+
+async function toggleStylePanel(): Promise<void> {
+  stylePanelOpen.value = !stylePanelOpen.value
+  if (!stylePanelOpen.value) return
+  await nextTick()
+  stylePanel.value?.focus({ preventScroll: true })
+}
+
+/** 用键盘关闭面板时焦点回到"样式"按钮。 */
+function closeStylePanel(event?: KeyboardEvent): void {
+  event?.preventDefault()
+  stylePanelOpen.value = false
+  if (event) styleButton.value?.focus()
+}
 
 function selectTheme(id: ThemeId): void {
   props.session.selectTheme(id)
@@ -266,101 +348,292 @@ function overrideStyle(patch: StyleOverrides): void {
 function setImageLayout(key: string, layout: ImageOverride | null): void {
   props.session.setImageLayout(key, layout)
 }
+
+/** 编辑器报告的工具栏状态与选中的图片（显示在顶栏）。 */
+const tools = shallowRef<ToolbarState | null>(null)
+const figure = shallowRef<SelectedFigure | null>(null)
+
+function showTools(state: ToolbarState, selected: SelectedFigure | null): void {
+  tools.value = state
+  figure.value = selected
+}
+
+function runCommand(command: ToolbarCommand): void {
+  editor.value?.runCommand(command)
+}
+
+function changeFigureLayout(patch: ImageOverride): void {
+  editor.value?.changeFigureLayout(patch)
+}
+
+/** 正文滚动离开顶部后，顶栏下方出现一条分隔线，说明内容在它下面继续。 */
+const scrolled = ref(false)
+
+function onMainScroll(event: Event): void {
+  const target = event.target as HTMLElement
+  if (target.classList?.contains('chapter-editor__scroller') || target.classList?.contains('workspace__preview')) {
+    scrolled.value = target.scrollTop > 0
+  }
+}
+
+/** 文档菜单：重命名文档、新建 / 打开其他文档。 */
+const documentMenu = ref<(MenuAnchor & { keyboard: boolean }) | null>(null)
+const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
+const mod = isMac ? '⌘' : 'Ctrl+'
+const DOCUMENT_ITEMS: readonly MenuEntry[] = [
+  { id: 'rename', label: '重命名文档' },
+  { separator: true },
+  { id: 'new', label: '新建文档…', shortcut: `${mod}N` },
+  { id: 'open', label: '打开文档…', shortcut: `${mod}O` },
+]
+
+function toggleDocumentMenu(event: MouseEvent): void {
+  documentMenu.value = documentMenu.value ? null : anchorOf(event, 'start')
+}
+
+async function onDocumentMenu(id: string): Promise<void> {
+  documentMenu.value = null
+  if (id === 'new') emit('new-project')
+  else if (id === 'open') emit('open-project')
+  else {
+    await nextTick()
+    titleInput.value?.focus()
+    titleInput.value?.select()
+  }
+}
+
+/**
+ * 侧栏宽度（ui-spec §31）：默认 260px，拖动分隔线在 180–480px 之间调整，双击恢复默认；
+ * 同时保证正文区至少留出 MIN_MAIN 宽度。宽度是本机的界面偏好，不随项目保存。
+ */
+const SIDEBAR_DEFAULT = 260
+const SIDEBAR_MIN = 180
+const SIDEBAR_MAX = 480
+const MIN_MAIN = 440
+const SIDEBAR_KEY = 'writer.sidebar-width'
+
+function storedSidebarWidth(): number {
+  try {
+    const value = Number(window.localStorage.getItem(SIDEBAR_KEY))
+    return Number.isFinite(value) && value > 0 ? value : SIDEBAR_DEFAULT
+  } catch {
+    return SIDEBAR_DEFAULT
+  }
+}
+
+const sidebarPreferred = ref(storedSidebarWidth())
+const windowWidth = ref(window.innerWidth)
+const sidebarMax = computed(() => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, windowWidth.value - MIN_MAIN)))
+const sidebarWidth = computed(() => Math.round(Math.min(Math.max(sidebarPreferred.value, SIDEBAR_MIN), sidebarMax.value)))
+const resizing = ref(false)
+
+function onWindowResize(): void {
+  windowWidth.value = window.innerWidth
+}
+
+onMounted(() => window.addEventListener('resize', onWindowResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onWindowResize))
+
+function setSidebarWidth(width: number): void {
+  sidebarPreferred.value = Math.min(Math.max(width, SIDEBAR_MIN), sidebarMax.value)
+  try {
+    window.localStorage.setItem(SIDEBAR_KEY, String(Math.round(sidebarPreferred.value)))
+  } catch {
+    // 偏好没有保存下来不影响使用。
+  }
+}
+
+function startResize(event: PointerEvent): void {
+  if (event.button !== 0) return
+  event.preventDefault()
+  const handle = event.currentTarget as HTMLElement
+  const startX = event.clientX
+  const startWidth = sidebarWidth.value
+  resizing.value = true
+  handle.setPointerCapture?.(event.pointerId)
+  const move = (moveEvent: PointerEvent) => setSidebarWidth(startWidth + moveEvent.clientX - startX)
+  const end = () => {
+    resizing.value = false
+    handle.removeEventListener('pointermove', move)
+    handle.removeEventListener('pointerup', end)
+    handle.removeEventListener('pointercancel', end)
+  }
+  handle.addEventListener('pointermove', move)
+  handle.addEventListener('pointerup', end)
+  handle.addEventListener('pointercancel', end)
+}
+
+const RESIZE_STEP = 16
+
+function onResizeKey(event: KeyboardEvent): void {
+  const next: Record<string, number> = {
+    ArrowLeft: sidebarWidth.value - RESIZE_STEP,
+    ArrowRight: sidebarWidth.value + RESIZE_STEP,
+    Home: SIDEBAR_MIN,
+    End: sidebarMax.value,
+  }
+  if (!(event.key in next)) return
+  event.preventDefault()
+  setSidebarWidth(next[event.key])
+}
 </script>
 
+
 <template>
-  <div class="workspace">
-    <header class="workspace__bar">
-      <input
-        class="workspace__title"
-        type="text"
-        aria-label="文档标题"
-        :value="document.title"
-        @change="commitTitle"
-        @keydown.enter="($event.target as HTMLInputElement).blur()"
-      />
-      <SaveStatus :status="status" :error="lastError" @retry="session.save()" />
-      <div class="workspace__actions">
-        <div class="workspace__style">
+  <div
+    class="workspace"
+    :class="{ 'workspace--resizing': resizing }"
+    :style="{ '--sidebar-w': `${sidebarWidth}px` }"
+  >
+    <aside class="workspace__sidebar" aria-label="文档结构">
+      <div class="workspace__document">
+        <div class="workspace__document-row">
+          <input
+            ref="titleInput"
+            class="workspace__title"
+            type="text"
+            aria-label="文档标题"
+            spellcheck="false"
+            :value="document.title"
+            :title="document.title"
+            @change="commitTitle"
+            @keydown.enter="($event.target as HTMLInputElement).blur()"
+          />
           <button
             type="button"
-            aria-haspopup="dialog"
-            :aria-expanded="stylePanelOpen"
-            title="整本文档的字体、字号与主题"
-            @click="stylePanelOpen = !stylePanelOpen"
-          >
-            样式
-          </button>
-          <div v-if="stylePanelOpen" class="workspace__backdrop" @click="stylePanelOpen = false"></div>
-          <div
-            v-if="stylePanelOpen"
-            class="workspace__popover"
-            role="dialog"
-            aria-label="文档样式"
-            @keydown.esc="stylePanelOpen = false"
-          >
-            <DocumentStylePanel
-              :document-style="documentStyle"
-              @select-theme="selectTheme"
-              @override="overrideStyle"
-              @reset="session.resetStyleOverrides()"
-            />
-          </div>
-        </div>
-        <button type="button" class="workspace__preview-toggle" @click="togglePreview">
-          {{ mode === 'preview' ? '返回编辑' : '预览' }}
-        </button>
-        <div class="workspace__export">
-          <button
-            type="button"
+            class="workspace__icon-button"
+            tabindex="0"
+            aria-label="文档菜单"
             aria-haspopup="menu"
+            :aria-expanded="documentMenu !== null"
+            @click="toggleDocumentMenu"
+          >
+            <Icon name="chevron-down" />
+          </button>
+        </div>
+        <SaveStatus class="workspace__save-status" :status="status" :error="lastError" @retry="session.save()" />
+      </div>
+      <PopupMenu
+        v-if="documentMenu"
+        label="文档"
+        :items="DOCUMENT_ITEMS"
+        :anchor="documentMenu"
+        :keyboard="documentMenu.keyboard"
+        @select="onDocumentMenu"
+        @close="documentMenu = null"
+      />
+
+      <ChapterManager
+        v-model:selected-id="selectedId"
+        v-model:collapsed-ids="collapsedIds"
+        class="workspace__chapters"
+        :tree="document.tree"
+        :has-content="chapterHasContent"
+        @update:tree="applyTree"
+        @open="openChapter"
+      />
+
+      <div
+        class="workspace__resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整侧栏宽度"
+        :aria-valuenow="sidebarWidth"
+        :aria-valuemin="SIDEBAR_MIN"
+        :aria-valuemax="sidebarMax"
+        tabindex="0"
+        @pointerdown="startResize"
+        @dblclick="setSidebarWidth(SIDEBAR_DEFAULT)"
+        @keydown="onResizeKey"
+      ></div>
+    </aside>
+
+    <main class="workspace__main" @scroll.capture="onMainScroll">
+      <header class="workspace__bar" :class="{ 'workspace__bar--scrolled': scrolled }">
+        <div class="workspace__tools">
+          <EditorToolbar
+            v-if="mode === 'edit' && selectedChapter"
+            :state="tools"
+            @command="runCommand"
+          >
+            <template v-if="figure" #context>
+              <ImageLayoutControls :layout="figure.layout" @change="changeFigureLayout" />
+            </template>
+          </EditorToolbar>
+          <span v-else-if="mode === 'preview'" class="workspace__mode">全文预览</span>
+        </div>
+
+        <div class="workspace__actions">
+          <div class="workspace__anchor">
+            <button
+              ref="styleButton"
+              type="button"
+              class="workspace__action"
+              tabindex="0"
+              :class="{ 'workspace__action--open': stylePanelOpen }"
+              aria-haspopup="dialog"
+              :aria-expanded="stylePanelOpen"
+              title="整本文档的字体、字号与主题"
+              @click="toggleStylePanel"
+            >
+              样式
+            </button>
+            <div v-if="stylePanelOpen" class="workspace__backdrop" @click="closeStylePanel()"></div>
+            <div
+              v-if="stylePanelOpen"
+              ref="stylePanel"
+              class="workspace__popover"
+              role="dialog"
+              aria-label="文档样式"
+              tabindex="-1"
+              @keydown.esc="closeStylePanel"
+            >
+              <DocumentStylePanel
+                :document-style="documentStyle"
+                @select-theme="selectTheme"
+                @override="overrideStyle"
+                @reset="session.resetStyleOverrides()"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            class="workspace__action"
+            tabindex="0"
+            :class="{ 'workspace__action--on': mode === 'preview' }"
+            :aria-pressed="mode === 'preview'"
+            :title="mode === 'preview' ? '回到编辑（Esc）' : '按导出的样子查看全文'"
+            @click="togglePreview"
+          >
+            预览
+          </button>
+          <button
+            type="button"
+            class="workspace__action"
+            tabindex="0"
+            :class="{ 'workspace__action--open': exportMenu !== null }"
+            aria-haspopup="menu"
+            :aria-expanded="exportMenu !== null"
             :disabled="exporting !== null"
-            @click="exportMenuOpen = !exportMenuOpen"
+            @click="toggleExportMenu"
           >
             {{ exporting ? '正在导出…' : '导出' }}
           </button>
-          <!-- 透明遮罩：点击菜单以外任意处关闭菜单。 -->
-          <div v-if="exportMenuOpen" class="workspace__backdrop" @click="exportMenuOpen = false"></div>
-          <ul
-            v-if="exportMenuOpen"
-            class="workspace__export-menu"
-            role="menu"
-            @keydown.esc="exportMenuOpen = false"
-          >
-            <li><button type="button" role="menuitem" @click="exportAs('docx')">导出 Word（.docx）</button></li>
-            <li><button type="button" role="menuitem" @click="exportAs('pdf')">导出 PDF</button></li>
-          </ul>
+          <PopupMenu
+            v-if="exportMenu"
+            label="导出"
+            menu-class="workspace__export-menu"
+            backdrop-class="workspace__backdrop"
+            :items="EXPORT_ITEMS"
+            :anchor="exportMenu"
+            :keyboard="exportMenu.keyboard"
+            @select="exportAs($event as ExportFormat)"
+            @close="exportMenu = null"
+          />
         </div>
-        <button type="button" @click="emit('new-project')">新建</button>
-        <button type="button" @click="emit('open-project')">打开</button>
-      </div>
-    </header>
+      </header>
 
-    <p v-if="exportNotice" class="workspace__notice" role="status">
-      <span>{{ exportNotice.message }}</span>
-      <span>
-        <button type="button" @click="shell.revealFile(exportNotice.path)">在文件夹中显示</button>
-        <button type="button" aria-label="关闭提示" @click="exportNotice = null">×</button>
-      </span>
-    </p>
-    <p v-if="actionError" class="workspace__error" role="alert">
-      {{ actionError }}
-      <button type="button" aria-label="关闭提示" @click="actionError = null">×</button>
-    </p>
-
-    <div class="workspace__body">
-      <aside class="workspace__sidebar">
-        <ChapterManager
-          v-model:selected-id="selectedId"
-          v-model:collapsed-ids="collapsedIds"
-          :tree="document.tree"
-          :has-content="chapterHasContent"
-          @update:tree="applyTree"
-          @open="openChapter"
-        />
-      </aside>
-
-      <main class="workspace__main">
+      <div class="workspace__content">
         <div v-if="mode === 'preview'" class="workspace__preview">
           <p v-if="previewError" class="workspace__preview-error" role="alert">{{ previewError }}</p>
           <DocumentPreview
@@ -374,6 +647,7 @@ function setImageLayout(key: string, layout: ImageOverride | null): void {
         <ChapterEditor
           v-else-if="selectedChapter && selectedId !== null"
           ref="editor"
+          external-toolbar
           :chapter-id="selectedId"
           :content="document.contents.get(selectedId) ?? ''"
           :number="selectedNumber"
@@ -384,173 +658,279 @@ function setImageLayout(key: string, layout: ImageOverride | null): void {
           @change="updateContent"
           @request-image="insertImage"
           @image-layout="setImageLayout"
+          @tools="showTools"
         />
-        <p v-else class="workspace__placeholder">选择或新建一个章节开始写作。</p>
-      </main>
-    </div>
+        <div v-else class="workspace__placeholder">
+          <p>{{ document.tree.length === 0 ? '新建一个章节，开始写作。' : '在左侧选择一个章节，开始写作。' }}</p>
+        </div>
+      </div>
+
+      <div class="workspace__toasts">
+        <Toast v-if="notice" class="app__notice" @dismiss="emit('dismiss-notice')">{{ notice }}</Toast>
+        <Toast v-if="actionError" class="workspace__error" tone="error" @dismiss="actionError = null">
+          {{ actionError }}
+        </Toast>
+        <Toast v-if="exportNotice" class="workspace__notice" @dismiss="exportNotice = null">
+          {{ exportNotice.message }}
+          <template #actions>
+            <button type="button" @click="shell.revealFile(exportNotice.path)">在文件夹中显示</button>
+          </template>
+        </Toast>
+      </div>
+    </main>
   </div>
 </template>
 
 <style scoped>
 .workspace {
   display: flex;
-  flex-direction: column;
   height: 100vh;
 }
 
-.workspace__bar {
+.workspace--resizing {
+  cursor: col-resize;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 侧栏：略带色调的安静表面，与正文区之间只有一条细分隔线。 */
+.workspace__sidebar {
+  position: relative;
+  display: flex;
   flex: none;
+  flex-direction: column;
+  width: var(--sidebar-w);
+  min-height: 0;
+  border-right: 1px solid var(--color-separator);
+  background: var(--color-bg-sidebar);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.workspace__document {
+  flex: none;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+
+.workspace__document-row {
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 44px;
-  padding: 0 12px;
-  border-bottom: 1px solid #e5e7eb;
-  background: #fafafa;
+  gap: var(--space-1);
+  height: var(--control-h-m);
 }
 
+/* 文档名看起来是一行标题；hover 提示可以编辑，编辑时才出现输入框的样子。 */
 .workspace__title {
-  flex: 0 1 280px;
-  min-width: 80px;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h-m);
+  box-sizing: border-box;
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-m);
   background: none;
-  color: inherit;
+  color: var(--color-text);
   font: inherit;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-l);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  transition: background-color var(--duration-fast) var(--ease-out);
 }
 
-.workspace__title:hover,
+.workspace__title:hover {
+  background: var(--color-fill-hover);
+}
+
 .workspace__title:focus {
-  border-color: #d1d5db;
-  background: #ffffff;
+  outline: none;
+  background: var(--color-bg);
+  box-shadow: 0 0 0 1px var(--color-control-border), 0 0 0 3px var(--color-accent-fill-strong);
+}
+
+.workspace__save-status {
+  padding: 0 var(--space-3);
+}
+
+.workspace__icon-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h-m);
+  height: var(--control-h-m);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-m);
+  background: none;
+  color: var(--color-text-tertiary);
+}
+
+.workspace__icon-button:hover,
+.workspace__icon-button[aria-expanded='true'] {
+  background: var(--color-fill-hover);
+  color: var(--color-text-secondary);
+}
+
+.workspace__chapters {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 分隔线本身是 1px 的边框；可拖动区域更宽，悬停或拖动时以强调色显示。 */
+.workspace__resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 5;
+  width: 7px;
+  cursor: col-resize;
+}
+
+.workspace__resizer::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  content: '';
+  background: transparent;
+  transition: background-color var(--duration-base) var(--ease-out);
+}
+
+.workspace__resizer:hover::after,
+.workspace--resizing .workspace__resizer::after {
+  background: var(--color-accent);
+  transition-delay: 120ms;
+}
+
+.workspace__resizer:focus-visible {
   outline: none;
 }
 
-.workspace__actions {
-  flex: none;
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
+.workspace__resizer:focus-visible::after {
+  left: 2px;
+  width: 3px;
+  background: var(--color-focus-ring);
 }
 
-.workspace__actions button {
-  white-space: nowrap;
-  padding: 4px 10px;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  background: #ffffff;
-  color: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.workspace__export,
-.workspace__style {
+.workspace__main {
   position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--color-bg);
+}
+
+/* 顶栏：与正文同底色，没有边框；正文滚动离开顶部后才出现分隔线。 */
+.workspace__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-5);
+  height: var(--header-h);
+  padding: 0 var(--space-4);
+  box-shadow: 0 1px 0 transparent;
+  transition: box-shadow var(--duration-base) var(--ease-out);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.workspace__bar--scrolled {
+  box-shadow: 0 1px 0 var(--color-separator);
+}
+
+.workspace__tools {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.workspace__tools > * {
+  flex: 1;
+}
+
+.workspace__mode {
+  padding: 0 var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--text-m);
+  font-weight: var(--weight-medium);
+}
+
+.workspace__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.workspace__anchor {
+  position: relative;
+}
+
+/* 文档级操作是无边框的文字按钮：可读、可发现，但不与正文争夺注意力。 */
+.workspace__action {
+  height: var(--control-h-m);
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-m);
+  background: none;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-m);
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.workspace__action:hover:not(:disabled),
+.workspace__action--open {
+  background: var(--color-fill-hover);
+  color: var(--color-text);
+}
+
+.workspace__action:active:not(:disabled) {
+  background: var(--color-fill-pressed);
+}
+
+.workspace__action--on,
+.workspace__action--on:hover:not(:disabled) {
+  background: var(--color-accent-fill);
+  color: var(--color-accent-text);
+}
+
+.workspace__action:disabled {
+  color: var(--color-text-tertiary);
 }
 
 .workspace__popover {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + var(--space-2));
   right: 0;
-  z-index: 20;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #ffffff;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  z-index: calc(var(--z-popover) + 1);
+  border-radius: var(--radius-l);
+  background: var(--color-bg-raised);
+  box-shadow: var(--shadow-popover);
+  outline: none;
+  animation: workspace-popover-in var(--duration-fast) var(--ease-out);
 }
 
-.workspace__export-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 20;
-  min-width: 11rem;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  background: #ffffff;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+@keyframes workspace-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
 }
 
 .workspace__backdrop {
   position: fixed;
   inset: 0;
-  z-index: 10;
+  z-index: var(--z-popover);
 }
 
-.workspace__actions .workspace__export-menu button {
-  display: block;
-  width: 100%;
-  border: none;
-  text-align: left;
-}
-
-.workspace__notice {
-  flex: none;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 0;
-  padding: 6px 12px;
-  background: #ecfdf5;
-  color: #065f46;
-  font-size: 13px;
-}
-
-.workspace__notice button {
-  border: none;
-  background: none;
-  color: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.workspace__error {
-  flex: none;
-  display: flex;
-  justify-content: space-between;
-  margin: 0;
-  padding: 6px 12px;
-  background: #fef2f2;
-  color: #b91c1c;
-  font-size: 13px;
-}
-
-.workspace__error button {
-  border: none;
-  background: none;
-  color: inherit;
-  font-size: 16px;
-  cursor: pointer;
-}
-
-.workspace__body {
+.workspace__content {
   flex: 1;
-  display: flex;
   min-height: 0;
-}
-
-/* 章节栏默认 260px（ui-spec §31），与正文区各自滚动（§27）。 */
-.workspace__sidebar {
-  flex: none;
-  width: 260px;
-  overflow-y: auto;
-  padding: 8px 4px 8px 8px;
-  border-right: 1px solid #e5e7eb;
-}
-
-/* 编辑器自身滚动（正文区内的滚动容器），与章节栏互不影响。 */
-.workspace__main {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
 }
 
 .workspace__preview {
@@ -559,13 +939,40 @@ function setImageLayout(key: string, layout: ImageOverride | null): void {
 }
 
 .workspace__preview-error {
-  margin: 0;
-  padding: 8px 32px;
-  color: #b91c1c;
+  max-width: var(--doc-column);
+  box-sizing: border-box;
+  margin: var(--space-6) auto 0;
+  padding: 0 var(--doc-gutter);
+  color: var(--color-danger-text);
+  font-size: var(--text-m);
 }
 
 .workspace__placeholder {
-  padding: 24px 32px;
-  color: #6b7280;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding-bottom: var(--header-h);
+  box-sizing: border-box;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-l);
+}
+
+.workspace__placeholder p {
+  margin: 0;
+}
+
+.workspace__toasts {
+  position: absolute;
+  right: 0;
+  bottom: var(--space-6);
+  left: 0;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-6);
+  pointer-events: none;
 }
 </style>
