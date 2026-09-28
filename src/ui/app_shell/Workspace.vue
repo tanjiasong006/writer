@@ -358,12 +358,14 @@ const selectedNumber = computed(() =>
 }
 
 .workspace__actions {
+  flex: none;
   display: flex;
   gap: 6px;
   margin-left: auto;
 }
 
 .workspace__actions button {
+  white-space: nowrap;
   padding: 4px 10px;
   border: 1px solid #d1d5db;
   border-radius: 4px;

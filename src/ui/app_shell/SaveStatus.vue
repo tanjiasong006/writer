@@ -33,7 +33,7 @@ const detail = computed(() =>
 <template>
   <div class="save-status" :class="`save-status--${status}`" role="status">
     <span class="save-status__label" :title="detail ?? undefined">{{ label }}</span>
-    <span v-if="detail" class="save-status__detail">{{ detail }}</span>
+    <span v-if="detail" class="save-status__detail" :title="detail">{{ detail }}</span>
     <button v-if="status === 'failed'" type="button" class="save-status__retry" @click="emit('retry')">
       重试
     </button>
@@ -54,7 +54,13 @@ const detail = computed(() =>
   color: #b91c1c;
 }
 
+.save-status__label {
+  flex: none;
+  white-space: nowrap;
+}
+
 .save-status__detail {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
