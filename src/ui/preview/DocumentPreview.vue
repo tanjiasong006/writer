@@ -44,15 +44,24 @@ watch(
   { immediate: true },
 )
 
+/** 在预览中点击选中的章节：它已经在眼前，选中变化时不再滚动到章节开头。 */
+let selectedByClick: ChapterId | null = null
+
 watch(
   () => props.activeChapterId,
-  () => scrollToActive('smooth'),
+  (id) => {
+    const fromClick = id === selectedByClick
+    selectedByClick = null
+    if (!fromClick) scrollToActive('smooth')
+  },
 )
 
 function onClick(event: MouseEvent): void {
   const section = (event.target as HTMLElement | null)?.closest<HTMLElement>('section[data-chapter-id]')
   const id = section?.dataset.chapterId
-  if (id) emit('select', id)
+  if (!id || id === props.activeChapterId) return
+  selectedByClick = id
+  emit('select', id)
 }
 </script>
 

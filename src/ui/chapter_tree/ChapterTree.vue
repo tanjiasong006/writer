@@ -208,9 +208,20 @@ function toggleFromTitle(row: ChapterRow): void {
 
 /** 当前打开菜单的章节 id；同一时间只允许一个菜单。 */
 const openMenuId = ref<ChapterId | null>(null)
+/** 下方空间不够时菜单向上展开，避免被窗口底部裁切。 */
+const menuUp = ref(false)
+/** 节点菜单的大致高度（10 项 + 分隔线）。 */
+const MENU_HEIGHT = 340
 
-function toggleMenu(chapterId: ChapterId): void {
-  openMenuId.value = openMenuId.value === chapterId ? null : chapterId
+function toggleMenu(chapterId: ChapterId, event?: MouseEvent): void {
+  if (openMenuId.value === chapterId) {
+    openMenuId.value = null
+    return
+  }
+  const rect = (event?.currentTarget as HTMLElement | undefined)?.getBoundingClientRect()
+  menuUp.value =
+    rect !== undefined && window.innerHeight - rect.bottom < MENU_HEIGHT && rect.top > MENU_HEIGHT
+  openMenuId.value = chapterId
 }
 
 function closeMenu(): void {
@@ -549,13 +560,14 @@ const rows = computed<ChapterRow[]>(() => {
             aria-label="更多操作"
             aria-haspopup="menu"
             :tabindex="row.id === tabbableId ? 0 : -1"
-            @click.stop="toggleMenu(row.id)"
+            @click.stop="toggleMenu(row.id, $event)"
           ></button>
         </div>
 
         <ul
           v-if="openMenuId === row.id"
           class="chapter-tree__menu"
+          :class="{ 'chapter-tree__menu--up': menuUp }"
           role="menu"
           draggable="false"
           @click.stop
@@ -843,6 +855,11 @@ const rows = computed<ChapterRow[]>(() => {
   font-size: 13px;
   text-align: left;
   cursor: pointer;
+}
+
+.chapter-tree__menu--up {
+  top: auto;
+  bottom: 100%;
 }
 
 .chapter-tree__menu button:disabled {

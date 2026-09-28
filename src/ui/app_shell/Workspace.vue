@@ -252,7 +252,14 @@ const selectedNumber = computed(() =>
           >
             {{ exporting ? '正在导出…' : '导出' }}
           </button>
-          <ul v-if="exportMenuOpen" class="workspace__export-menu" role="menu">
+          <!-- 透明遮罩：点击菜单以外任意处关闭菜单。 -->
+          <div v-if="exportMenuOpen" class="workspace__backdrop" @click="exportMenuOpen = false"></div>
+          <ul
+            v-if="exportMenuOpen"
+            class="workspace__export-menu"
+            role="menu"
+            @keydown.esc="exportMenuOpen = false"
+          >
             <li><button type="button" role="menuitem" @click="exportAs('docx')">导出 Word（.docx）</button></li>
             <li><button type="button" role="menuitem" @click="exportAs('pdf')">导出 PDF</button></li>
           </ul>
@@ -383,6 +390,12 @@ const selectedNumber = computed(() =>
   border-radius: 6px;
   background: #ffffff;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.workspace__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
 }
 
 .workspace__actions .workspace__export-menu button {

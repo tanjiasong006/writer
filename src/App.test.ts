@@ -244,6 +244,48 @@ test('切换项目：先保存当前项目，再打开新项目', async () => {
   expect(services.shell.lastProjectPath).toBe('/文稿/另一篇')
 })
 
+test('打开或新建失败时回到原来的项目，并说明原因', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await button(wrapper, '+').trigger('click')
+  await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Escape' })
+
+  // 选错了文件夹（不是 Writer 文档）。
+  services.shell.projectPath = '/文稿'
+  await button(wrapper, '打开').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.workspace').exists()).toBe(true)
+  expect(wrapper.find<HTMLInputElement>('.workspace__title').element.value).toBe('毕业论文')
+  expect(rowTexts(wrapper)).toHaveLength(4)
+  expect(wrapper.find('.app__notice').text()).toContain('不是 Writer 文档')
+  expect(services.shell.lastProjectPath).toBe(PATH)
+  // 离开前的修改已保存。
+  expect(services.storage.committed(PATH)!.tree).toHaveLength(3)
+
+  // 新建到已有内容的位置。
+  services.shell.newProjectPath = PATH
+  await button(wrapper, '新建').trigger('click')
+  await flushPromises()
+  expect(wrapper.find<HTMLInputElement>('.workspace__title').element.value).toBe('毕业论文')
+  expect(wrapper.find('.app__notice').text()).toContain('已存在且不为空')
+})
+
+test('导出菜单：点击别处或按 Esc 关闭', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+
+  await button(wrapper, '导出').trigger('click')
+  expect(wrapper.find('.workspace__export-menu').exists()).toBe(true)
+  await wrapper.find('.workspace__backdrop').trigger('click')
+  expect(wrapper.find('.workspace__export-menu').exists()).toBe(false)
+
+  await button(wrapper, '导出').trigger('click')
+  await wrapper.find('.workspace__export-menu').trigger('keydown', { key: 'Escape' })
+  expect(wrapper.find('.workspace__export-menu').exists()).toBe(false)
+})
+
 test('孤儿文件：打开后提示已原样保留', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH

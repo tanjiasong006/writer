@@ -70,7 +70,8 @@ function leaveCurrent(): Promise<boolean> {
   return leaving
 }
 
-async function enter(load: () => Promise<OpenSessionResult>): Promise<void> {
+/** 进入项目；失败时停在欢迎页并显示原因，返回失败原因（成功返回 null）。 */
+async function enter(load: () => Promise<OpenSessionResult>): Promise<string | null> {
   busy.value = true
   error.value = null
   notice.value = null
@@ -79,7 +80,7 @@ async function enter(load: () => Promise<OpenSessionResult>): Promise<void> {
     if (!result.ok) {
       error.value = messageForStorageFailure(result.error)
       view.value = { kind: 'welcome' }
-      return
+      return error.value
     }
     shell.setLastProjectPath(result.session.path)
     view.value = { kind: 'open', session: result.session, key: nextKey++ }
@@ -89,18 +90,33 @@ async function enter(load: () => Promise<OpenSessionResult>): Promise<void> {
   } finally {
     busy.value = false
   }
+  return null
+}
+
+/**
+ * 从当前项目切换到另一个项目（新建或打开）。当前项目先保存并释放；
+ * 新项目打不开（选错文件夹、目标不为空……）时重新打开原项目并说明原因，
+ * 不让一次选错把用户留在欢迎页。
+ */
+async function switchTo(load: () => Promise<OpenSessionResult>): Promise<void> {
+  const current = view.value
+  const previous = current.kind === 'open' ? current.session.path : null
+  if (!(await leaveCurrent())) return
+  const failure = await enter(load)
+  if (failure === null || previous === null) return
+  if ((await enter(() => openProject(storage, previous))) === null) notice.value = failure
 }
 
 async function newProject(): Promise<void> {
   const path = await shell.pickNewProjectPath()
-  if (path === null || !(await leaveCurrent())) return
-  await enter(() => createProject(storage, path, titleFromPath(path)))
+  if (path === null) return
+  await switchTo(() => createProject(storage, path, titleFromPath(path)))
 }
 
 async function openExisting(): Promise<void> {
   const path = await shell.pickProjectPath()
-  if (path === null || !(await leaveCurrent())) return
-  await enter(() => openProject(storage, path))
+  if (path === null) return
+  await switchTo(() => openProject(storage, path))
 }
 
 /** 新文档默认以文件夹名作为标题。 */

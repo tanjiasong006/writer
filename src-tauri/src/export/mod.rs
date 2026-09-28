@@ -150,4 +150,40 @@ mod tests {
         let (pdf, _) = pdf::export(&document, &root, pdf::font_store(None)).unwrap();
         fs::write(out.join("stress.pdf"), pdf).unwrap();
     }
+
+    /// 大文档耗时测量（1050 章节、约 210 万字）：
+    /// `CARGO_PROFILE_RELEASE_LTO=false cargo test --release bench_large_document -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_large_document() {
+        use crate::render::{build, html, RenderChapter, RenderRequest};
+        use std::time::Instant;
+        let dir = tempfile::TempDir::new().unwrap();
+        let paragraph = "长文档写作需要清晰的结构与稳定的输出。".repeat(20);
+        let body = vec![paragraph; 5].join("\n\n");
+        let mut chapters = Vec::new();
+        for p in 1..=50u32 {
+            chapters.push(RenderChapter { id: format!("p{p}"), number: vec![p], title: format!("第 {p} 部分"), markdown: body.clone() });
+            for s in 1..=20u32 {
+                chapters.push(RenderChapter { id: format!("p{p}-{s}"), number: vec![p, s], title: format!("小节 {s}"), markdown: body.clone() });
+            }
+        }
+        let request = RenderRequest { title: "大文档".into(), chapters };
+        let t = Instant::now();
+        let document = build(&request);
+        println!("parse: {:?}", t.elapsed());
+        let t = Instant::now();
+        let preview = html::render(&document, dir.path());
+        println!("preview html: {:?} ({} KB)", t.elapsed(), preview.len() / 1024);
+        if let Ok(out) = std::env::var("WRITER_SAMPLE_DIR") {
+            fs::write(std::path::Path::new(&out).join("large-preview.html"), &preview).unwrap();
+        }
+        let t = Instant::now();
+        let (docx, _) = docx::export(&document, dir.path()).unwrap();
+        println!("docx: {:?} ({} KB)", t.elapsed(), docx.len() / 1024);
+        let fonts = pdf::font_store(None);
+        let t = Instant::now();
+        let (pdf, _) = pdf::export(&document, dir.path(), fonts).unwrap();
+        println!("pdf: {:?} ({} KB)", t.elapsed(), pdf.len() / 1024);
+    }
 }

@@ -38,3 +38,26 @@ test('当前章节变化时滚动到对应章节', async () => {
   expect(scrolled).toEqual(['b'])
   wrapper.unmount()
 })
+
+test('在预览中点击选中章节时不跳动：阅读位置保持不变', async () => {
+  const scrolled: string[] = []
+  const wrapper = mount(DocumentPreview, {
+    attachTo: document.body,
+    props: { html, toDisplayUrl: (p: string) => p, activeChapterId: 'a' },
+  })
+  // 首次显示时定位到当前章节（与本测试无关），等它完成后再记录滚动。
+  await nextTick()
+  await nextTick()
+  for (const section of wrapper.findAll('section')) {
+    section.element.scrollIntoView = () => scrolled.push((section.element as HTMLElement).dataset.chapterId!)
+  }
+  // 点击第 b 章中间的段落 → 上层把选中章节改为 b。
+  await wrapper.find('section[data-chapter-id="b"] p').trigger('click')
+  await wrapper.setProps({ activeChapterId: 'b' })
+  expect(scrolled).toEqual([])
+
+  // 之后从别处（章节树）选中其他章节，仍然滚动过去。
+  await wrapper.setProps({ activeChapterId: 'a' })
+  expect(scrolled).toEqual(['a'])
+  wrapper.unmount()
+})
