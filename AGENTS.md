@@ -53,6 +53,7 @@ Domain 不包含面向用户的自然语言，用户可见文本由 UI 层负责
 - `docs/project-format.md`：项目磁盘格式、正文文件命名规则、保存事务与恢复。
 - `docs/implementation-plan.md`：MVP 实施计划与进度。
 - `docs/known-risks.md`：已知风险与结论。
+- `docs/ui-design-principles.md`：UI / UX 设计准则（视觉、交互、状态、动画、验收标准）。
 
 ## 开发规则
 
@@ -79,3 +80,9 @@ Domain 不包含面向用户的自然语言，用户可见文本由 UI 层负责
 新行为要有测试；修复 Bug 先复现，再修复；完成前运行相关测试。
 
 新增或修改可视 UI 组件时，应同步新增或更新对应的 Storybook Story，用于独立查看和人工调试关键状态。
+
+### UI / UX 工作
+
+任何涉及界面、视觉、布局、交互、拖拽、键盘行为、焦点管理、动画或组件状态的修改，**在设计和实现前必须阅读并遵守 `docs/ui-design-principles.md`**，以及对应组件的规格文档（如 `src/ui/chapter_tree/ui-spec.md`）。
+
+测试通过不代表 UI 工作完成，结束前按该文档的默认流程与验收标准检查。

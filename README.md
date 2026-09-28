@@ -37,3 +37,4 @@ WRITER_SAMPLE_DIR=/tmp/writer-sample cargo test write_sample -- --ignored
 - `docs/project-format.md`：项目磁盘格式、正文文件命名、保存事务与恢复。
 - `docs/implementation-plan.md`：MVP 实施计划、进度与手动验收清单。
 - `docs/known-risks.md`：已知风险与结论。
+- `docs/ui-design-principles.md`：UI / UX 设计准则。
