@@ -572,3 +572,48 @@ fn error_serializes_with_code_and_camel_case_fields() {
         json!({ "code": "not-a-project" })
     );
 }
+
+/// 与 TS 共享的格式契约：`fixtures/示例项目` 同时被 TS 的 fixture_contract 测试读取。
+#[test]
+fn shared_fixture_opens_and_survives_a_rename_save() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/示例项目");
+    let opened = open_project(&RealFs, &fixture).unwrap();
+    assert_eq!(opened.contents.len(), 3);
+    assert!(opened.orphan_files.is_empty());
+    assert_eq!(
+        opened.contents["3f1c9a52-0000-4000-8000-000000000001"],
+        "本文研究长文档写作。\n\n- 要点一\n- 要点二\n"
+    );
+
+    // 复制到临时目录，交换两个根章节后保存，验证换名与字节保留。
+    let dir = TempDir::new().unwrap();
+    let root = project_root(&dir);
+    fs::create_dir_all(root.join("content")).unwrap();
+    fs::copy(fixture.join("writer.json"), root.join("writer.json")).unwrap();
+    for name in RealFs.list_files(&fixture.join("content")).unwrap() {
+        fs::copy(
+            fixture.join("content").join(&name),
+            root.join("content").join(&name),
+        )
+        .unwrap();
+    }
+    let mut manifest = opened.manifest.clone();
+    manifest["files"] = json!({
+        "3f1c9a52-0000-4000-8000-000000000001": "ch_2.md",
+        "3f1c9a52-0000-4000-8000-000000000002": "ch_1.md",
+        "3f1c9a52-0000-4000-8000-000000000003": "ch_1_1.md",
+    });
+    let request = SaveRequest {
+        manifest,
+        contents: BTreeMap::new(),
+    };
+    save_project(&RealFs, &root, &request).unwrap();
+    assert_eq!(
+        fs::read(root.join("content/ch_1_1.md")).unwrap(),
+        fs::read(fixture.join("content/ch_2_1.md")).unwrap()
+    );
+    assert_eq!(
+        open_project(&RealFs, &root).unwrap().contents,
+        opened.contents
+    );
+}

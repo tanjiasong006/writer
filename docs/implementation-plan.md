@@ -15,8 +15,8 @@
 | S0 | 章节树 Domain / Application / UI（已有） | ✅ 完成 |
 | S1 | 文档模型 + 项目格式（manifest 解析/生成、文件名规则） | ✅ 完成 |
 | S2 | Rust 存储层：保存事务、恢复、打开/新建、Tauri command | ✅ 完成 |
-| S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | ⏳ 进行中 |
-| S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | 待开始 |
+| S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | ✅ 完成 |
+| S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | ⏳ 进行中 |
 | S5 | CodeMirror 正文编辑、按内容决定删除确认 | 待开始 |
 | S6 | 插入内容：工具栏、图片资源导入、表格等 | 待开始 |
 | S7 | 全文预览（Rust pulldown-cmark 渲染） | 待开始 |
@@ -108,3 +108,14 @@
 - Tauri command：`project_create` / `project_open` / `project_save`（后台线程 + 全局串行锁）；接入 dialog 插件。
 - 验证：cargo test 23/23，cargo clippy --all-targets 无警告，npm test / vue-tsc 通过。
 - 备注：macOS 上 fsync 为 F_FULLFSYNC，大批量换名时的耗时在 S10 测量。
+
+### S3（完成）
+
+- `application/project_storage.ts`：存储端口与机器可读的失败原因。
+- `application/project_session.ts`：revision / savedRevision 快照语义，失败保持 dirty 并暴露错误，
+  保存串行且期间请求合并，防抖自动保存 + 失败重试，close 时尽力提交并报告结果。
+- `application/project_lifecycle.ts`：openProject / createProject。
+- `infrastructure/tauri_project_storage.ts`：Tauri 实现，Rust 返回的数据在这里校验后再进 Domain。
+- `testing/memory_project_storage.ts`：模拟"未报告变化的章节保留磁盘旧内容"，漏报变化会被测试发现；Storybook 也可用。
+- 共享格式契约：`src-tauri/fixtures/示例项目` 同时被 TS 与 Rust 测试读取，防止两侧格式漂移。
+- 验证：npm test 229/229，vue-tsc 通过，cargo test 24/24，clippy 无警告。
