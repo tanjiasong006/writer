@@ -65,6 +65,40 @@
 - 章节标题只存在于 manifest 中，正文 Markdown **不重复保存章节标题，也不保存章节编号**。
 - JSON 以 UTF-8 保存，不转义中文。
 
+### 3.1 文档样式：style（可选）
+
+```json
+{
+  "style": {
+    "theme": "book",
+    "overrides": { "bodyFont": "sans", "bodySize": 10.5, "lineHeight": 1.6 },
+    "images": {
+      "assets/装置.png": { "size": "large", "align": "center" },
+      "assets/曲线.png": { "size": "small" }
+    }
+  }
+}
+```
+
+- 整本文档的样式（`docs/decisions.md` 第 8 节）。正文 Markdown 中**不含任何排版信息**。
+- `theme`：内置主题 `book`（默认）/ `classic` / `technical`。
+- `overrides`：在主题之上的调整，只记录与主题不同的字段：`bodyFont` / `headingFont`（`serif` 宋体类、`sans` 黑体类）、
+  `bodySize` / `heading1Size` / `heading2Size` / `heading3Size`（磅，6–72）、`lineHeight`（字号的倍数，1–3）。
+  切换主题时清空。
+- `images`：图片布局。key 是**图片文件键**：正文中的图片引用（相对 `content/`，可含 `%XX` 编码）指向的项目内文件，
+  以相对项目根目录、`/` 分隔的规范路径表示（`../assets/装置.png` → `assets/装置.png`）。value 中 `size` 为
+  `original` / `small` / `medium` / `large` / `full`，`align` 为 `left` / `center` / `right`，缺少的字段跟随主题。
+  - 这是图片文件（asset）级的布局覆盖，不是元素实例身份：同一文件的所有引用共享布局；
+    插入、删除、移动其他图片不影响它。
+  - 规则由 TS `imageKey` 与 Rust `render::image_key` 共同实现，共享用例 `src-tauri/fixtures/image-keys.json`。
+  - 图片从正文中删除后记录保留（与 `assets/` 中的文件一样不自动清理），撤销删除或再次插入同一文件时布局仍在。
+- **兼容**：`style` 可以整体省略。没有 `style` 的项目（包括引入样式之前的项目）使用默认样式；使用默认样式时
+  Writer 也不写出 `style`，因此这类项目的 `writer.json` 与之前完全相同。打开项目从不写盘；样式只在用户修改后随下一次保存写入。
+  无法识别的主题、非法的调整值与图片布局逐项忽略（跟随主题），不拒绝打开项目。`style` 是可选的新增字段，
+  `version` 保持 1；不认识 `style` 的旧版 Writer 可以打开这样的项目，但保存时会丢弃样式（正文不受影响）。
+  这是已知的向前兼容限制：`version` 只有"更高版本拒绝打开"一种行为，升级它会让旧版无法打开任何由新版保存过的项目
+  （包括只改了正文的项目），代价大于丢失样式设置，因此不为可选的样式字段升级版本。
+
 ## 4. 正文内容
 
 - 每个章节恰好对应一个 `.md` 文件，允许为空文件。

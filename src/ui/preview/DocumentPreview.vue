@@ -1,18 +1,26 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
+import { THEMES, type DocumentTheme } from '../../domain/document_style/document_style.ts'
+import { themeCssVars } from '../document_style/theme_css.ts'
 
 /**
  * 全文预览：显示 Rust render::html 生成的 HTML（所有文本已转义，不含脚本与链接跳转），
  * 因此可以安全地使用 v-html。
  * - 图片以 data-writer-src 给出本地路径，这里经 toDisplayUrl 转成可显示的地址。
  * - activeChapterId 变化时滚动到该章节；点击某一章节发出 select。
+ * - HTML 只有语义结构；排版来自文档主题（与编辑器共用 theme_css 的 CSS 变量），
+ *   独立成段的图片以 data-size / data-align 标明布局。
  */
 const props = defineProps<{
   html: string
   activeChapterId?: ChapterId | null
   toDisplayUrl: (filePath: string) => string
+  /** 文档主题（已解析）；不提供时使用默认主题。 */
+  theme?: DocumentTheme
 }>()
+
+const themeStyle = computed(() => themeCssVars(props.theme ?? THEMES.book))
 
 const emit = defineEmits<{ select: [chapterId: ChapterId] }>()
 
@@ -66,24 +74,32 @@ function onClick(event: MouseEvent): void {
 </script>
 
 <template>
-  <article ref="root" class="document-preview" @click="onClick" v-html="html"></article>
+  <article ref="root" class="document-preview" :style="themeStyle" @click="onClick" v-html="html"></article>
 </template>
 
 <style scoped>
+/*
+ * 版心宽度与编辑器相同；字体、字号、行距、段距、标题、引用、代码、表格、图注与图片布局
+ * 来自文档主题的 CSS 变量（ui/document_style/theme_css.ts）。
+ * 标题标签与层级：h2 = 第 1 级，h3 = 第 2 级，h4 及更深 = 第 3 级（与 Rust render::html 的输出一致）。
+ */
 .document-preview {
   max-width: 760px;
   margin: 0 auto;
   padding: 32px 32px 40vh;
-  font-size: 16px;
-  line-height: 1.8;
+  font-family: var(--doc-body-font);
+  font-size: var(--doc-body-size);
+  line-height: var(--doc-line-height);
   color: #111827;
   /* 过长的 URL、路径与导出一致地在任意字符处折行，不撑出横向滚动。 */
   overflow-wrap: anywhere;
 }
 
 .document-preview :deep(.doc-title) {
-  margin: 0 0 32px;
-  font-size: 28px;
+  margin: 0 0 1.4em;
+  font-family: var(--doc-title-font);
+  font-size: var(--doc-title-size);
+  line-height: 1.4;
   text-align: center;
 }
 
@@ -91,23 +107,32 @@ function onClick(event: MouseEvent): void {
   cursor: default;
 }
 
-.document-preview :deep(.chapter-heading) {
-  margin: 1.6em 0 0.6em;
+.document-preview :deep(h2),
+.document-preview :deep(h3),
+.document-preview :deep(h4),
+.document-preview :deep(h5),
+.document-preview :deep(h6) {
   line-height: 1.4;
 }
 
 .document-preview :deep(h2) {
-  font-size: 22px;
+  margin: var(--doc-h1-before) 0 var(--doc-h1-after);
+  font-family: var(--doc-h1-font);
+  font-size: var(--doc-h1-size);
 }
 
 .document-preview :deep(h3) {
-  font-size: 19px;
+  margin: var(--doc-h2-before) 0 var(--doc-h2-after);
+  font-family: var(--doc-h2-font);
+  font-size: var(--doc-h2-size);
 }
 
 .document-preview :deep(h4),
 .document-preview :deep(h5),
 .document-preview :deep(h6) {
-  font-size: 17px;
+  margin: var(--doc-h3-before) 0 var(--doc-h3-after);
+  font-family: var(--doc-h3-font);
+  font-size: var(--doc-h3-size);
 }
 
 .document-preview :deep(.chapter-number) {
@@ -117,7 +142,7 @@ function onClick(event: MouseEvent): void {
 }
 
 .document-preview :deep(p) {
-  margin: 0.6em 0;
+  margin: var(--doc-paragraph-spacing) 0;
 }
 
 .document-preview :deep(blockquote) {
@@ -125,6 +150,8 @@ function onClick(event: MouseEvent): void {
   padding: 0 1em;
   border-left: 3px solid #d1d5db;
   color: #4b5563;
+  font-family: var(--doc-quote-font);
+  font-size: var(--doc-quote-size);
 }
 
 .document-preview :deep(pre) {
@@ -132,12 +159,15 @@ function onClick(event: MouseEvent): void {
   padding: 12px 14px;
   border-radius: 6px;
   background: #f3f4f6;
-  font-size: 14px;
+  font-size: var(--doc-code-size);
   line-height: 1.6;
 }
 
 .document-preview :deep(code) {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.document-preview :deep(:not(pre) > code) {
   font-size: 0.9em;
 }
 
@@ -145,7 +175,7 @@ function onClick(event: MouseEvent): void {
   width: 100%;
   margin: 1em 0;
   border-collapse: collapse;
-  font-size: 15px;
+  font-size: var(--doc-table-size);
 }
 
 .document-preview :deep(th),
@@ -158,21 +188,55 @@ function onClick(event: MouseEvent): void {
   background: #f9fafb;
 }
 
+/* 图片尺寸规则与编辑器、Word / PDF 导出相同（见 ChapterEditor 与 export::images::display_size_pt）。 */
 .document-preview :deep(figure) {
-  margin: 1.2em 0;
+  margin: var(--doc-image-spacing) 0;
   text-align: center;
 }
 
-/* 与 Word / PDF 导出相同的尺寸规则：不超过正文宽度，高度不超过 420 磅（560px），保持比例。 */
+.document-preview :deep(figure[data-align='left']) {
+  text-align: left;
+}
+
+.document-preview :deep(figure[data-align='right']) {
+  text-align: right;
+}
+
 .document-preview :deep(img) {
   max-width: 100%;
   max-height: 560px;
+  object-fit: contain;
+}
+
+.document-preview :deep(figure[data-size='small'] img) {
+  width: var(--doc-image-small);
+}
+
+.document-preview :deep(figure[data-size='medium'] img) {
+  width: var(--doc-image-medium);
+}
+
+.document-preview :deep(figure[data-size='large'] img) {
+  width: var(--doc-image-large);
+}
+
+.document-preview :deep(figure[data-size='full'] img) {
+  width: var(--doc-image-full);
+}
+
+.document-preview :deep(figure[data-align='left'] img) {
+  object-position: left;
+}
+
+.document-preview :deep(figure[data-align='right'] img) {
+  object-position: right;
 }
 
 .document-preview :deep(figcaption) {
   margin-top: 4px;
   color: #6b7280;
-  font-size: 14px;
+  font-family: var(--doc-caption-font);
+  font-size: var(--doc-caption-size);
 }
 
 .document-preview :deep(.missing-image) {

@@ -4,6 +4,11 @@ import {
   type ChapterNumber,
 } from '../domain/chapter_numbering/chapter_numbering.ts'
 import type { WriterDocument } from '../domain/document/document.ts'
+import {
+  resolveTheme,
+  type DocumentTheme,
+  type ImageOverride,
+} from '../domain/document_style/document_style.ts'
 import type { IoKind } from './project_storage.ts'
 
 /**
@@ -11,10 +16,16 @@ import type { IoKind } from './project_storage.ts'
  * 预览、Word、PDF 共用同一份请求与同一个 Markdown 解析器（docs/decisions.md 第 5 节）。
  */
 
-/** 按章节树先序展开的全文：章节标题与编号来自结构，正文不含它们。 */
+/**
+ * 按章节树先序展开的全文：章节标题与编号来自结构，正文不含它们。
+ * 排版来自 theme（已按主题与用户调整解析好的语义样式）与 images（图片文件键 → 布局），
+ * 预览、Word、PDF 各自把它们翻译成自己的样式。
+ */
 export interface RenderRequest {
   readonly title: string
   readonly chapters: readonly RenderChapter[]
+  readonly theme: DocumentTheme
+  readonly images: Readonly<Record<string, ImageOverride>>
 }
 
 export interface RenderChapter {
@@ -93,5 +104,10 @@ export function buildRenderRequest(document: WriterDocument): RenderRequest {
     }
   }
   visit(document.tree)
-  return { title: document.title, chapters }
+  return {
+    title: document.title,
+    chapters,
+    theme: resolveTheme(document.style),
+    images: Object.fromEntries(document.style.images),
+  }
 }

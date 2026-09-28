@@ -9,6 +9,19 @@ import {
   type ChapterNumber,
 } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import type { WriterDocument } from '../../domain/document/document.ts'
+import {
+  DEFAULT_THEME_ID,
+  defaultDocumentStyle,
+  imageKey,
+  isDefaultStyle,
+  isThemeId,
+  overrideStyle,
+  setImageLayout,
+  type DocumentStyle,
+  type ImageOverride,
+  type StyleOverrides,
+  type ThemeId,
+} from '../../domain/document_style/document_style.ts'
 
 /**
  * Writer 项目 manifest（writer.json）的生成与解析。
@@ -26,6 +39,15 @@ export interface Manifest {
   readonly chapters: ChapterTree
   /** ChapterId → 当前正文文件名（相对 content/）。 */
   readonly files: Readonly<Record<ChapterId, string>>
+  /** 文档样式；使用默认样式时省略（没有设置过样式的项目，writer.json 与引入样式之前完全相同）。 */
+  readonly style?: ManifestStyle
+}
+
+/** writer.json 中的 style：主题、主题之上的调整、图片布局（图片文件键 → 布局）。空的部分省略。 */
+export interface ManifestStyle {
+  readonly theme: ThemeId
+  readonly overrides?: StyleOverrides
+  readonly images?: Readonly<Record<string, ImageOverride>>
 }
 
 /** 正文文件名格式：ch_ + 各级编号（从 1 开始、无前导 0）以 _ 连接 + .md。 */
@@ -58,38 +80,30 @@ export function assetReference(fileName: string): string {
  * 与 Rust `render::resolve_image` 规则一致（Rust 另外比较规范化路径以防符号链接逃逸）。
  */
 export function resolveAssetReference(projectPath: string, reference: string): string | null {
-  if (reference.length === 0 || reference.includes('://') || reference.startsWith('data:')) return null
-  let decoded: string
-  try {
-    decoded = decodeURIComponent(reference)
-  } catch {
-    // 非法的 %XX 编码：与 Rust 一样视为无法解析。
-    return null
-  }
-  if (/^([\\/]|[A-Za-z]:)/.test(decoded)) return null
+  // 图片文件键就是它在项目中指向的文件（相对项目根目录）：显示的文件与布局所属的图片永远一致。
+  const key = imageKey(reference)
+  if (key === null) return null
   const separator = projectPath.includes('\\') && !projectPath.includes('/') ? '\\' : '/'
-  const parts = ['content']
-  for (const part of decoded.split(/[\\/]/)) {
-    if (part === '' || part === '.') continue
-    if (part === '..') {
-      if (parts.length === 0) return null
-      parts.pop()
-    } else {
-      parts.push(part)
-    }
-  }
-  if (parts.length === 0) return null
-  return [projectPath.replace(/[\\/]+$/, ''), ...parts].join(separator)
+  return [projectPath.replace(/[\\/]+$/, ''), ...key.split('/')].join(separator)
 }
 
 /** 由文档生成 manifest；文件名总是按当前编号重新推导。 */
 export function buildManifest(document: WriterDocument): Manifest {
-  return {
+  const manifest: Manifest = {
     format: MANIFEST_FORMAT,
     version: MANIFEST_VERSION,
     title: document.title,
     chapters: document.tree,
     files: Object.fromEntries(contentFiles(document.tree)),
+  }
+  return isDefaultStyle(document.style) ? manifest : { ...manifest, style: buildStyle(document.style) }
+}
+
+function buildStyle(style: DocumentStyle): ManifestStyle {
+  return {
+    theme: style.theme,
+    ...(Object.keys(style.overrides).length > 0 ? { overrides: style.overrides } : {}),
+    ...(style.images.size > 0 ? { images: Object.fromEntries(style.images) } : {}),
   }
 }
 
@@ -109,6 +123,7 @@ export interface ParsedManifest {
   readonly title: string
   readonly tree: ChapterTree
   readonly files: ReadonlyMap<ChapterId, string>
+  readonly style: DocumentStyle
 }
 
 export type ParseManifestResult =
@@ -154,7 +169,46 @@ export function parseManifest(raw: unknown): ParseManifestResult {
     if (!files.has(chapterId)) return fail({ code: 'file-missing', chapterId })
   }
 
-  return { ok: true, manifest: { title: m.title, tree: tree.tree, files } }
+  return { ok: true, manifest: { title: m.title, tree: tree.tree, files, style: parseStyle(m.style) } }
+}
+
+/**
+ * 解析 style。样式不影响文档内容，因此从宽处理：缺失（旧项目）使用默认样式；
+ * 无法识别的主题、非法的调整值与图片布局逐项忽略（跟随主题），不拒绝打开项目。
+ */
+export function parseStyle(raw: unknown): DocumentStyle {
+  const style = defaultDocumentStyle()
+  if (!isRecord(raw)) return style
+  let result: DocumentStyle = { ...style, theme: isThemeId(raw.theme) ? raw.theme : DEFAULT_THEME_ID }
+  if (isRecord(raw.overrides)) result = overrideStyle(result, pickOverrides(raw.overrides))
+  if (isRecord(raw.images)) {
+    for (const [key, layout] of Object.entries(raw.images)) {
+      // 只接受规范形式的身份（如 assets/图.png），与 imageKey 生成的一致。
+      if (!isRecord(layout) || imageKey(`../${key}`) !== key) continue
+      result = setImageLayout(result, key, layout as ImageOverride)
+    }
+  }
+  return result
+}
+
+const OVERRIDE_FIELDS: ReadonlyArray<keyof StyleOverrides> = [
+  'bodyFont',
+  'bodySize',
+  'lineHeight',
+  'headingFont',
+  'heading1Size',
+  'heading2Size',
+  'heading3Size',
+]
+
+function pickOverrides(raw: Record<string, unknown>): StyleOverrides {
+  const picked: Record<string, unknown> = {}
+  for (const field of OVERRIDE_FIELDS) if (field in raw) picked[field] = raw[field]
+  return picked as StyleOverrides
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function fail(issue: ManifestIssue): ParseManifestResult {

@@ -26,9 +26,10 @@ import { gapCursor } from 'prosemirror-gapcursor'
 import { isEmptyDocument, nodes, schema } from './schema.ts'
 import { toggleBold, toggleCode, toggleItalic } from './commands.ts'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
+import { imageLayoutPlugin } from './image_layout.ts'
 
 /**
- * 编辑器插件：快捷键、Markdown 输入规则、撤销历史、表格编辑、占位提示与剪贴板的 Markdown 文本。
+ * 编辑器插件：快捷键、Markdown 输入规则、撤销历史、表格编辑、占位提示、图片布局与剪贴板的 Markdown 文本。
  * 所有章节的 EditorState 共用同一组插件，切换章节时 EditorView 无需重新配置。
  */
 
@@ -134,25 +135,6 @@ function placeholder(text: string): Plugin {
   })
 }
 
-/** 只含一张图片的段落：与预览 / 导出一样作为独立的图显示（居中）。 */
-function figures(): Plugin {
-  return new Plugin({
-    props: {
-      decorations(state) {
-        const decorations: Decoration[] = []
-        state.doc.descendants((node, pos) => {
-          if (node.type !== nodes.paragraph) return !node.isTextblock
-          if (node.childCount === 1 && node.firstChild!.type === nodes.image) {
-            decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'is-figure' }))
-          }
-          return false
-        })
-        return DecorationSet.create(state.doc, decorations)
-      },
-    },
-  })
-}
-
 /**
  * 剪贴板：复制出的纯文本是 Markdown，粘贴的纯文本按 Markdown 解析，
  * 与其他 Markdown 工具之间复制粘贴时结构不丢失。代码块中粘贴的文本仍原样插入（由 ProseMirror 处理）。
@@ -190,7 +172,7 @@ export const editorPlugins: readonly Plugin[] = [
   gapCursor(),
   tableEditing(),
   placeholder('开始写作…'),
-  figures(),
+  imageLayoutPlugin(),
   markdownClipboard(),
 ]
 

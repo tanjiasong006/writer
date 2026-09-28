@@ -335,7 +335,27 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   - 粘贴网页 / Word 内容会把 data: 图片（base64）、远程图片、本机临时文件写进正文 → 只接受正文中的相对图片引用。
 - 未在真实 Tauri 窗口中完成：真实中文输入法（需在真实桌面环境中按手动验收清单确认）。
 
-## 后续（MVP 之外，按价值排序）
+## 文档样式系统（Document Style System）（完成）
+
+正文内容与排版分离（docs/decisions.md 第 8 节）：Markdown 只保存内容；整本文档的视觉由主题决定；图片尺寸 / 对齐
+作为图片文件（asset）级的布局覆盖按图片文件键保存在 manifest 中。
+
+- Domain `document_style`：`DocumentStyle`（主题 + 调整 + 图片布局）→ `resolveTheme` → `DocumentTheme`（语义参数）。
+  内置主题：书籍（默认，与之前的导出排版基本一致）、传统（全宋体、宽松）、技术文档（全黑体、紧凑、图片默认 85%）。
+  `WriterDocument.style`；`ProjectSession.selectTheme / overrideStyle / resetStyleOverrides / setImageLayout`。
+- 持久化：`writer.json` 可选的 `style`（docs/project-format.md 第 3.1 节），走原有保存事务；默认样式不写出。
+- 渲染：`RenderRequest` 携带 `theme` 与 `images`。Rust `render::theme`（数值限制在合法范围）、`render::image_key`；
+  预览 HTML 只输出 `data-size` / `data-align`；Word 映射到段落样式（默认、标题 1–9、Title、Quote、Code、TableText、Caption）
+  与图片宽度 / 对齐；PDF 映射到 Typst 的 text / par / heading / raw / table / figure 规则。行距语义统一为"相邻基线距离 / 字号"：
+  CSS line-height、Word"最小值"行距、Typst 固定 1em 排版框 + leading。
+- 编辑器：主题以 CSS 变量作用（与预览共用 `theme_css.ts`，字体栈与 `export::fonts` 同序）；章节标题与正文标题按层级取样式。
+  图片布局：插件状态 + 装饰，`ImageLayoutStep` 可撤销；选中图片时工具栏右侧出现"原始 / 小 / 中 / 大 / 通栏、靠左 / 居中 / 靠右"。
+- 界面：顶栏"样式"弹出文档样式面板：主题、正文字体 / 字号 / 行距、标题字体 / 一二三级字号、恢复主题默认。
+- 验证：domain / 格式 / 会话 / 编辑器 / 组件 / App 级测试；Rust 测试逐项核对 Word 样式 XML 与 Typst 排版结果
+  （字号、字体族、实测行距 = 字号 × 行距、图片宽度与左右位置）；TS 与 Rust 共享默认主题与图片文件键用例；
+  WebKit（Playwright）中查看 Storybook：布局按钮、撤销、主题变量生效。
+
+
 
 0. 富文本粘贴的后续能力（不是迁移回归）：识别 Word / WPS 的列表段落（目前是带 · 的普通段落）；
    粘贴 / 拖入的图片自动导入项目资源（目前被忽略，只能通过"插入图片"）。

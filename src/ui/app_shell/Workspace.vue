@@ -20,6 +20,13 @@ import {
   type ExportFormat,
 } from '../../application/document_output.ts'
 import { messageForOutputFailure } from './output_messages.ts'
+import DocumentStylePanel from '../document_style/DocumentStylePanel.vue'
+import {
+  resolveTheme,
+  type ImageOverride,
+  type StyleOverrides,
+  type ThemeId,
+} from '../../domain/document_style/document_style.ts'
 
 /**
  * 已打开项目的工作区：顶栏（标题、保存状态、项目操作）+ 左侧章节树 + 右侧正文区。
@@ -239,6 +246,26 @@ const selectedChapter = computed(() =>
 const selectedNumber = computed(() =>
   selectedId.value === null ? '' : (numbers.value.get(selectedId.value) ?? []).join('.'),
 )
+
+/**
+ * 文档样式（整本书的设置，不属于正文工具栏）。与 tree 一样只依赖样式对象：
+ * 编辑正文时样式引用不变，主题不会重新解析，编辑器与预览的样式也不会重算。
+ */
+const documentStyle = computed(() => document.value.style)
+const theme = computed(() => resolveTheme(documentStyle.value))
+const stylePanelOpen = ref(false)
+
+function selectTheme(id: ThemeId): void {
+  props.session.selectTheme(id)
+}
+
+function overrideStyle(patch: StyleOverrides): void {
+  props.session.overrideStyle(patch)
+}
+
+function setImageLayout(key: string, layout: ImageOverride | null): void {
+  props.session.setImageLayout(key, layout)
+}
 </script>
 
 <template>
@@ -254,6 +281,32 @@ const selectedNumber = computed(() =>
       />
       <SaveStatus :status="status" :error="lastError" @retry="session.save()" />
       <div class="workspace__actions">
+        <div class="workspace__style">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            :aria-expanded="stylePanelOpen"
+            title="整本文档的字体、字号与主题"
+            @click="stylePanelOpen = !stylePanelOpen"
+          >
+            样式
+          </button>
+          <div v-if="stylePanelOpen" class="workspace__backdrop" @click="stylePanelOpen = false"></div>
+          <div
+            v-if="stylePanelOpen"
+            class="workspace__popover"
+            role="dialog"
+            aria-label="文档样式"
+            @keydown.esc="stylePanelOpen = false"
+          >
+            <DocumentStylePanel
+              :document-style="documentStyle"
+              @select-theme="selectTheme"
+              @override="overrideStyle"
+              @reset="session.resetStyleOverrides()"
+            />
+          </div>
+        </div>
         <button type="button" class="workspace__preview-toggle" @click="togglePreview">
           {{ mode === 'preview' ? '返回编辑' : '预览' }}
         </button>
@@ -314,6 +367,7 @@ const selectedNumber = computed(() =>
             :html="previewHtml"
             :active-chapter-id="selectedId"
             :to-display-url="shell.toDisplayUrl"
+            :theme="theme"
             @select="selectedId = $event"
           />
         </div>
@@ -325,8 +379,11 @@ const selectedNumber = computed(() =>
           :number="selectedNumber"
           :title="selectedChapter.title"
           :resolve-image="resolveImage"
+          :theme="theme"
+          :image-layouts="documentStyle.images"
           @change="updateContent"
           @request-image="insertImage"
+          @image-layout="setImageLayout"
         />
         <p v-else class="workspace__placeholder">选择或新建一个章节开始写作。</p>
       </main>
@@ -390,8 +447,20 @@ const selectedNumber = computed(() =>
   cursor: pointer;
 }
 
-.workspace__export {
+.workspace__export,
+.workspace__style {
   position: relative;
+}
+
+.workspace__popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
 }
 
 .workspace__export-menu {

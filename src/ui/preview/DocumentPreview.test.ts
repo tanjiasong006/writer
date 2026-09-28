@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import DocumentPreview from './DocumentPreview.vue'
+import { THEMES, defaultDocumentStyle, overrideStyle, resolveTheme } from '../../domain/document_style/document_style.ts'
 
 const html =
   '<h1 class="doc-title">论文</h1>' +
@@ -60,4 +61,13 @@ test('在预览中点击选中章节时不跳动：阅读位置保持不变', as
   await wrapper.setProps({ activeChapterId: 'a' })
   expect(scrolled).toEqual(['a'])
   wrapper.unmount()
+})
+
+test('主题通过 CSS 变量作用在预览上，变化时即时更新', async () => {
+  const wrapper = mount(DocumentPreview, { props: { html, toDisplayUrl: (p: string) => p } })
+  const value = (name: string) => (wrapper.element as HTMLElement).style.getPropertyValue(name)
+  expect(value('--doc-body-size')).toBe(`${THEMES.book.body.size}pt`)
+  await wrapper.setProps({ theme: resolveTheme(overrideStyle(defaultDocumentStyle(), { bodySize: 14, lineHeight: 2 })) })
+  expect(value('--doc-body-size')).toBe('14pt')
+  expect(value('--doc-line-height')).toBe('2')
 })

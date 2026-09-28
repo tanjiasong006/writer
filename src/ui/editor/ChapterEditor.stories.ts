@@ -1,20 +1,30 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import { ref } from 'vue'
 import ChapterEditor from './ChapterEditor.vue'
+import { THEMES, setImageLayout, defaultDocumentStyle, type ImageLayouts, type ImageOverride } from '../../domain/document_style/document_style.ts'
 
 const meta = {
   title: 'UI/Editor/ChapterEditor',
   component: ChapterEditor,
   parameters: { layout: 'fullscreen' },
-  // 模拟上层：把 change 写回 content，行为与工作区一致。
+  // 模拟上层：把 change 写回 content、把 image-layout 写回图片布局，行为与工作区一致。
   render: (args) => ({
     components: { ChapterEditor },
     setup() {
       const content = ref(args.content)
-      return { args, content, update: (_id: string, text: string) => (content.value = text) }
+      const layouts = ref<ImageLayouts>(args.imageLayouts ?? new Map())
+      return {
+        args,
+        content,
+        layouts,
+        update: (_id: string, text: string) => (content.value = text),
+        setLayout: (key: string, layout: ImageOverride | null) => {
+          layouts.value = setImageLayout({ ...defaultDocumentStyle(), images: layouts.value }, key, layout).images
+        },
+      }
     },
     template:
-      '<div style="height: 100vh"><ChapterEditor v-bind="args" :content="content" @change="update" /></div>',
+      '<div style="height: 100vh"><ChapterEditor v-bind="args" :content="content" :image-layouts="layouts" @change="update" @image-layout="setLayout" /></div>',
   }),
 } satisfies Meta<typeof ChapterEditor>
 
@@ -61,19 +71,36 @@ export const Markdown: Story = {
   },
 }
 
-/** 图片：项目内的图片正常显示（这里用内嵌 SVG 模拟），无法显示的引用显示占位。 */
+const svgImage = (label: string) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="200"><rect width="480" height="200" fill="#e5e7eb"/><text x="240" y="108" font-size="20" text-anchor="middle" fill="#374151">${label}</text></svg>`,
+  )}`
+
+/**
+ * 图片：项目内的图片正常显示（这里用内嵌 SVG 模拟），无法显示的引用显示占位。
+ * 点击选中图片后出现布局按钮（原始 / 小 / 中 / 大 / 通栏，靠左 / 居中 / 靠右），Cmd+Z 可撤销。
+ */
 export const Images: Story = {
   args: {
     chapterId: 'ch-4',
     number: '2.2',
     title: '实验装置',
-    content: '装置示意：\n\n![装置](../assets/装置.svg)\n\n![缺失的图](../assets/缺失.png)\n',
+    content: '装置示意：\n\n![装置](../assets/装置.svg)\n\n![曲线](../assets/曲线.svg)\n\n![缺失的图](../assets/缺失.png)\n',
+    imageLayouts: new Map([['assets/曲线.svg', { size: 'small', align: 'left' }]]),
     resolveImage: (reference: string) =>
-      reference.endsWith('装置.svg')
-        ? `data:image/svg+xml,${encodeURIComponent(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="200"><rect width="480" height="200" fill="#e5e7eb"/><text x="240" y="108" font-size="20" text-anchor="middle" fill="#374151">实验装置</text></svg>',
-          )}`
-        : null,
+      reference.endsWith('装置.svg') ? svgImage('实验装置') : reference.endsWith('曲线.svg') ? svgImage('曲线（小图靠左）') : null,
+  },
+}
+
+/** 技术文档主题：黑体正文、较小字号；图片默认为正文宽度的 85%。 */
+export const TechnicalTheme: Story = {
+  args: {
+    chapterId: 'ch-5',
+    number: '1',
+    title: '系统架构',
+    theme: THEMES.technical,
+    content: '## 模块\n\n系统分为**存储**与*渲染*两部分。\n\n![架构](../assets/架构.svg)\n\n> 设计原则：简单可靠。\n\n| 模块 | 职责 |\n| --- | --- |\n| 存储 | 保存事务 |\n',
+    resolveImage: () => svgImage('架构图'),
   },
 }
 

@@ -6,6 +6,8 @@ use std::path::Path;
 
 use image::{ImageFormat, ImageReader, Limits};
 
+use crate::render::theme::ImageSize;
+
 /// 单边像素上限；更大的图片按比例缩小后再嵌入 Word，控制文件体积。
 const MAX_EMBED_PX: u32 = 2400;
 /// 解码时的尺寸与内存上限，防止恶意图片耗尽内存。
@@ -17,11 +19,25 @@ const PT_PER_PX: f64 = 0.75;
 /// 图片显示高度上限（磅）：约为 A4 正文区高度的 60%，章节标题、图片与图注能排在同一页。
 pub const MAX_IMAGE_HEIGHT_PT: f64 = 420.0;
 
-/// 图片在正文中的显示尺寸（磅）：按 96 DPI 换算，保持比例缩小到不超过正文宽度与高度上限，不放大。
-pub fn display_size_pt(width_px: u32, height_px: u32, max_width_pt: f64) -> (f64, f64) {
+/// 图片在正文中的显示尺寸（磅），保持比例：
+/// - original：按 96 DPI 换算，缩小到不超过正文宽度，不放大；
+/// - 其他尺寸：宽度为正文宽度的固定比例（小图会被放大）。
+///
+/// 任何尺寸下高度都不超过 `MAX_IMAGE_HEIGHT_PT`（超出时整体按比例缩小）。
+/// 编辑器与预览的 CSS 遵循同一规则（`ui/document_style/theme.css`）。
+pub fn display_size_pt(
+    width_px: u32,
+    height_px: u32,
+    text_width_pt: f64,
+    size: ImageSize,
+) -> (f64, f64) {
     let width = f64::from(width_px) * PT_PER_PX;
     let height = f64::from(height_px) * PT_PER_PX;
-    let scale = (max_width_pt / width).min(MAX_IMAGE_HEIGHT_PT / height).min(1.0);
+    let scale = match size.width_ratio() {
+        Some(ratio) => text_width_pt * ratio / width,
+        None => (text_width_pt / width).min(1.0),
+    };
+    let scale = scale.min(MAX_IMAGE_HEIGHT_PT / height);
     (width * scale, height * scale)
 }
 
@@ -99,13 +115,33 @@ pub mod tests {
 
     #[test]
     fn display_size_fits_width_and_height_keeping_aspect_ratio() {
+        let original = ImageSize::Original;
         // 小图不放大。
-        assert_eq!(display_size_pt(100, 50, 453.5), (75.0, 37.5));
+        assert_eq!(display_size_pt(100, 50, 453.5, original), (75.0, 37.5));
         // 宽图按正文宽度缩小。
-        let (w, h) = display_size_pt(3000, 300, 453.5);
+        let (w, h) = display_size_pt(3000, 300, 453.5, original);
         assert!((w - 453.5).abs() < 1e-6 && (h - 45.35).abs() < 1e-6);
         // 竖长图按高度上限缩小，比例不变。
-        let (w, h) = display_size_pt(400, 1600, 453.5);
+        let (w, h) = display_size_pt(400, 1600, 453.5, original);
+        assert!((h - MAX_IMAGE_HEIGHT_PT).abs() < 1e-6);
+        assert!((w / h - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn semantic_sizes_are_fractions_of_text_width() {
+        for (size, ratio) in [
+            (ImageSize::Small, 0.4),
+            (ImageSize::Medium, 0.65),
+            (ImageSize::Large, 0.85),
+            (ImageSize::Full, 1.0),
+        ] {
+            // 小图同样放大到目标宽度。
+            let (w, h) = display_size_pt(100, 50, 400.0, size);
+            assert!((w - 400.0 * ratio).abs() < 1e-6, "{size:?}");
+            assert!((w / h - 2.0).abs() < 1e-9);
+        }
+        // 竖长图即使选择通栏，高度也不超过上限。
+        let (w, h) = display_size_pt(400, 1600, 453.5, ImageSize::Full);
         assert!((h - MAX_IMAGE_HEIGHT_PT).abs() < 1e-6);
         assert!((w / h - 0.25).abs() < 1e-9);
     }

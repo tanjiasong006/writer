@@ -7,8 +7,10 @@ import {
   hasContent,
   replaceTree,
   setContent,
+  setStyle,
   setTitle,
 } from './document.ts'
+import { defaultDocumentStyle, isDefaultStyle, overrideStyle } from '../document_style/document_style.ts'
 
 const tree: ChapterTree = [
   { id: 'a', title: '第一章', children: [{ id: 'a1', title: '背景', children: [] }] },
@@ -54,10 +56,21 @@ test('createDocument：多出不属于任何章节的正文时失败', () => {
   })
 })
 
-test('emptyDocument：空树、空正文', () => {
+test('emptyDocument：空树、空正文、默认样式', () => {
   const document = emptyDocument('新文档')
   assert.deepEqual(document.tree, [])
   assert.equal(document.contents.size, 0)
+  assert.ok(isDefaultStyle(document.style))
+})
+
+test('setStyle：只改变样式，正文与结构不变；同一样式返回同一文档', () => {
+  const document = doc()
+  const style = overrideStyle(defaultDocumentStyle(), { bodySize: 14 })
+  const next = setStyle(document, style)
+  assert.equal(next.style, style)
+  assert.equal(next.contents, document.contents)
+  assert.equal(next.tree, document.tree)
+  assert.equal(setStyle(next, style), next)
 })
 
 test('replaceTree：删除子树时一并去掉子孙正文', () => {

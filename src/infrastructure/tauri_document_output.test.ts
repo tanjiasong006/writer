@@ -1,10 +1,17 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
 import { createTauriDocumentOutput } from './tauri_document_output.ts'
+import { THEMES } from '../domain/document_style/document_style.ts'
+import type { RenderRequest } from '../application/document_output.ts'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 const invokeMock = vi.mocked(invoke)
-const request = { title: '论文', chapters: [{ id: 'a', number: [1], title: '绪论', markdown: '正文' }] }
+const request: RenderRequest = {
+  title: '论文',
+  chapters: [{ id: 'a', number: [1], title: '绪论', markdown: '正文' }],
+  theme: THEMES.book,
+  images: {},
+}
 
 beforeEach(() => {
   invokeMock.mockReset()

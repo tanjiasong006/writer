@@ -96,6 +96,37 @@ test('只调整结构：不携带任何正文，正文由存储层保留', async
   expect(committedContents(storage)).toEqual({ a: '引言', a1: '背景正文', b: '' })
 })
 
+test('修改文档样式：dirty，保存不携带任何正文；重新打开后样式恢复', async () => {
+  const { storage, session } = setup()
+  session.selectTheme('technical')
+  session.overrideStyle({ bodySize: 12, lineHeight: 2 })
+  session.setImageLayout('assets/图.png', { size: 'large', align: 'left' })
+  expect(session.status).toBe('dirty')
+
+  expect(await session.save()).toBe(true)
+  expect(storage.saves[0].changed.size).toBe(0)
+  expect(session.status).toBe('saved')
+
+  const reopened = await openProject(storage, PATH)
+  if (!reopened.ok) throw new Error('reopen')
+  const { style } = reopened.session.document
+  expect(style.theme).toBe('technical')
+  expect(style.overrides).toEqual({ bodySize: 12, lineHeight: 2 })
+  expect([...style.images]).toEqual([['assets/图.png', { size: 'large', align: 'left' }]])
+  expect(committedContents(storage)).toEqual({ a: '引言', a1: '背景正文', b: '' })
+})
+
+test('样式没有实际变化时不产生修改', () => {
+  const { session } = setup()
+  const before = session.document
+  session.selectTheme('book')
+  session.overrideStyle({ bodySize: 12 })
+  session.resetStyleOverrides()
+  session.setImageLayout('assets/图.png', null)
+  expect(session.document).toBe(before)
+  expect(session.isDirty).toBe(false)
+})
+
 test('删除含子章节的章节：保存后磁盘上不再有其正文', async () => {
   const { storage, session } = setup()
   const removed = removeChapter(session.document.tree, 'a')

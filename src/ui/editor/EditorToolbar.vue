@@ -6,6 +6,7 @@ import type { ToolbarCommand, ToolbarState } from './commands.ts'
  * 只发出命令名，具体编辑由 commands 中的 ProseMirror 命令完成；
  * 按钮的可用 / 激活状态来自编辑器当前状态（state），不提供时全部可用。
  * 按钮在 mousedown 时阻止默认行为，点击后焦点仍留在编辑器中。
+ * context 插槽显示在工具栏右侧，用于与当前选中内容相关的按钮（如图片布局）。
  */
 const props = defineProps<{ state?: ToolbarState | null }>()
 
@@ -92,13 +93,17 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
         <template v-else>{{ item.text }}</template>
       </button>
     </div>
+    <div v-if="$slots.context" class="editor-toolbar__context">
+      <slot name="context" />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .editor-toolbar {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   width: 100%;
   max-width: 760px;
   box-sizing: border-box;
@@ -110,6 +115,11 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
 .editor-toolbar__group {
   display: flex;
   gap: 2px;
+}
+
+.editor-toolbar__context {
+  display: flex;
+  margin-left: auto;
 }
 
 .editor-toolbar__button {

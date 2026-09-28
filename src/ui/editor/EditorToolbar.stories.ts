@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import EditorToolbar from './EditorToolbar.vue'
+import ImageLayoutControls from './ImageLayoutControls.vue'
 
 const meta = {
   title: 'UI/Editor/EditorToolbar',
@@ -45,4 +46,14 @@ export const InCodeBlock: Story = {
       image: { enabled: false, active: false },
     },
   },
+}
+
+/** 选中图片时：工具栏右侧出现图片布局按钮（context 插槽）；窄窗口中换到第二行。 */
+export const WithImageSelected: Story = {
+  render: (args) => ({
+    components: { EditorToolbar, ImageLayoutControls },
+    setup: () => ({ args }),
+    template:
+      '<EditorToolbar v-bind="args"><template #context><ImageLayoutControls :layout="{ size: \'large\', align: \'center\' }" /></template></EditorToolbar>',
+  }),
 }

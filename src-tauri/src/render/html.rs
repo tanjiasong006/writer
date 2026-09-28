@@ -1,5 +1,8 @@
 //! 全文预览的 HTML。所有文本都经过转义；图片以 `data-writer-src` 给出本地绝对路径，
 //! 由前端转换成 webview 可访问的地址，渲染层不关心平台协议。
+//!
+//! 这里只输出语义结构：主题由前端以 CSS 变量应用到预览容器（与编辑器共用同一套映射），
+//! 独立成段的图片以 `data-size` / `data-align` 标明布局，HTML 中不含任何样式数值。
 
 use std::fmt::Write;
 use std::path::Path;
@@ -15,12 +18,12 @@ pub fn render(document: &Document, project_root: &Path) -> String {
         escape(&document.title)
     );
     for section in &document.sections {
-        render_section(&mut out, section, project_root);
+        render_section(&mut out, document, section, project_root);
     }
     out
 }
 
-fn render_section(out: &mut String, section: &Section, root: &Path) {
+fn render_section(out: &mut String, document: &Document, section: &Section, root: &Path) {
     let level = section.depth.clamp(1, 5) + 1;
     let _ = write!(
         out,
@@ -31,14 +34,26 @@ fn render_section(out: &mut String, section: &Section, root: &Path) {
         title = escape(&section.title),
     );
     for block in &section.blocks {
-        render_block(out, block, section, root);
+        render_block(out, document, block, section, root);
     }
     out.push_str("</section>");
 }
 
-fn render_block(out: &mut String, block: &Block, section: &Section, root: &Path) {
+fn render_block(
+    out: &mut String,
+    document: &Document,
+    block: &Block,
+    section: &Section,
+    root: &Path,
+) {
     if let Some((src, alt)) = block.as_figure() {
-        out.push_str("<figure>");
+        let layout = document.figure_layout(src);
+        let _ = write!(
+            out,
+            "<figure data-size=\"{}\" data-align=\"{}\">",
+            layout.size.as_str(),
+            layout.align.as_str()
+        );
         render_image(out, src, alt, root);
         if !alt.is_empty() {
             let _ = write!(out, "<figcaption>{}</figcaption>", escape(alt));
@@ -71,7 +86,7 @@ fn render_block(out: &mut String, block: &Block, section: &Section, root: &Path)
             for item in items {
                 out.push_str("<li>");
                 for block in item {
-                    render_block(out, block, section, root);
+                    render_block(out, document, block, section, root);
                 }
                 out.push_str("</li>");
             }
@@ -80,7 +95,7 @@ fn render_block(out: &mut String, block: &Block, section: &Section, root: &Path)
         Block::Quote(blocks) => {
             out.push_str("<blockquote>");
             for block in blocks {
-                render_block(out, block, section, root);
+                render_block(out, document, block, section, root);
             }
             out.push_str("</blockquote>");
         }
@@ -188,14 +203,26 @@ fn escape(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::theme::{test_theme, ImageAlign, ImageOverride, ImageSize};
     use super::super::{build, RenderChapter, RenderRequest};
     use super::*;
+    use std::collections::BTreeMap;
     use std::fs;
     use tempfile::TempDir;
 
     fn render_chapters(root: &Path, chapters: &[(&str, Vec<u32>, &str, &str)]) -> String {
+        render_with_images(root, chapters, BTreeMap::new())
+    }
+
+    fn render_with_images(
+        root: &Path,
+        chapters: &[(&str, Vec<u32>, &str, &str)],
+        images: BTreeMap<String, ImageOverride>,
+    ) -> String {
         let request = RenderRequest {
             title: "论文 <标题>".into(),
+            theme: test_theme(),
+            images,
             chapters: chapters
                 .iter()
                 .map(|(id, number, title, markdown)| RenderChapter {
@@ -267,10 +294,47 @@ mod tests {
         );
         let expected = root.join("assets/图.png");
         assert!(html.contains(&format!(
-            "<figure><img data-writer-src=\"{}\" alt=\"装置\"><figcaption>装置</figcaption></figure>",
+            "<figure data-size=\"original\" data-align=\"center\"><img data-writer-src=\"{}\" alt=\"装置\"><figcaption>装置</figcaption></figure>",
             expected.display()
         )));
         assert!(html.contains("<span class=\"missing-image\">图片无法显示：丢失</span>"));
+    }
+
+    #[test]
+    fn figures_carry_layout_by_image_identity() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("assets")).unwrap();
+        fs::create_dir_all(root.join("content")).unwrap();
+        fs::write(root.join("assets/a.png"), b"x").unwrap();
+        fs::write(root.join("assets/b.png"), b"x").unwrap();
+        let images = BTreeMap::from([(
+            "assets/b.png".to_owned(),
+            ImageOverride {
+                size: Some(ImageSize::Small),
+                align: Some(ImageAlign::Right),
+            },
+        )]);
+        // b 之前插入了 a：布局仍属于 b，不会串到 a。
+        let html = render_with_images(
+            root,
+            &[(
+                "x",
+                vec![1],
+                "图",
+                "![](../assets/a.png)\n\n![](../assets/b.png)\n\n行内 ![](../assets/b.png) 图",
+            )],
+            images,
+        );
+        let figures: Vec<&str> = html
+            .match_indices("<figure ")
+            .map(|(i, _)| &html[i..i + 50])
+            .collect();
+        assert_eq!(figures.len(), 2);
+        assert!(figures[0].starts_with("<figure data-size=\"original\" data-align=\"center\">"));
+        assert!(figures[1].starts_with("<figure data-size=\"small\" data-align=\"right\">"));
+        // 与文字同段的图片不是独立的图，没有布局。
+        assert!(html.contains("<p>行内 <img"));
     }
 
     #[test]

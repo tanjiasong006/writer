@@ -15,7 +15,8 @@
 | `plugins.ts` | 快捷键、输入规则、撤销历史、表格编辑、占位提示、剪贴板；`createEditorState`。 |
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |
 | `image_view.ts` | 图片节点视图：按项目资源显示，无法显示时占位。 |
-| `ChapterEditor.vue` / `EditorToolbar.vue` | 挂载 EditorView、响应章节切换、发出 change、展示工具栏。 |
+| `image_layout.ts` | 图片布局：插件状态（图片文件键 → 布局、主题默认）、figure 装饰、可撤销的 `ImageLayoutStep`。 |
+| `ChapterEditor.vue` / `EditorToolbar.vue` / `ImageLayoutControls.vue` | 挂载 EditorView、响应章节切换、发出 change / image-layout、展示工具栏与图片布局按钮。 |
 
 ## 数据流
 
@@ -36,6 +37,9 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
 - 父组件回传的 content 与缓存一致时什么都不做；不一致（外部修改）时用一个事务替换文档并以新正文为基准，不回发 change。
 - `serializeChapter` 的结果再次解析后结构与文字不变；Markdown 无法表达的格式在写出时调整或去掉，文字永远不变。
 - 图片节点只保存正文中的原始引用；显示地址不进入文档，远程与项目外的地址不加载。
+- 文档主题只以 CSS 变量作用在组件外层（`ui/document_style/theme_css.ts`）：不改变文档、不产生 change、不进入撤销历史、不重建视图。
+- 图片布局不进入文档与 Markdown：由插件状态 + 装饰呈现；用户修改产生不改变文档的 `ImageLayoutStep`（进入撤销历史，
+  选区不变），编辑器据此发出 `image-layout`；上层的布局 / 主题变化以不进入历史的同步事务回到插件状态（切换章节时同样同步）。
 
 ## 非目标
 

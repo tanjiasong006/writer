@@ -1,6 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
-import { createDocument } from '../domain/document/document.ts'
+import { createDocument, setStyle } from '../domain/document/document.ts'
+import { defaultDocumentStyle, selectTheme, setImageLayout } from '../domain/document_style/document_style.ts'
 import { createTauriProjectStorage, decodeOpened, toFailure } from './tauri_project_storage.ts'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
@@ -101,4 +102,24 @@ test('decodeOpened：manifest 或正文不一致时拒绝', () => {
     ok: false,
     error: { code: 'manifest-invalid', detail: 'contents' },
   })
+})
+
+test('样式随 manifest 保存，打开时恢复；只改样式的保存不携带正文', async () => {
+  const style = setImageLayout(selectTheme(defaultDocumentStyle(), 'classic'), 'assets/图.png', { size: 'full' })
+  invokeMock.mockResolvedValue(null)
+  await createTauriProjectStorage().save('/p/论文', setStyle(document, style), new Set())
+  const sent = invokeMock.mock.calls[0][1] as { request: { manifest: unknown; contents: unknown } }
+  expect(sent.request.contents).toEqual({})
+  expect(sent.request.manifest).toEqual({
+    ...manifest,
+    style: { theme: 'classic', images: { 'assets/图.png': { size: 'full' } } },
+  })
+
+  const opened = decodeOpened({
+    manifest: JSON.parse(JSON.stringify(sent.request.manifest)),
+    contents: { a: 'A', b: 'B', b1: 'B1' },
+    orphanFiles: [],
+  })
+  if (!opened.ok) throw new Error('decode')
+  expect(opened.value.document.style).toEqual(style)
 })

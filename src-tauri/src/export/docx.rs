@@ -5,6 +5,8 @@
 //! - 正文内的 `#` 标题叠加在章节层级之下，不带编号。
 //! - 所有写入 XML 的文本先去掉 XML 1.0 不允许的控制字符，否则 Word 会拒绝打开整个文件。
 //! - 图片缺失或损坏时输出占位文字并记录在报告中，绝不 panic。
+//! - 排版来自文档主题（`render::theme`）：字体族、字号、行距、段距、各级标题、引用、代码、表格、
+//!   图注写入对应的段落样式；独立成段的图片按其布局决定宽度与对齐。
 
 use std::io::Cursor;
 use std::path::Path;
@@ -12,15 +14,16 @@ use std::path::Path;
 use docx_rs::{
     AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, Footer, Hyperlink,
     HyperlinkType, IndentLevel, Level, LevelJc, LevelOverride, LevelText, LineSpacing,
-    NumberFormat, Numbering, NumberingId, PageMargin, PageNum, Paragraph, ParagraphBorder,
-    ParagraphBorderPosition, Pic, Run, RunFonts, Shading, ShdType, SpecialIndentType, Start, Style,
-    StyleType, Table, TableCell, TableRow, WidthType,
+    LineSpacingType, NumberFormat, Numbering, NumberingId, PageMargin, PageNum, Paragraph,
+    ParagraphBorder, ParagraphBorderPosition, Pic, Run, RunFonts, Shading, ShdType,
+    SpecialIndentType, Start, Style, StyleType, Table, TableCell, TableRow, WidthType,
 };
 
-use super::fonts::{docx_fonts, FontRole};
+use super::fonts::{docx_fonts, FontFamily};
 use super::images::{display_size_pt, load_for_docx};
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{Align, Block, Inline};
+use crate::render::theme::{ImageAlign, ImageSize, Theme};
 use crate::render::{resolve_image, Document, Section};
 
 /// A4，单位 twip（1/20 磅）。
@@ -38,14 +41,22 @@ const BULLET_NUMBERING: usize = 10;
 const FIRST_LIST_NUMBERING: usize = 11;
 const MAX_HEADING: usize = 9;
 
-/// 标题字号（半磅）：H1..H9。
-const HEADING_SIZES: [usize; MAX_HEADING] = [32, 28, 26, 24, 24, 24, 24, 24, 24];
+/// 磅 → Word 的半磅字号。
+fn half_points(pt: f64) -> usize {
+    (pt * 2.0).round() as usize
+}
+
+/// 磅 → twip（1/20 磅）。
+fn twips(pt: f64) -> u32 {
+    (pt * 20.0).round() as u32
+}
 
 pub fn export(
     document: &Document,
     project_root: &Path,
 ) -> Result<(Vec<u8>, ExportReport), ExportError> {
     let mut writer = Writer {
+        document,
         root: project_root,
         report: ExportReport::default(),
         next_numbering: FIRST_LIST_NUMBERING,
@@ -64,7 +75,7 @@ pub fn export(
         writer.section(section);
     }
 
-    let mut docx = base_document();
+    let mut docx = base_document(&document.theme);
     for numbering in writer.numberings.drain(..) {
         docx = docx.add_numbering(numbering);
     }
@@ -93,6 +104,7 @@ enum Item {
 }
 
 struct Writer<'a> {
+    document: &'a Document,
     root: &'a Path,
     report: ExportReport,
     next_numbering: usize,
@@ -164,7 +176,9 @@ impl Writer<'_> {
                 }
             }
             Block::Code { text, .. } => {
-                let mut run = Run::new().fonts(fonts(FontRole::Mono)).size(20);
+                let mut run = Run::new()
+                    .fonts(fonts(FontFamily::Mono))
+                    .size(half_points(self.document.theme.code_block.size));
                 for (i, line) in text.split('\n').enumerate() {
                     if i > 0 {
                         run = run.add_break(BreakType::TextWrapping);
@@ -294,7 +308,7 @@ impl Writer<'_> {
             |writer: &mut Self, cells: &[Vec<Inline>], style: RunStyle, is_header: bool| {
                 let cells = (0..columns)
                     .map(|i| {
-                        let mut p = Paragraph::new();
+                        let mut p = Paragraph::new().style("TableText");
                         p = match alignments.get(i) {
                             Some(Align::Center) => p.align(AlignmentType::Center),
                             Some(Align::Right) => p.align(AlignmentType::Right),
@@ -332,20 +346,38 @@ impl Writer<'_> {
     }
 
     fn figure(&mut self, src: &str, alt: &str, context: BlockContext) {
-        let p = self.indent(Paragraph::new().align(AlignmentType::Center), context);
+        let layout = self.document.figure_layout(src);
+        let align = match layout.align {
+            ImageAlign::Left => AlignmentType::Left,
+            ImageAlign::Center => AlignmentType::Center,
+            ImageAlign::Right => AlignmentType::Right,
+        };
+        let theme = &self.document.theme;
+        let spacing = twips(theme.image.spacing * theme.body.size);
+        let image_spacing =
+            LineSpacing::new()
+                .before(spacing)
+                .after(if alt.is_empty() { spacing } else { 0 });
+        let p = self
+            .indent(Paragraph::new().align(align), context)
+            .line_spacing(image_spacing);
         // 图片与下面的图注留在同一页。
-        let p = p.keep_next(!alt.is_empty()).add_run(self.image_run(src, alt));
+        let p = p
+            .keep_next(!alt.is_empty())
+            .add_run(self.image_run(src, alt, layout.size));
         self.items.push(Item::Paragraph(p));
         if !alt.is_empty() {
             self.items.push(Item::Paragraph(
                 Paragraph::new()
                     .style("Caption")
+                    .align(align)
+                    .line_spacing(LineSpacing::new().after(spacing))
                     .add_run(Run::new().add_text(xml_safe(alt))),
             ));
         }
     }
 
-    fn image_run(&mut self, src: &str, alt: &str) -> Run {
+    fn image_run(&mut self, src: &str, alt: &str, size: ImageSize) -> Run {
         let image = resolve_image(self.root, src).and_then(|path| load_for_docx(&path));
         let Some(image) = image else {
             self.report.missing_images.push(src.to_owned());
@@ -354,8 +386,12 @@ impl Writer<'_> {
                 .color("B91C1C")
                 .add_text(xml_safe(&format!("[图片无法显示：{label}]")));
         };
-        let (width, height) =
-            display_size_pt(image.width, image.height, f64::from(TEXT_WIDTH) / 20.0);
+        let (width, height) = display_size_pt(
+            image.width,
+            image.height,
+            f64::from(TEXT_WIDTH) / 20.0,
+            size,
+        );
         let pic = Pic::new_with_dimensions(image.png, image.width, image.height)
             .size(pt_to_emu(width), pt_to_emu(height));
         Run::new().add_image(pic)
@@ -410,7 +446,8 @@ impl Writer<'_> {
                     }
                 }
                 Inline::Image { src, alt } => {
-                    let run = self.image_run(src, alt);
+                    // 与文字同段的图片没有布局，按原始尺寸（不超过正文宽度）。
+                    let run = self.image_run(src, alt, ImageSize::Original);
                     p.add_run(run)
                 }
                 Inline::SoftBreak => p.add_run(styled(Run::new().add_text(" "), style)),
@@ -433,14 +470,14 @@ fn styled(mut run: Run, style: RunStyle) -> Run {
     }
     if style.code {
         run = run
-            .fonts(fonts(FontRole::Mono))
+            .fonts(fonts(FontFamily::Mono))
             .shading(Shading::new().shd_type(ShdType::Clear).fill("F3F4F6"));
     }
     run
 }
 
-fn fonts(role: FontRole) -> RunFonts {
-    let names = docx_fonts(role);
+fn fonts(family: impl Into<FontFamily>) -> RunFonts {
+    let names = docx_fonts(family.into());
     RunFonts::new()
         .ascii(names.latin)
         .hi_ansi(names.latin)
@@ -467,9 +504,13 @@ pub fn xml_safe(text: &str) -> String {
         .collect()
 }
 
-fn base_document() -> Docx {
-    let body = fonts(FontRole::Body);
-    let heading = fonts(FontRole::Heading);
+fn base_document(theme: &Theme) -> Docx {
+    let body = &theme.body;
+    // 行距：相邻基线距离 = 字号 × 行距倍数。用"最小值"而不是"固定值"：行内图片等较高的内容不会被裁掉。
+    let body_line = LineSpacing::new()
+        .line_rule(LineSpacingType::AtLeast)
+        .line(twips(body.size * body.line_height) as i32)
+        .after(twips(body.size * body.paragraph_spacing));
 
     let mut docx = Docx::new()
         .page_size(PAGE_WIDTH, PAGE_HEIGHT)
@@ -482,9 +523,9 @@ fn base_document() -> Docx {
                 .header(720)
                 .footer(720),
         )
-        .default_fonts(body)
-        .default_size(24)
-        .default_line_spacing(LineSpacing::new().line(360).after(120))
+        .default_fonts(fonts(body.font))
+        .default_size(half_points(body.size))
+        .default_line_spacing(body_line)
         .footer(
             Footer::new().add_paragraph(
                 Paragraph::new()
@@ -496,8 +537,8 @@ fn base_document() -> Docx {
             Style::new("Title", StyleType::Paragraph)
                 .name("Title")
                 .based_on("Normal")
-                .fonts(heading.clone())
-                .size(44)
+                .fonts(fonts(theme.title.font))
+                .size(half_points(theme.title.size))
                 .bold()
                 .align(AlignmentType::Center)
                 .q_format(true),
@@ -506,37 +547,65 @@ fn base_document() -> Docx {
             Style::new("Code", StyleType::Paragraph)
                 .name("Code")
                 .based_on("Normal")
-                .fonts(fonts(FontRole::Mono))
-                .size(20)
-                .line_spacing(LineSpacing::new().line(276).after(120)),
+                .fonts(fonts(FontFamily::Mono))
+                .size(half_points(theme.code_block.size))
+                .line_spacing(
+                    LineSpacing::new()
+                        .line_rule(LineSpacingType::Auto)
+                        .line(276)
+                        .after(twips(body.size * body.paragraph_spacing)),
+                ),
         )
         .add_style(
             Style::new("Quote", StyleType::Paragraph)
                 .name("Quote")
                 .based_on("Normal")
+                .fonts(fonts(theme.blockquote.font))
+                .size(half_points(theme.blockquote.size))
                 .color("4B5563")
                 .indent(Some(LIST_INDENT), None, None, None),
+        )
+        .add_style(
+            Style::new("TableText", StyleType::Paragraph)
+                .name("Table Text")
+                .based_on("Normal")
+                .size(half_points(theme.table.size))
+                .line_spacing(
+                    LineSpacing::new()
+                        .line_rule(LineSpacingType::Auto)
+                        .line(276)
+                        .before(40)
+                        .after(40),
+                ),
         )
         .add_style(
             Style::new("Caption", StyleType::Paragraph)
                 .name("caption")
                 .based_on("Normal")
-                .size(20)
+                .fonts(fonts(theme.caption.font))
+                .size(half_points(theme.caption.size))
                 .color("6B7280")
                 .align(AlignmentType::Center),
         );
 
     for level in 1..=MAX_HEADING {
+        let heading = theme.heading(level);
         docx = docx.add_style(
             Style::new(format!("Heading{level}"), StyleType::Paragraph)
                 .name(format!("heading {level}"))
                 .based_on("Normal")
                 .next("Normal")
-                .fonts(heading.clone())
-                .size(HEADING_SIZES[level - 1])
+                .fonts(fonts(heading.font))
+                .size(half_points(heading.size))
                 .bold()
                 .outline_lvl(level - 1)
-                .line_spacing(LineSpacing::new().before(240).after(120))
+                .line_spacing(
+                    LineSpacing::new()
+                        .line_rule(LineSpacingType::Auto)
+                        .line(288)
+                        .before(twips(heading.size * heading.spacing_before))
+                        .after(twips(heading.size * heading.spacing_after)),
+                )
                 .q_format(true),
         );
     }
@@ -615,6 +684,8 @@ mod tests {
     fn request(chapters: &[(&str, Vec<u32>, &str, &str)]) -> RenderRequest {
         RenderRequest {
             title: "示例论文".into(),
+            theme: crate::render::theme::test_theme(),
+            images: Default::default(),
             chapters: chapters
                 .iter()
                 .map(|(id, number, title, markdown)| RenderChapter {
@@ -812,6 +883,104 @@ mod tests {
         assert!(xml.contains(r#"cx="1333500" cy="5334000""#));
     }
 
+    /// styles.xml 中某个样式定义的 XML 片段。
+    fn style_xml<'a>(styles: &'a str, id: &str) -> &'a str {
+        let start = styles
+            .find(&format!(r#"w:styleId="{id}""#))
+            .unwrap_or_else(|| panic!("style {id} missing"));
+        let end = styles[start..].find("</w:style>").unwrap() + start;
+        &styles[start..end]
+    }
+
+    #[test]
+    fn theme_maps_to_word_styles() {
+        use crate::render::theme::FontId;
+        let dir = project();
+        let mut request = request(&[(
+            "a",
+            vec![1],
+            "绪论",
+            "正文\n\n> 引用\n\n| a |\n| - |\n| 1 |",
+        )]);
+        request.theme.body.font = FontId::Sans;
+        request.theme.body.size = 10.5;
+        request.theme.body.line_height = 2.0;
+        request.theme.body.paragraph_spacing = 0.5;
+        request.theme.heading1.font = FontId::Serif;
+        request.theme.heading1.size = 18.0;
+        request.theme.heading1.spacing_before = 1.0;
+        request.theme.table.size = 9.0;
+        request.theme.caption.size = 9.5;
+        let (bytes, _) = export(&build(&request), dir.path()).unwrap();
+        docx_rs::read_docx(&bytes).expect("generated docx must be readable");
+        let styles = part(&bytes, "word/styles.xml");
+
+        // 默认（正文）：黑体类字体、10.5 磅（半磅 21）、行距至少 21 磅（420 twip）、段后 5.25 磅。
+        let defaults = &styles
+            [styles.find("<w:docDefaults>").unwrap()..styles.find("</w:docDefaults>").unwrap()];
+        assert!(defaults.contains(r#"w:ascii="Arial""#), "{defaults}");
+        assert!(defaults.contains(r#"w:eastAsia="SimHei""#));
+        assert!(defaults.contains(r#"<w:sz w:val="21" />"#));
+        assert!(
+            defaults.contains(r#"w:line="420""#) && defaults.contains(r#"w:lineRule="atLeast""#)
+        );
+        assert!(defaults.contains(r#"w:after="105""#));
+
+        let h1 = style_xml(&styles, "Heading1");
+        assert!(h1.contains(r#"w:eastAsia="SimSun""#), "{h1}");
+        assert!(h1.contains(r#"<w:sz w:val="36" />"#));
+        assert!(h1.contains(r#"w:before="360""#));
+        // 第 3 级之后沿用第 3 级样式。
+        let h3 = style_xml(&styles, "Heading3");
+        let h7 = style_xml(&styles, "Heading7");
+        assert_eq!(
+            h3.replace("Heading3", "X")
+                .replace("heading 3", "x")
+                .replace("w:val=\"2\"", "L"),
+            h7.replace("Heading7", "X")
+                .replace("heading 7", "x")
+                .replace("w:val=\"6\"", "L")
+        );
+        assert!(style_xml(&styles, "TableText").contains(r#"<w:sz w:val="18" />"#));
+        assert!(style_xml(&styles, "Caption").contains(r#"<w:sz w:val="19" />"#));
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains(r#"<w:pStyle w:val="TableText" />"#));
+    }
+
+    #[test]
+    fn figure_layout_sets_width_and_alignment() {
+        use crate::render::theme::{ImageAlign, ImageOverride, ImageSize};
+        let dir = project();
+        write_image(&dir.path().join("assets/图.png"), 100, 50, ImageFormat::Png);
+        write_image(&dir.path().join("assets/另.png"), 100, 50, ImageFormat::Png);
+        let mut request = request(&[(
+            "a",
+            vec![1],
+            "图",
+            "![图注](../assets/图.png)\n\n![](../assets/另.png)",
+        )]);
+        request.images.insert(
+            "assets/图.png".into(),
+            ImageOverride {
+                size: Some(ImageSize::Full),
+                align: Some(ImageAlign::Right),
+            },
+        );
+        let (bytes, _) = export(&build(&request), dir.path()).unwrap();
+        let xml = part(&bytes, "word/document.xml");
+        // 通栏：正文宽度 5731510 EMU（小图被放大），高度按比例。
+        assert!(xml.contains(r#"cx="5731510" cy="2865755""#), "{xml}");
+        // 未设置的图片跟随主题：原始尺寸。
+        assert!(xml.contains(r#"cx="952500" cy="476250""#));
+        // 图片与图注都靠右。
+        let figure = &xml[..xml.find(r#"cx="5731510""#).unwrap()];
+        let figure = &figure[figure.rfind("<w:pPr>").unwrap()..];
+        assert!(figure.contains(r#"<w:jc w:val="right" />"#), "{figure}");
+        let caption =
+            &xml[xml.find("图注").unwrap().saturating_sub(600)..xml.find("图注").unwrap()];
+        assert!(caption.contains(r#"<w:jc w:val="right" />"#));
+    }
+
     #[test]
     fn control_characters_and_unsafe_links_do_not_break_the_file() {
         let dir = project();
@@ -906,6 +1075,13 @@ fn write_sample_docx() {
         320,
         image::ImageFormat::Png,
     );
+    // 第二张图设置了布局（小图、靠右），用于核对图片布局在导出中的效果。
+    write_image(
+        &root.join("assets/曲线.png"),
+        640,
+        320,
+        image::ImageFormat::Png,
+    );
     let chapter = |id: &str, number: Vec<u32>, title: &str, markdown: &str| RenderChapter {
         id: id.into(),
         number,
@@ -914,10 +1090,19 @@ fn write_sample_docx() {
     };
     let request = RenderRequest {
         title: "Writer 示例文档".into(),
+        theme: crate::render::theme::test_theme(),
+        images: [(
+            "assets/曲线.png".to_owned(),
+            crate::render::theme::ImageOverride {
+                size: Some(crate::render::theme::ImageSize::Small),
+                align: Some(crate::render::theme::ImageAlign::Right),
+            },
+        )]
+        .into(),
         chapters: vec![
             chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
-            chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
+            chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（小图靠右）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
     };
     let (bytes, report) = export(&build(&request), &root).unwrap();

@@ -2,7 +2,14 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import type { ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { MAX_CHAPTER_DEPTH } from '../../domain/chapter_tree/chapter_tree.ts'
-import { replaceTree, emptyDocument } from '../../domain/document/document.ts'
+import { replaceTree, emptyDocument, setStyle } from '../../domain/document/document.ts'
+import {
+  defaultDocumentStyle,
+  isDefaultStyle,
+  overrideStyle,
+  selectTheme,
+  setImageLayout,
+} from '../../domain/document_style/document_style.ts'
 import {
   buildManifest,
   contentFileName,
@@ -199,5 +206,65 @@ test('resolveAssetReference：项目外、远程、绝对路径与非法编码�
     '',
   ]) {
     assert.equal(resolveAssetReference('/文稿/论文', reference), null, reference)
+  }
+})
+
+test('style：旧项目没有 style 时使用默认样式；默认样式不写入 manifest', () => {
+  const raw = manifestJson()
+  assert.equal('style' in (raw as object), false)
+  const parsed = parseManifest(raw)
+  assert.ok(parsed.ok)
+  if (!parsed.ok) return
+  assert.ok(isDefaultStyle(parsed.manifest.style))
+})
+
+test('style：主题、调整与图片布局往返不变', () => {
+  let style = selectTheme(defaultDocumentStyle(), 'technical')
+  style = overrideStyle(style, { bodyFont: 'serif', lineHeight: 2, heading1Size: 18 })
+  style = setImageLayout(style, 'assets/装置.png', { size: 'large', align: 'left' })
+  style = setImageLayout(style, 'assets/小图.png', { size: 'small' })
+  const document = setStyle(replaceTree(emptyDocument('我的论文'), tree), style)
+  const raw = JSON.parse(JSON.stringify(buildManifest(document)))
+  assert.deepEqual(raw.style, {
+    theme: 'technical',
+    overrides: { bodyFont: 'serif', lineHeight: 2, heading1Size: 18 },
+    images: { 'assets/装置.png': { size: 'large', align: 'left' }, 'assets/小图.png': { size: 'small' } },
+  })
+  const parsed = parseManifest(raw)
+  assert.ok(parsed.ok)
+  if (!parsed.ok) return
+  assert.deepEqual(parsed.manifest.style, style)
+})
+
+test('style：只有主题时省略空的 overrides 与 images', () => {
+  const document = setStyle(emptyDocument('论文'), selectTheme(defaultDocumentStyle(), 'classic'))
+  assert.deepEqual(buildManifest(document).style, { theme: 'classic' })
+})
+
+test('style：无法识别的内容逐项忽略，不拒绝打开', () => {
+  const parsed = parseManifest(
+    manifestJson({
+      style: {
+        theme: 'future-theme',
+        overrides: { bodySize: 999, lineHeight: 1.5, bodyFont: 'Comic Sans', unknown: 1 },
+        images: {
+          'assets/a.png': { size: 'huge', align: 'right' },
+          'assets/b.png': 'large',
+          '../outside.png': { size: 'small' },
+          '/abs.png': { size: 'small' },
+          'assets/c.png': { size: 'bogus' },
+        },
+      },
+    }),
+  )
+  assert.ok(parsed.ok)
+  if (!parsed.ok) return
+  const { style } = parsed.manifest
+  assert.equal(style.theme, 'book')
+  assert.deepEqual(style.overrides, { lineHeight: 1.5 })
+  assert.deepEqual([...style.images], [['assets/a.png', { align: 'right' }]])
+  for (const junk of [null, 3, 'book', []]) {
+    const result = parseManifest(manifestJson({ style: junk }))
+    assert.ok(result.ok && isDefaultStyle(result.manifest.style))
   }
 })

@@ -5,7 +5,8 @@ import { APP_SERVICES } from './ui/services.ts'
 import { createMemoryServices } from './testing/memory_services.ts'
 import { createDocument } from './domain/document/document.ts'
 import type { ChapterTree } from './domain/chapter_tree/chapter_tree.ts'
-import { Selection, TextSelection } from 'prosemirror-state'
+import { NodeSelection, Selection, TextSelection } from 'prosemirror-state'
+import { undo, undoDepth } from 'prosemirror-history'
 import type { EditorView } from 'prosemirror-view'
 import ChapterEditor from './ui/editor/ChapterEditor.vue'
 
@@ -546,6 +547,109 @@ test('插入图片期间切换了章节：图片追加到发起请求的章节�
   const contents = services.storage.committed(PATH)!.contents
   expect(contents.get('a')).toBe('引言\n\n![a](../assets/a.png)\n')
   expect(contents.get('b')).toBe('方法正文')
+})
+
+test('文档样式：修改正文字体即时作用于编辑器，不改变正文与撤销历史；预览、导出使用同一主题；重开后仍在', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.exportPath = '/导出/毕业论文.pdf'
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  const view = editorView(wrapper)
+  typeAtEnd(view, '！')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  const depth = undoDepth(view.state)
+  const doc = view.state.doc
+
+  await button(wrapper, '样式').trigger('click')
+  await wrapper.find('[aria-label="正文字体"]').findAll('button')[1].trigger('click') // 黑体
+  await wrapper.findAll('.style-panel select')[2].setValue('2') // 行距
+  await flushPromises()
+
+  // 编辑器：同一个视图、文档与撤销历史不变，只改变 CSS 变量。
+  expect(editorView(wrapper)).toBe(view)
+  expect(view.state.doc).toBe(doc)
+  expect(undoDepth(view.state)).toBe(depth)
+  const root = wrapper.find('.chapter-editor').element as HTMLElement
+  expect(root.style.getPropertyValue('--doc-body-font')).toContain('Arial')
+  expect(root.style.getPropertyValue('--doc-line-height')).toBe('2')
+  expect(wrapper.find('.save-status').text()).toBe('未保存')
+
+  // 保存：只提交样式，不携带任何正文。
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  expect(services.storage.saves).toHaveLength(2)
+  expect(services.storage.saves[1].changed.size).toBe(0)
+  expect(services.storage.committed(PATH)!.style.overrides).toEqual({ bodyFont: 'sans', lineHeight: 2 })
+  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言！')
+
+  // 预览与导出使用同一套语义样式。
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出 PDF').trigger('click')
+  await flushPromises()
+  expect(services.output.exports[0].request.theme.body).toMatchObject({ font: 'sans', lineHeight: 2 })
+  await button(wrapper, '预览').trigger('click')
+  await flushPromises()
+  expect(services.output.previews.at(-1)!.theme.body).toMatchObject({ font: 'sans', lineHeight: 2 })
+  const preview = wrapper.find('.document-preview').element as HTMLElement
+  expect(preview.style.getPropertyValue('--doc-line-height')).toBe('2')
+
+  // 重新打开项目：样式恢复。
+  wrapper.unmount()
+  mounted.splice(mounted.indexOf(wrapper), 1)
+  const reopened = await mountApp(services)
+  await flushPromises()
+  const editorRoot = reopened.find('.chapter-editor').element as HTMLElement
+  expect(editorRoot.style.getPropertyValue('--doc-body-font')).toContain('Arial')
+  await button(reopened, '样式').trigger('click')
+  expect(reopened.find('[aria-label="正文字体"] [aria-pressed="true"]').text()).toBe('黑体')
+})
+
+test('图片布局：在编辑器中调整后按图片保存到文档样式，正文 Markdown 不变；撤销恢复', async () => {
+  const services = createMemoryServices()
+  const seeded = createDocument(
+    '图文',
+    [{ id: 'a', title: '装置', children: [] }],
+    new Map([['a', '![装置](../assets/装置.png)\n\n![曲线](../assets/曲线.png)\n']]),
+  )
+  if (!seeded.ok) throw new Error('fixture')
+  services.storage.seed(PATH, seeded.document)
+  services.shell.lastProjectPath = PATH
+  services.shell.exportPath = '/导出/图文.docx'
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  const view = editorView(wrapper)
+  let second = -1
+  view.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'image' && node.attrs.src === '../assets/曲线.png') second = pos
+  })
+  view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, second)))
+  await flushPromises()
+  await button(wrapper, '小').trigger('click')
+  await wrapper.find('button[aria-label="靠右"]').trigger('click')
+  await flushPromises()
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  const committed = services.storage.committed(PATH)!
+  expect([...committed.style.images]).toEqual([['assets/曲线.png', { size: 'small', align: 'right' }]])
+  expect(committed.contents.get('a')).toBe('![装置](../assets/装置.png)\n\n![曲线](../assets/曲线.png)\n')
+  expect(services.storage.saves[0].changed.size).toBe(0)
+
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出 Word（.docx）').trigger('click')
+  await flushPromises()
+  expect(services.output.exports[0].request.images).toEqual({ 'assets/曲线.png': { size: 'small', align: 'right' } })
+
+  undo(view.state, view.dispatch)
+  undo(view.state, view.dispatch)
+  await flushPromises()
+  expect(wrapper.find('.save-status').text()).toBe('未保存')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  expect(services.storage.committed(PATH)!.style.images.size).toBe(0)
 })
 
 test('全文预览：显示所有章节，编辑后刷新，点击章节同步选中', async () => {

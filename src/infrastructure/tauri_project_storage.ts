@@ -123,7 +123,7 @@ export function decodeOpened(raw: unknown): StorageResult<OpenedProject> {
     texts.set(id, text)
   }
 
-  const document = createDocument(parsed.manifest.title, parsed.manifest.tree, texts)
+  const document = createDocument(parsed.manifest.title, parsed.manifest.tree, texts, parsed.manifest.style)
   if (!document.ok) return invalid(document.reason)
 
   const orphans = Array.isArray(orphanFiles)

@@ -1,0 +1,12 @@
+{
+  "body": { "font": "serif", "size": 12, "lineHeight": 1.8, "paragraphSpacing": 0.5 },
+  "title": { "font": "sans", "size": 22 },
+  "heading1": { "font": "sans", "size": 16, "spacingBefore": 1.4, "spacingAfter": 0.6 },
+  "heading2": { "font": "sans", "size": 14, "spacingBefore": 1.2, "spacingAfter": 0.5 },
+  "heading3": { "font": "sans", "size": 13, "spacingBefore": 1, "spacingAfter": 0.4 },
+  "blockquote": { "font": "serif", "size": 12 },
+  "codeBlock": { "size": 10 },
+  "table": { "size": 11 },
+  "image": { "size": "original", "align": "center", "spacing": 1 },
+  "caption": { "font": "serif", "size": 10 }
+}

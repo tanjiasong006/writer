@@ -132,6 +132,8 @@ mod tests {
         }
         let request = RenderRequest {
             title: "压力样例".into(),
+            theme: crate::render::theme::test_theme(),
+            images: Default::default(),
             chapters: chapters
                 .into_iter()
                 .enumerate()
@@ -168,7 +170,12 @@ mod tests {
                 chapters.push(RenderChapter { id: format!("p{p}-{s}"), number: vec![p, s], title: format!("小节 {s}"), markdown: body.clone() });
             }
         }
-        let request = RenderRequest { title: "大文档".into(), chapters };
+        let request = RenderRequest {
+            title: "大文档".into(),
+            chapters,
+            theme: crate::render::theme::test_theme(),
+            images: Default::default(),
+        };
         let t = Instant::now();
         let document = build(&request);
         println!("parse: {:?}", t.elapsed());

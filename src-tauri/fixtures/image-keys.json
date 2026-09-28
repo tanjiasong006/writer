@@ -1,0 +1,21 @@
+{
+  "说明": "图片文件键（imageKey）规则的共享用例：TS domain/document_style 与 Rust render::image_key 都读取本文件。",
+  "cases": [
+    ["../assets/实验 图.png", "assets/实验 图.png"],
+    ["../assets/%E5%AE%9E%E9%AA%8C%20%E5%9B%BE.png", "assets/实验 图.png"],
+    ["./图.png", "content/图.png"],
+    ["图.png", "content/图.png"],
+    ["../assets/./sub/../a.png", "assets/a.png"],
+    ["..\\assets\\a.png", "assets/a.png"],
+    ["../assets//a.png", "assets/a.png"],
+    ["../../secret.png", null],
+    ["/etc/hosts", null],
+    ["\\\\server\\a.png", null],
+    ["C:/a.png", null],
+    ["https://example.com/a.png", null],
+    ["data:image/png;base64,AAAA", null],
+    ["../assets/%ZZ.png", null],
+    ["..", null],
+    ["", null]
+  ]
+}
