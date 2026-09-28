@@ -219,6 +219,14 @@
 - Storybook：`UI/ChapterTree/KeyboardNavigation`。
 - 验证：npm test 320/320（含变异检查：去掉移动后的重新聚焦，3 项测试失败），vue-tsc、vite build、build-storybook 通过。
 
+### 修复：打包后章节拖动无效
+
+- 原因：Tauri 窗口默认 `dragDropEnabled: true`，拦截拖放事件用于原生文件拖入，webview 内的 HTML5 拖拽收不到 drop。
+  组件测试运行在 happy-dom 中，无法发现。
+- 修正：`tauri.conf.json` 窗口设置 `dragDropEnabled: false`（应用不使用原生文件拖入）；
+  `tauri_window_config.test.ts` 约束该配置（去掉配置时测试失败）。
+- 以后若要支持把图片等文件拖入窗口，需要改用前端的 HTML5 文件拖放，而不是重新打开这个选项。
+
 ## 后续（MVP 之外，按价值排序）
 
 1. 手动验收清单全部走一遍（需要真实桌面环境与 Word / WPS）。
