@@ -45,6 +45,15 @@ Domain 不包含面向用户的自然语言，用户可见文本由 UI 层负责
 
 复杂模块可以用 `CONTRACT.md` 定义职责、输入输出和不变量。
 
+## 长期约束文档
+
+修改相关功能前先阅读，修改约束前先与产品负责人确认：
+
+- `docs/decisions.md`：已确定的产品与技术决策（编辑器、导出、保存语义、字体等）。
+- `docs/project-format.md`：项目磁盘格式、正文文件命名规则、保存事务与恢复。
+- `docs/implementation-plan.md`：MVP 实施计划与进度。
+- `docs/known-risks.md`：已知风险与结论。
+
 ## 开发规则
 
 ### 先想清楚再写
