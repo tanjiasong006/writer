@@ -399,3 +399,45 @@ test('插入图片期间切换了章节：图片追加到发起请求的章节�
   expect(contents.get('a')).toBe('引言\n\n![a](../assets/a.png)\n')
   expect(contents.get('b')).toBe('方法正文')
 })
+
+test('全文预览：显示所有章节，编辑后刷新，点击章节同步选中', async () => {
+  vi.useFakeTimers()
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await vi.advanceTimersByTimeAsync(0)
+
+  await button(wrapper, '预览').trigger('click')
+  await vi.advanceTimersByTimeAsync(0)
+  expect(services.output.previews[0].chapters.map((c) => [c.number.join('.'), c.title])).toEqual([
+    ['1', '绪论'],
+    ['1.1', '背景'],
+    ['2', '方法'],
+  ])
+  expect(wrapper.find('.document-preview').text()).toContain('方法正文')
+  expect(wrapper.findComponent(ChapterEditor).exists()).toBe(false)
+
+  // 在章节树中重命名，预览随之刷新。
+  await wrapper.findAll('.chapter-tree__row')[2].find('.chapter-tree__more').trigger('click')
+  await button(wrapper, '重命名').trigger('click')
+  await wrapper.find('.chapter-tree__rename-input').setValue('研究方法')
+  await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Enter' })
+  await vi.advanceTimersByTimeAsync(500)
+  expect(wrapper.find('.document-preview').text()).toContain('研究方法')
+
+  await wrapper.find('section[data-chapter-id="b"]').trigger('click')
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('2研究方法')
+
+  await button(wrapper, '返回编辑').trigger('click')
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('2研究方法')
+})
+
+test('全文预览失败时显示原因', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.output.failNext({ code: 'unknown', message: '渲染进程无响应' })
+  const wrapper = await mountApp(services)
+  await button(wrapper, '预览').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.workspace__preview-error').text()).toContain('渲染进程无响应')
+})

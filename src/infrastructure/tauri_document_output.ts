@@ -1,0 +1,35 @@
+import { invoke } from '@tauri-apps/api/core'
+import type {
+  DocumentOutput,
+  OutputFailure,
+  OutputResult,
+} from '../application/document_output.ts'
+
+/** DocumentOutput 的 Tauri 实现：渲染与导出在 Rust `render` 模块中完成。 */
+export function createTauriDocumentOutput(): DocumentOutput {
+  return {
+    async renderPreview(projectPath, request) {
+      return call(() => invoke<string>('render_preview', { path: projectPath, document: request }))
+    },
+  }
+}
+
+async function call<T>(run: () => Promise<T>): Promise<OutputResult<T>> {
+  try {
+    return { ok: true, value: await run() }
+  } catch (error) {
+    return { ok: false, error: toOutputFailure(error) }
+  }
+}
+
+const KNOWN_CODES = new Set<OutputFailure['code']>(['no-cjk-font', 'io', 'render-failed'])
+
+export function toOutputFailure(error: unknown): OutputFailure {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code: unknown }).code
+    if (typeof code === 'string' && KNOWN_CODES.has(code as OutputFailure['code'])) {
+      return error as OutputFailure
+    }
+  }
+  return { code: 'unknown', message: error instanceof Error ? error.message : String(error) }
+}

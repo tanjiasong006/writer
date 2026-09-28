@@ -13,6 +13,9 @@ import { useSession } from './use_session.ts'
 import { restoreUiState, serializeUiState } from './ui_state.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown_commands.ts'
+import DocumentPreview from '../preview/DocumentPreview.vue'
+import { previewDocument } from '../../application/document_output.ts'
+import { messageForOutputFailure } from './output_messages.ts'
 
 /**
  * 已打开项目的工作区：顶栏（标题、保存状态、项目操作）+ 左侧章节树 + 右侧正文区。
@@ -27,7 +30,7 @@ const emit = defineEmits<{
   'open-project': []
 }>()
 
-const { shell } = useServices()
+const { shell, output } = useServices()
 const { document, status, lastError } = useSession(props.session)
 
 const selectedId = ref<ChapterId | null>(null)
@@ -84,6 +87,49 @@ function updateContent(chapterId: ChapterId, text: string): void {
   props.session.setContent(chapterId, text)
 }
 
+/** 正文区模式：编辑当前章节，或全文预览。 */
+const mode = ref<'edit' | 'preview'>('edit')
+const previewHtml = ref('')
+const previewError = ref<string | null>(null)
+const PREVIEW_DELAY_MS = 400
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+/** 只采用最新一次请求的结果，避免较慢的旧请求覆盖新内容。 */
+let previewRequest = 0
+
+async function refreshPreview(): Promise<void> {
+  const request = ++previewRequest
+  const result = await previewDocument(output, props.session.path, document.value)
+  if (request !== previewRequest || mode.value !== 'preview') return
+  if (result.ok) {
+    previewHtml.value = result.value
+    previewError.value = null
+  } else {
+    previewError.value = messageForOutputFailure(result.error)
+  }
+}
+
+function togglePreview(): void {
+  mode.value = mode.value === 'edit' ? 'preview' : 'edit'
+  if (mode.value === 'preview') {
+    previewHtml.value = ''
+    void refreshPreview()
+  }
+}
+
+// 预览打开时，文档变化后防抖刷新。
+watch(document, () => {
+  if (mode.value !== 'preview') return
+  if (previewTimer !== null) clearTimeout(previewTimer)
+  previewTimer = setTimeout(() => {
+    previewTimer = null
+    void refreshPreview()
+  }, PREVIEW_DELAY_MS)
+})
+
+onBeforeUnmount(() => {
+  if (previewTimer !== null) clearTimeout(previewTimer)
+})
+
 /** 插入图片：选择文件 → 复制进项目 assets/ → 在发起请求的章节中插入引用。 */
 async function insertImage(chapterId: ChapterId): Promise<void> {
   actionError.value = null
@@ -139,6 +185,9 @@ const selectedNumber = computed(() => {
       />
       <SaveStatus :status="status" :error="lastError" @retry="session.save()" />
       <div class="workspace__actions">
+        <button type="button" class="workspace__preview-toggle" @click="togglePreview">
+          {{ mode === 'preview' ? '返回编辑' : '预览' }}
+        </button>
         <button type="button" @click="emit('new-project')">新建</button>
         <button type="button" @click="emit('open-project')">打开</button>
       </div>
@@ -161,8 +210,17 @@ const selectedNumber = computed(() => {
       </aside>
 
       <main class="workspace__main">
+        <div v-if="mode === 'preview'" class="workspace__preview">
+          <p v-if="previewError" class="workspace__preview-error" role="alert">{{ previewError }}</p>
+          <DocumentPreview
+            :html="previewHtml"
+            :active-chapter-id="selectedId"
+            :to-display-url="shell.toDisplayUrl"
+            @select="selectedId = $event"
+          />
+        </div>
         <ChapterEditor
-          v-if="selectedChapter && selectedId !== null"
+          v-else-if="selectedChapter && selectedId !== null"
           ref="editor"
           :chapter-id="selectedId"
           :content="document.contents.get(selectedId) ?? ''"
@@ -270,6 +328,17 @@ const selectedNumber = computed(() => {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+}
+
+.workspace__preview {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.workspace__preview-error {
+  margin: 0;
+  padding: 8px 32px;
+  color: #b91c1c;
 }
 
 .workspace__placeholder {

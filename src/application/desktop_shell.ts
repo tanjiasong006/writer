@@ -1,4 +1,5 @@
 import type { ProjectStorage } from './project_storage.ts'
+import type { DocumentOutput } from './document_output.ts'
 
 /**
  * 应用需要的桌面能力（对话框、窗口关闭、界面状态）。真实实现基于 Tauri（infrastructure/tauri_services.ts），
@@ -21,6 +22,8 @@ export interface DesktopShell {
   loadUiState(projectPath: string): Promise<string | null>
   /** 尽力保存项目的界面状态；失败静默忽略（界面状态丢失不影响文档）。 */
   saveUiState(projectPath: string, state: string): Promise<void>
+  /** 把本地文件路径转换成界面可以显示的地址（如预览中的图片）。 */
+  toDisplayUrl(filePath: string): string
   getLastProjectPath(): string | null
   setLastProjectPath(path: string | null): void
 }
@@ -28,4 +31,5 @@ export interface DesktopShell {
 export interface AppServices {
   readonly storage: ProjectStorage
   readonly shell: DesktopShell
+  readonly output: DocumentOutput
 }

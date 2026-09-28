@@ -1,5 +1,6 @@
 import type { AppServices, DesktopShell } from '../application/desktop_shell.ts'
 import { MemoryProjectStorage } from './memory_project_storage.ts'
+import { MemoryDocumentOutput } from './memory_document_output.ts'
 
 /** 内存版桌面能力：对话框结果、确认框答案由测试 / Story 预先设定。 */
 export class MemoryShell implements DesktopShell {
@@ -49,6 +50,10 @@ export class MemoryShell implements DesktopShell {
     this.uiStates.set(projectPath, state)
   }
 
+  toDisplayUrl(filePath: string) {
+    return `file://${filePath}`
+  }
+
   getLastProjectPath() {
     return this.lastProjectPath
   }
@@ -61,6 +66,11 @@ export class MemoryShell implements DesktopShell {
 export function createMemoryServices(): AppServices & {
   storage: MemoryProjectStorage
   shell: MemoryShell
+  output: MemoryDocumentOutput
 } {
-  return { storage: new MemoryProjectStorage(), shell: new MemoryShell() }
+  return {
+    storage: new MemoryProjectStorage(),
+    shell: new MemoryShell(),
+    output: new MemoryDocumentOutput(),
+  }
 }

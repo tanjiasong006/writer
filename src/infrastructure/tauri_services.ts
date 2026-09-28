@@ -1,14 +1,19 @@
-import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ask, open, save } from '@tauri-apps/plugin-dialog'
 import type { AppServices, DesktopShell } from '../application/desktop_shell.ts'
 import { createTauriProjectStorage } from './tauri_project_storage.ts'
+import { createTauriDocumentOutput } from './tauri_document_output.ts'
 
 const LAST_PROJECT_KEY = 'writer.lastProjectPath'
 
 /** 基于 Tauri 的桌面能力。 */
 export function createTauriServices(): AppServices {
-  return { storage: createTauriProjectStorage(), shell: createTauriShell() }
+  return {
+    storage: createTauriProjectStorage(),
+    shell: createTauriShell(),
+    output: createTauriDocumentOutput(),
+  }
 }
 
 function createTauriShell(): DesktopShell {
@@ -72,6 +77,10 @@ function createTauriShell(): DesktopShell {
       } catch {
         // 界面状态只是便利，写入失败不打扰用户。
       }
+    },
+
+    toDisplayUrl(filePath) {
+      return convertFileSrc(filePath)
     },
 
     getLastProjectPath() {

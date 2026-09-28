@@ -1,0 +1,479 @@
+//! Markdown → 块 / 行内模型。预览、Word、PDF 共用这一份解析结果，保证三者结构一致。
+//!
+//! 原始 HTML 一律作为普通文本处理：预览运行在能调用 Tauri IPC 的 webview 中，
+//! 绝不能让正文里的 HTML 被当作标记执行。
+
+use std::iter::Peekable;
+
+use pulldown_cmark::{
+    Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
+};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Block {
+    /// 正文内部的标题；level 为 Markdown 中的级别（1..=6），渲染时再叠加章节深度。
+    Heading { level: u8, inlines: Vec<Inline> },
+    Paragraph(Vec<Inline>),
+    List { ordered: bool, start: u64, items: Vec<Vec<Block>> },
+    Quote(Vec<Block>),
+    Code { language: Option<String>, text: String },
+    Table { alignments: Vec<Align>, header: Vec<Vec<Inline>>, rows: Vec<Vec<Vec<Inline>>> },
+    Rule,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Align {
+    None,
+    Left,
+    Center,
+    Right,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Inline {
+    Text(String),
+    Strong(Vec<Inline>),
+    Emphasis(Vec<Inline>),
+    Strike(Vec<Inline>),
+    Code(String),
+    Link { url: String, children: Vec<Inline> },
+    /// src 为正文中的原始引用（如 ../assets/图.png），由各渲染器自行解析。
+    Image { src: String, alt: String },
+    SoftBreak,
+    HardBreak,
+}
+
+impl Block {
+    /// 只含一张图片的段落，渲染为独立的图（居中、限宽）。
+    pub fn as_figure(&self) -> Option<(&str, &str)> {
+        match self {
+            Block::Paragraph(inlines) => match inlines.as_slice() {
+                [Inline::Image { src, alt }] => Some((src, alt)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+/// 引用 / 列表的最大嵌套层数。更深的内容压平为文本，保证解析与各渲染器的递归深度有上界。
+const MAX_NESTING: usize = 32;
+
+pub fn parse(markdown: &str) -> Vec<Block> {
+    let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let mut events = Parser::new_ext(markdown, options).peekable();
+    blocks(&mut events, &|_| false, 0)
+}
+
+type Events<'a> = Peekable<Parser<'a>>;
+
+/// 读取块，直到遇到满足 stop 的结束标记（该标记被消费）。
+/// 紧凑列表项中的行内内容没有 Paragraph 包裹，这里把连续的行内事件收成一个段落。
+fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> Vec<Block> {
+    let mut out = Vec::new();
+    let mut pending: Vec<Inline> = Vec::new();
+    let flush = |pending: &mut Vec<Inline>, out: &mut Vec<Block>| {
+        if !pending.is_empty() {
+            out.push(Block::Paragraph(normalize(std::mem::take(pending))));
+        }
+    };
+
+    while let Some(event) = events.next() {
+        match event {
+            Event::End(end) if stop(&end) => break,
+            Event::Start(Tag::Paragraph) => {
+                flush(&mut pending, &mut out);
+                out.push(Block::Paragraph(inlines(events, TagEnd::Paragraph)));
+            }
+            Event::Start(Tag::Heading { level, .. }) => {
+                flush(&mut pending, &mut out);
+                out.push(Block::Heading {
+                    level: heading_level(level),
+                    inlines: inlines(events, TagEnd::Heading(level)),
+                });
+            }
+            Event::Start(Tag::BlockQuote(_) | Tag::List(_)) if depth >= MAX_NESTING => {
+                flush(&mut pending, &mut out);
+                out.push(Block::Paragraph(vec![Inline::Text(flatten(events))]));
+            }
+            Event::Start(Tag::BlockQuote(_)) => {
+                flush(&mut pending, &mut out);
+                out.push(Block::Quote(blocks(
+                    events,
+                    &|e| matches!(e, TagEnd::BlockQuote(_)),
+                    depth + 1,
+                )));
+            }
+            Event::Start(Tag::CodeBlock(kind)) => {
+                flush(&mut pending, &mut out);
+                let language = match kind {
+                    CodeBlockKind::Fenced(info) => {
+                        info.split_whitespace().next().map(str::to_owned)
+                    }
+                    CodeBlockKind::Indented => None,
+                };
+                let mut text = raw_text(events, TagEnd::CodeBlock);
+                if text.ends_with('\n') {
+                    text.pop();
+                }
+                out.push(Block::Code { language, text });
+            }
+            Event::Start(Tag::HtmlBlock) => {
+                flush(&mut pending, &mut out);
+                let text = raw_text(events, TagEnd::HtmlBlock);
+                out.push(Block::Paragraph(vec![Inline::Text(text.trim_end().to_owned())]));
+            }
+            Event::Start(Tag::List(start)) => {
+                flush(&mut pending, &mut out);
+                out.push(list(events, start, depth + 1));
+            }
+            Event::Start(Tag::Table(alignments)) => {
+                flush(&mut pending, &mut out);
+                out.push(table(events, &alignments));
+            }
+            Event::Rule => {
+                flush(&mut pending, &mut out);
+                out.push(Block::Rule);
+            }
+            Event::Start(tag) => {
+                if let Some(inline) = inline_from_start(tag, events) {
+                    pending.push(inline);
+                }
+            }
+            other => {
+                if let Some(inline) = inline_from_leaf(other) {
+                    pending.push(inline);
+                }
+            }
+        }
+    }
+    flush(&mut pending, &mut out);
+    out
+}
+
+fn heading_level(level: HeadingLevel) -> u8 {
+    match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
+    }
+}
+
+fn list(events: &mut Events, start: Option<u64>, depth: usize) -> Block {
+    let mut items = Vec::new();
+    while let Some(event) = events.next() {
+        match event {
+            Event::Start(Tag::Item) => {
+                items.push(blocks(events, &|e| matches!(e, TagEnd::Item), depth));
+            }
+            Event::End(TagEnd::List(_)) => break,
+            _ => {}
+        }
+    }
+    Block::List { ordered: start.is_some(), start: start.unwrap_or(1), items }
+}
+
+fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
+    let alignments = alignments
+        .iter()
+        .map(|a| match a {
+            Alignment::None => Align::None,
+            Alignment::Left => Align::Left,
+            Alignment::Center => Align::Center,
+            Alignment::Right => Align::Right,
+        })
+        .collect();
+    let mut header = Vec::new();
+    let mut rows = Vec::new();
+    let mut row: Vec<Vec<Inline>> = Vec::new();
+    let mut in_head = false;
+    while let Some(event) = events.next() {
+        match event {
+            Event::Start(Tag::TableHead) => in_head = true,
+            Event::End(TagEnd::TableHead) => {
+                in_head = false;
+                header = std::mem::take(&mut row);
+            }
+            Event::Start(Tag::TableCell) => row.push(inlines(events, TagEnd::TableCell)),
+            Event::End(TagEnd::TableRow) if !in_head => rows.push(std::mem::take(&mut row)),
+            Event::End(TagEnd::Table) => break,
+            _ => {}
+        }
+    }
+    Block::Table { alignments, header, rows }
+}
+
+/// 读取行内内容直到指定结束标记。
+fn inlines(events: &mut Events, end: TagEnd) -> Vec<Inline> {
+    let mut out = Vec::new();
+    while let Some(event) = events.next() {
+        match event {
+            Event::End(e) if e == end => break,
+            Event::Start(tag) => {
+                if let Some(inline) = inline_from_start(tag, events) {
+                    out.push(inline);
+                }
+            }
+            other => {
+                if let Some(inline) = inline_from_leaf(other) {
+                    out.push(inline);
+                }
+            }
+        }
+    }
+    normalize(out)
+}
+
+fn inline_from_start(tag: Tag, events: &mut Events) -> Option<Inline> {
+    Some(match tag {
+        Tag::Emphasis => Inline::Emphasis(inlines(events, TagEnd::Emphasis)),
+        Tag::Strong => Inline::Strong(inlines(events, TagEnd::Strong)),
+        Tag::Strikethrough => Inline::Strike(inlines(events, TagEnd::Strikethrough)),
+        Tag::Link { dest_url, .. } => Inline::Link {
+            url: dest_url.into_string(),
+            children: inlines(events, TagEnd::Link),
+        },
+        Tag::Image { dest_url, .. } => Inline::Image {
+            src: dest_url.into_string(),
+            alt: plain_text(&inlines(events, TagEnd::Image)),
+        },
+        other => {
+            // 未启用的扩展（上下标等）：保留其中的文字。
+            let end = other.to_end();
+            return Some(Inline::Text(plain_text(&inlines(events, end))));
+        }
+    })
+}
+
+fn inline_from_leaf(event: Event) -> Option<Inline> {
+    Some(match event {
+        Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
+            Inline::Text(text.into_string())
+        }
+        Event::Code(code) | Event::InlineMath(code) | Event::DisplayMath(code) => {
+            Inline::Code(code.into_string())
+        }
+        Event::SoftBreak => Inline::SoftBreak,
+        Event::HardBreak => Inline::HardBreak,
+        Event::TaskListMarker(done) => Inline::Text(if done { "☑ " } else { "☐ " }.to_owned()),
+        Event::FootnoteReference(name) => Inline::Text(format!("[^{name}]")),
+        _ => return None,
+    })
+}
+
+/// 迭代地消费一个已开始的容器直到它结束，只保留文字。用于超过嵌套上限的内容。
+fn flatten(events: &mut Events) -> String {
+    let mut open = 1usize;
+    let mut text = String::new();
+    for event in events.by_ref() {
+        match event {
+            Event::Start(_) => open += 1,
+            Event::End(_) => {
+                open -= 1;
+                if open == 0 {
+                    break;
+                }
+            }
+            Event::Text(t) | Event::Code(t) | Event::Html(t) | Event::InlineHtml(t) => {
+                if !text.is_empty() && !text.ends_with(' ') {
+                    text.push(' ');
+                }
+                text.push_str(&t);
+            }
+            _ => {}
+        }
+    }
+    text
+}
+
+fn raw_text(events: &mut Events, end: TagEnd) -> String {
+    let mut text = String::new();
+    for event in events.by_ref() {
+        match event {
+            Event::End(e) if e == end => break,
+            Event::Text(t) | Event::Html(t) => text.push_str(&t),
+            _ => {}
+        }
+    }
+    text
+}
+
+/// 合并相邻文本（pulldown-cmark 会在特殊字符处拆分文本）。
+fn normalize(inlines: Vec<Inline>) -> Vec<Inline> {
+    let mut out: Vec<Inline> = Vec::with_capacity(inlines.len());
+    for inline in inlines {
+        match (out.last_mut(), inline) {
+            (Some(Inline::Text(previous)), Inline::Text(text)) => previous.push_str(&text),
+            (_, inline) => out.push(inline),
+        }
+    }
+    out
+}
+
+/// 行内内容的纯文本（用于图片 alt 等）。
+pub fn plain_text(inlines: &[Inline]) -> String {
+    let mut text = String::new();
+    for inline in inlines {
+        match inline {
+            Inline::Text(t) | Inline::Code(t) => text.push_str(t),
+            Inline::Strong(c) | Inline::Emphasis(c) | Inline::Strike(c) => {
+                text.push_str(&plain_text(c))
+            }
+            Inline::Link { children, .. } => text.push_str(&plain_text(children)),
+            Inline::Image { alt, .. } => text.push_str(alt),
+            Inline::SoftBreak | Inline::HardBreak => text.push(' '),
+        }
+    }
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn text(s: &str) -> Inline {
+        Inline::Text(s.to_owned())
+    }
+
+    #[test]
+    fn paragraphs_and_inline_styles() {
+        assert_eq!(
+            parse("普通**加粗**与*斜体*、~~删除~~、`代码`。\n\n第二段"),
+            vec![
+                Block::Paragraph(vec![
+                    text("普通"),
+                    Inline::Strong(vec![text("加粗")]),
+                    text("与"),
+                    Inline::Emphasis(vec![text("斜体")]),
+                    text("、"),
+                    Inline::Strike(vec![text("删除")]),
+                    text("、"),
+                    Inline::Code("代码".into()),
+                    text("。"),
+                ]),
+                Block::Paragraph(vec![text("第二段")]),
+            ]
+        );
+    }
+
+    #[test]
+    fn headings_quotes_rules() {
+        assert_eq!(
+            parse("## 小节\n\n> 引用\n\n---"),
+            vec![
+                Block::Heading { level: 2, inlines: vec![text("小节")] },
+                Block::Quote(vec![Block::Paragraph(vec![text("引用")])]),
+                Block::Rule,
+            ]
+        );
+    }
+
+    #[test]
+    fn tight_and_nested_lists() {
+        assert_eq!(
+            parse("- 甲\n  1. 子项\n- 乙"),
+            vec![Block::List {
+                ordered: false,
+                start: 1,
+                items: vec![
+                    vec![
+                        Block::Paragraph(vec![text("甲")]),
+                        Block::List {
+                            ordered: true,
+                            start: 1,
+                            items: vec![vec![Block::Paragraph(vec![text("子项")])]],
+                        },
+                    ],
+                    vec![Block::Paragraph(vec![text("乙")])],
+                ],
+            }]
+        );
+        assert!(matches!(parse("3. 从三开始")[0], Block::List { ordered: true, start: 3, .. }));
+    }
+
+    #[test]
+    fn code_blocks_keep_text_verbatim() {
+        assert_eq!(
+            parse("```rust\nfn main() {}\n  <b>\n```"),
+            vec![Block::Code { language: Some("rust".into()), text: "fn main() {}\n  <b>".into() }]
+        );
+    }
+
+    #[test]
+    fn tables_with_alignment() {
+        let blocks = parse("| 组别 | 数 |\n| :-- | --: |\n| 对照 | 30 |\n| 实验 | **32** |");
+        assert_eq!(
+            blocks,
+            vec![Block::Table {
+                alignments: vec![Align::Left, Align::Right],
+                header: vec![vec![text("组别")], vec![text("数")]],
+                rows: vec![
+                    vec![vec![text("对照")], vec![text("30")]],
+                    vec![vec![text("实验")], vec![Inline::Strong(vec![text("32")])]],
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn standalone_image_is_a_figure() {
+        let blocks = parse("![实验 装置](../assets/图.png)");
+        assert_eq!(blocks[0].as_figure(), Some(("../assets/图.png", "实验 装置")));
+        assert_eq!(parse("文字 ![a](b.png)")[0].as_figure(), None);
+    }
+
+    #[test]
+    fn raw_html_is_plain_text() {
+        assert_eq!(
+            parse("<script>alert(1)</script>\n\n行内 <b>粗</b>"),
+            vec![
+                Block::Paragraph(vec![text("<script>alert(1)</script>")]),
+                Block::Paragraph(vec![text("行内 <b>粗</b>")]),
+            ]
+        );
+    }
+
+    #[test]
+    fn task_lists_and_links() {
+        assert_eq!(
+            parse("- [x] 完成\n\n[官网](https://example.com)"),
+            vec![
+                Block::List {
+                    ordered: false,
+                    start: 1,
+                    items: vec![vec![Block::Paragraph(vec![text("☑ 完成")])]],
+                },
+                Block::Paragraph(vec![Inline::Link {
+                    url: "https://example.com".into(),
+                    children: vec![text("官网")],
+                }]),
+            ]
+        );
+    }
+
+    #[test]
+    fn pathological_nesting_does_not_overflow() {
+        let quotes = format!("{} 深处", ">".repeat(10_000));
+        let blocks = parse(&quotes);
+        let mut depth = 0;
+        let mut current = &blocks;
+        while let [Block::Quote(inner)] = current.as_slice() {
+            depth += 1;
+            current = inner;
+        }
+        assert_eq!(depth, MAX_NESTING);
+        assert_eq!(current, &vec![Block::Paragraph(vec![text("深处")])]);
+
+        let lists: String = (0..5_000).map(|i| format!("{}- 项\n", "  ".repeat(i))).collect();
+        assert!(!parse(&lists).is_empty());
+    }
+
+    #[test]
+    fn empty_input() {
+        assert_eq!(parse(""), vec![]);
+        assert_eq!(parse("\n\n  \n"), vec![]);
+    }
+}

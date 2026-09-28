@@ -1,4 +1,5 @@
 mod commands;
+mod render;
 mod storage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -12,6 +13,7 @@ pub fn run() {
             commands::project_read_ui_state,
             commands::project_write_ui_state,
             commands::project_import_asset,
+            commands::render_preview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

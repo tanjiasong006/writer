@@ -3,6 +3,9 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use tauri::Manager;
+
+use crate::render::{self, RenderRequest};
 use crate::storage::{self, fs::RealFs, OpenedProject, SaveRequest, StorageError};
 
 /// 存储操作串行执行：即使前端意外并发调用，也不会有两个事务同时改写同一项目。
@@ -55,4 +58,19 @@ pub async fn project_write_ui_state(path: PathBuf, state: String) -> Result<(), 
 #[tauri::command]
 pub async fn project_import_asset(path: PathBuf, source: PathBuf) -> Result<String, StorageError> {
     run_storage(move || storage::assets::import_asset(&RealFs, &path, &source)).await
+}
+
+/// 全文预览 HTML。图片以本地路径给出，这里把项目目录加入 asset 协议的允许范围供 webview 读取。
+#[tauri::command]
+pub async fn render_preview(
+    app: tauri::AppHandle,
+    path: PathBuf,
+    document: RenderRequest,
+) -> Result<String, String> {
+    let _ = app.asset_protocol_scope().allow_directory(&path, true);
+    tauri::async_runtime::spawn_blocking(move || {
+        render::html::render(&render::build(&document), &path)
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
