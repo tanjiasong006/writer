@@ -75,9 +75,10 @@ pub fn export(
         };
     }
 
+    let mut xml = docx.build();
+    xml.document = mark_header_rows(&xml.document);
     let mut bytes = Cursor::new(Vec::new());
-    docx.build()
-        .pack(&mut bytes)
+    xml.pack(&mut bytes)
         .map_err(|error| ExportError::RenderFailed {
             message: error.to_string(),
         })?;
@@ -125,9 +126,7 @@ impl Writer<'_> {
             format!("{} {}", section.number, section.title)
         };
         self.items.push(Item::Paragraph(
-            Paragraph::new()
-                .style(&format!("Heading{level}"))
-                .add_run(Run::new().add_text(xml_safe(&text))),
+            heading(level).add_run(Run::new().add_text(xml_safe(&text))),
         ));
         for block in &section.blocks {
             self.block(block, section, BlockContext::default());
@@ -142,8 +141,7 @@ impl Writer<'_> {
         match block {
             Block::Heading { level, inlines } => {
                 let level = section.body_heading_depth(*level).clamp(1, MAX_HEADING);
-                let p = Paragraph::new().style(&format!("Heading{level}"));
-                let p = self.inlines(p, inlines, RunStyle::default());
+                let p = self.inlines(heading(level), inlines, RunStyle::default());
                 self.items.push(Item::Paragraph(p));
             }
             Block::Paragraph(inlines) => {
@@ -173,9 +171,13 @@ impl Writer<'_> {
                     }
                     run = run.add_text(xml_safe(line));
                 }
-                let p = self
+                let mut p = self
                     .indent(Paragraph::new().style("Code"), context)
                     .add_run(run);
+                // 与预览、PDF 一致的浅灰底色。
+                p.property = p
+                    .property
+                    .shading(Shading::new().shd_type(ShdType::Clear).fill("F3F4F6"));
                 self.items.push(Item::Paragraph(p));
             }
             Block::Table {
@@ -310,7 +312,12 @@ impl Writer<'_> {
                         }
                     })
                     .collect();
-                TableRow::new(cells)
+                // 表头行不跨页拆分，并在每一页重复（见 mark_header_rows）。
+                if is_header {
+                    TableRow::new(cells).cant_split()
+                } else {
+                    TableRow::new(cells)
+                }
             };
         let mut table_rows = vec![make_row(self, header, bold, true)];
         for row in rows {
@@ -326,7 +333,8 @@ impl Writer<'_> {
 
     fn figure(&mut self, src: &str, alt: &str, context: BlockContext) {
         let p = self.indent(Paragraph::new().align(AlignmentType::Center), context);
-        let p = p.add_run(self.image_run(src, alt));
+        // 图片与下面的图注留在同一页。
+        let p = p.keep_next(!alt.is_empty()).add_run(self.image_run(src, alt));
         self.items.push(Item::Paragraph(p));
         if !alt.is_empty() {
             self.items.push(Item::Paragraph(
@@ -574,6 +582,22 @@ fn base_document() -> Docx {
         .add_numbering(Numbering::new(BULLET_NUMBERING, BULLET_ABSTRACT))
 }
 
+/// 标题段落：与下一段落留在同一页，标题本身不跨页拆开，避免标题孤零零地留在页面底部。
+fn heading(level: usize) -> Paragraph {
+    Paragraph::new()
+        .style(&format!("Heading{level}"))
+        .keep_next(true)
+        .keep_lines(true)
+}
+
+/// 让表头行在表格跨页时于每页重复。docx-rs 没有 tblHeader 的接口：
+/// 只有表头行带 cantSplit，这里在它旁边补上 tblHeader（trPr 的子元素顺序不限）。
+fn mark_header_rows(document: &[u8]) -> Vec<u8> {
+    String::from_utf8_lossy(document)
+        .replace("<w:cantSplit />", "<w:cantSplit /><w:tblHeader />")
+        .into_bytes()
+}
+
 fn pt_to_emu(pt: f64) -> u32 {
     (pt * EMU_PER_PT).round() as u32
 }
@@ -680,6 +704,31 @@ mod tests {
         assert!(styles.contains(r#"<w:outlineLvl w:val="0" />"#));
         assert!(styles.contains(r#"w:eastAsia="SimHei""#));
         assert!(report.missing_images.is_empty());
+    }
+
+    #[test]
+    fn pagination_keeps_headings_with_text_and_repeats_table_headers() {
+        let dir = project();
+        let (bytes, _) = export_ok(
+            &dir,
+            &[(
+                "a",
+                vec![1],
+                "绪论",
+                "## 小节\n\n正文\n\n| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n\n```\ncode\n```",
+            )],
+        );
+        let xml = part(&bytes, "word/document.xml");
+        // 标题（文档标题除外）：章节标题与正文内标题都与下一段同页、不拆行。
+        let headings = xml.matches(r#"<w:pStyle w:val="Heading"#).count();
+        assert_eq!(headings, 2);
+        assert_eq!(xml.matches("<w:keepNext />").count(), headings);
+        assert_eq!(xml.matches("<w:keepLines />").count(), headings);
+        // 只有表头行在每页重复，且不跨页拆分。
+        assert_eq!(xml.matches("<w:tblHeader />").count(), 1);
+        assert_eq!(xml.matches("<w:cantSplit />").count(), 1);
+        // 代码块有底色。
+        assert!(xml.contains(r#"<w:shd w:val="clear" w:color="auto" w:fill="F3F4F6" />"#));
     }
 
     #[test]
