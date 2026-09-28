@@ -185,6 +185,8 @@ function messageForInsert(reason: InsertReason): string {
       return '添加位置无效。'
     case 'id-duplicate':
       return '新章节与已有章节重复，请重试。'
+    case 'depth-exceeded':
+      return '章节层级太深，无法再添加子章节。'
     default:
       return '新章节数据无效。'
   }
@@ -218,6 +220,8 @@ function messageForMove(reason: MoveReason): string {
       return '不能把章节移动到它自己的子章节里。'
     case 'index-out-of-range':
       return '目标位置无效。'
+    case 'depth-exceeded':
+      return '章节层级太深，无法移动到这里。'
   }
 }
 </script>

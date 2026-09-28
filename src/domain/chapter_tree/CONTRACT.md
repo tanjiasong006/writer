@@ -37,6 +37,7 @@ type TreeIssueCode =
   | 'id-duplicate'
   | 'title-invalid'
   | 'children-invalid'
+  | 'depth-exceeded'     // 超过 MAX_CHAPTER_DEPTH 层；校验在此处停止深入
 
 interface TreeIssue {
   readonly path: string   // 出问题的位置，如 "[0].children[1]"；根为 "root"
@@ -70,6 +71,7 @@ type MoveReason =
   | 'target-not-found'
   | 'target-is-descendant'   // 目标是自己或自己的子孙，会成环/丢子树
   | 'index-out-of-range'     // 非整数，或不在 0..长度 内
+  | 'depth-exceeded'         // 移动后子树最深处超过 MAX_CHAPTER_DEPTH
 
 validateMove(
   tree: ChapterTree,          // 已通过 validateTree 的可信树
@@ -127,6 +129,7 @@ type InsertResult =
 
 纯函数：不修改传入的 `tree`。`node` 先作为一棵单节点子树通过 `validateTree`，
 确认没有空 id、循环引用、共享节点、子树内部重复 id；其 id 还不能与树中已有 id 重复。
+插入后子树最深处不能超过 `MAX_CHAPTER_DEPTH`（`depth-exceeded`）。
 因此成功时返回的树一定满足全部不变量。
 
 ### removeChapter
@@ -162,6 +165,8 @@ type RenameResult =
 - `ChapterId` 全局唯一且为非空字符串。
 - 每个节点为对象，含字符串 `title` 和数组 `children`。
 - 是一棵真正的树：无循环引用、无共享节点，可安全遍历。
+- 层级不超过 `MAX_CHAPTER_DEPTH`（32，根层级为第 1 级）。`validateTree` 超过上限即停止深入，
+  因此任意外部输入都不会让递归耗尽调用栈；移动、插入也不能产生超限的树。
 
 ## 非目标
 

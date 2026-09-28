@@ -8,6 +8,14 @@ export interface ChapterNode {
 
 export type ChapterTree = readonly ChapterNode[]
 
+/**
+ * 章节树的最大层级数（根层级为第 1 级）。
+ *
+ * 这是文档规则：实际写作远用不到这么深；限制它让所有递归遍历的深度有上界，
+ * 也让来自文件的异常数据在信任边界上被拒绝，而不是耗尽调用栈。
+ */
+export const MAX_CHAPTER_DEPTH = 32
+
 /** 校验问题的机器可读代码。面向用户的文案由 UI 层根据 code 生成。 */
 export type TreeIssueCode =
   | 'not-an-array'
@@ -17,6 +25,7 @@ export type TreeIssueCode =
   | 'id-duplicate'
   | 'title-invalid'
   | 'children-invalid'
+  | 'depth-exceeded'
 
 /** 一条校验问题。path 指向出问题的位置，code 说明原因。 */
 export interface TreeIssue {
@@ -44,7 +53,13 @@ export function validateTree(tree: unknown): ValidateTreeResult {
   const seenIds = new Set<string>()
   const seenNodes = new WeakSet<object>()
 
-  const visit = (node: unknown, path: string): void => {
+  const visit = (node: unknown, path: string, depth: number): void => {
+    // 超过层级上限就不再深入，保证任意输入都不会让递归失控。
+    if (depth > MAX_CHAPTER_DEPTH) {
+      issues.push({ path, code: 'depth-exceeded' })
+      return
+    }
+
     if (typeof node !== 'object' || node === null || Array.isArray(node)) {
       issues.push({ path, code: 'node-not-object' })
       return
@@ -76,14 +91,14 @@ export function validateTree(tree: unknown): ValidateTreeResult {
       return
     }
 
-    n.children.forEach((child, i) => visit(child, `${path}.children[${i}]`))
+    n.children.forEach((child, i) => visit(child, `${path}.children[${i}]`, depth + 1))
   }
 
   if (!Array.isArray(tree)) {
     return { ok: false, issues: [{ path: 'root', code: 'not-an-array' }] }
   }
 
-  tree.forEach((node, i) => visit(node, `[${i}]`))
+  tree.forEach((node, i) => visit(node, `[${i}]`, 1))
 
   // 唯一的类型断言点：走到这里结构已全部校验通过，树可信。
   return issues.length === 0
@@ -106,6 +121,7 @@ export type MoveReason =
   | 'target-not-found'
   | 'target-is-descendant'
   | 'index-out-of-range'
+  | 'depth-exceeded'
 
 /**
  * 校验一次移动是否合法，不构造新树。
@@ -126,17 +142,21 @@ export function validateMove(
   if (!moving) return 'chapter-not-found'
 
   let baseLength = tree.length
+  let parentDepth = 0
   if (targetParentId !== null) {
     const target = locateNode(tree, targetParentId, null)
     if (!target) return 'target-not-found'
     // 移到自身或自己的子树里会形成环，也会把整棵子树从树上摘下来。
     if (containsId(moving.node, targetParentId)) return 'target-is-descendant'
     baseLength = target.node.children.length
+    parentDepth = depthOf(tree, targetParentId)
   }
 
   // 移动即“先摘除再插入”，同父移动时目标 children 少一个。
   const length = moving.parentId === targetParentId ? baseLength - 1 : baseLength
   if (!Number.isInteger(index) || index < 0 || index > length) return 'index-out-of-range'
+
+  if (parentDepth + heightOf(moving.node) > MAX_CHAPTER_DEPTH) return 'depth-exceeded'
 
   return null
 }
@@ -232,6 +252,11 @@ export function insertChapter(
     return { ok: false, reason: subtree.issues[0].code as SubtreeIssueCode }
   }
 
+  const parentDepth = parentId === null ? 0 : depthOf(tree, parentId)
+  if (parentDepth + heightOf(node) > MAX_CHAPTER_DEPTH) {
+    return { ok: false, reason: 'depth-exceeded' }
+  }
+
   const ids = new Set<ChapterId>()
   collectIds(subtree.tree[0], ids)
   for (const id of ids) {
@@ -313,6 +338,21 @@ function locateNode(
     if (found) return found
   }
   return null
+}
+
+/** 章节所在层级（根层级为 1）；前置条件：id 存在于树中。 */
+function depthOf(list: readonly ChapterNode[], id: ChapterId, depth = 1): number {
+  for (const node of list) {
+    if (node.id === id) return depth
+    const found = depthOf(node.children, id, depth + 1)
+    if (found > 0) return found
+  }
+  return 0
+}
+
+/** 子树的层数：叶子为 1。 */
+function heightOf(node: ChapterNode): number {
+  return 1 + node.children.reduce((max, child) => Math.max(max, heightOf(child)), 0)
 }
 
 function containsId(node: ChapterNode, id: ChapterId): boolean {

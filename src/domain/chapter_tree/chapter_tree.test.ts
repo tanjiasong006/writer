@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { insertChapter, moveChapter, removeChapter, renameChapter, validateMove, validateTree } from './chapter_tree.ts'
+import { MAX_CHAPTER_DEPTH, insertChapter, moveChapter, removeChapter, renameChapter, validateMove, validateTree } from './chapter_tree.ts'
 import type { ChapterNode, ChapterTree, InsertReason, MoveReason, TreeIssue } from './chapter_tree.ts'
 
 const valid: ChapterTree = [
@@ -396,4 +396,53 @@ test('重命名不修改原树', () => {
 test('重命名不存在的章节', () => {
   const result = renameChapter(outline, 'zzz', 'x')
   assert.equal(result.ok ? '' : result.reason, 'chapter-not-found')
+})
+
+/** 一条深度为 depth 的单链：id 为 d1..d{depth}。 */
+function chain(depth: number, prefix = 'd'): ChapterNode {
+  let node: ChapterNode = { id: `${prefix}${depth}`, title: '', children: [] }
+  for (let i = depth - 1; i >= 1; i--) node = { id: `${prefix}${i}`, title: '', children: [node] }
+  return node
+}
+
+test('validateTree：恰好 MAX_CHAPTER_DEPTH 层合法', () => {
+  assert.equal(validateTree([chain(MAX_CHAPTER_DEPTH)]).ok, true)
+})
+
+test('validateTree：超过层级上限报告 depth-exceeded，并停止深入', () => {
+  const issues = issuesOf([chain(MAX_CHAPTER_DEPTH + 1)])
+  assert.equal(issues.length, 1)
+  assert.equal(issues[0].code, 'depth-exceeded')
+})
+
+test('validateTree：极深的异常输入不会耗尽调用栈', () => {
+  let raw: unknown = { id: 'leaf', title: '', children: [] }
+  for (let i = 0; i < 100_000; i++) raw = { id: `n${i}`, title: '', children: [raw] }
+  const issues = issuesOf([raw])
+  assert.deepEqual(
+    issues.map((issue) => issue.code),
+    ['depth-exceeded'],
+  )
+})
+
+test('moveChapter：移动后超过层级上限时拒绝', () => {
+  // 深链最底层是第 32 级；把一个两层的子树放进第 31 级会达到 33 级。
+  const tree: ChapterTree = [chain(MAX_CHAPTER_DEPTH), chain(2, 'x')]
+  assert.equal(validateMove(tree, 'x1', `d${MAX_CHAPTER_DEPTH - 1}`, 0), 'depth-exceeded')
+  assert.deepEqual(moveChapter(tree, 'x1', `d${MAX_CHAPTER_DEPTH - 1}`, 0), {
+    ok: false,
+    reason: 'depth-exceeded',
+  })
+  // 放进第 30 级刚好到 32 级，合法。
+  assert.equal(validateMove(tree, 'x1', `d${MAX_CHAPTER_DEPTH - 2}`, 0), null)
+})
+
+test('insertChapter：插入后超过层级上限时拒绝', () => {
+  const tree: ChapterTree = [chain(MAX_CHAPTER_DEPTH)]
+  const leaf: ChapterNode = { id: 'new', title: '', children: [] }
+  assert.deepEqual(insertChapter(tree, `d${MAX_CHAPTER_DEPTH}`, 0, leaf), {
+    ok: false,
+    reason: 'depth-exceeded',
+  })
+  assert.equal(insertChapter(tree, `d${MAX_CHAPTER_DEPTH - 1}`, 0, leaf).ok, true)
 })

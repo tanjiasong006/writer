@@ -13,8 +13,8 @@
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | S0 | 章节树 Domain / Application / UI（已有） | ✅ 完成 |
-| S1 | 文档模型 + 项目格式（manifest 解析/生成、文件名规则） | ⏳ 进行中 |
-| S2 | Rust 存储层：保存事务、恢复、打开/新建、Tauri command | 待开始 |
+| S1 | 文档模型 + 项目格式（manifest 解析/生成、文件名规则） | ✅ 完成 |
+| S2 | Rust 存储层：保存事务、恢复、打开/新建、Tauri command | ⏳ 进行中 |
 | S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | 待开始 |
 | S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | 待开始 |
 | S5 | CodeMirror 正文编辑、按内容决定删除确认 | 待开始 |
@@ -84,3 +84,13 @@
 ## 进度记录
 
 （每个阶段完成后在此追加：完成内容、验证结果、发现的问题与修正。）
+
+### S1（完成）
+
+- 新增 Domain `document`（WriterDocument、replaceTree、setContent、isChapterBlank）。
+- 新增 infrastructure `project_format`（文件名规则、buildManifest、parseManifest）。
+- 发现：深度上限若只放在文件格式里，用户可以通过拖拽造出"能编辑但存不下"的树。
+  修正：`MAX_CHAPTER_DEPTH = 32` 放进 Domain `chapter_tree`，`validateTree` 超限即停止递归，
+  `validateMove` / `insertChapter` 拒绝超限结果（新 reason `depth-exceeded`，UI 已补文案）。
+  known-risks #1 因此关闭。
+- 验证：npm test 200/200，vue-tsc 通过。
