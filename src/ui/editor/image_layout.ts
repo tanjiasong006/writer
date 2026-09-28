@@ -19,7 +19,7 @@ import { nodes } from './schema.ts'
  *
  * 布局不属于正文：它按图片文件键（imageKey）保存在文档样式中（docs/decisions.md 第 8 节），
  * ProseMirror 文档与 Markdown 都不包含它。编辑器这样使用它：
- * - 插件状态持有当前的图片布局与主题默认布局，独立成段的图片（figure）按它加上
+ * - 插件状态持有当前的图片布局与主题默认布局，独立成段的图片（figure 节点）按它加上
  *   data-image-size / data-image-align 装饰，由 CSS 呈现；
  * - 用户修改布局时产生一个 ImageLayoutStep：它不改变文档，但作为事务中的 step 进入撤销历史，
  *   因此 Cmd+Z / Shift+Cmd+Z 能撤销 / 重做布局修改，选区不受影响；
@@ -86,13 +86,6 @@ function sameLayouts(a: ImageLayouts, b: ImageLayouts): boolean {
   return true
 }
 
-/** 只含一张图片的段落：与预览 / 导出一样作为独立的图（figure）显示，才有布局。 */
-function figureImage(node: Node): Node | null {
-  return node.type === nodes.paragraph && node.childCount === 1 && node.firstChild!.type === nodes.image
-    ? node.firstChild
-    : null
-}
-
 export function effectiveLayout(state: ImageLayoutState, key: string | null): ImageLayout {
   const own = key === null ? undefined : state.layouts.get(key)
   return { size: own?.size ?? state.defaults.size, align: own?.align ?? state.defaults.align }
@@ -120,19 +113,17 @@ export function imageLayoutPlugin(): Plugin<ImageLayoutState> {
       decorations(state) {
         const layout = imageLayoutKey.getState(state)!
         const decorations: Decoration[] = []
+        // 只有独立成段的图片（figure）有布局；行内图片随文字排列。
         state.doc.descendants((node, pos) => {
-          if (node.type !== nodes.paragraph) return !node.isTextblock
-          const image = figureImage(node)
-          if (image) {
-            const { size, align } = effectiveLayout(layout, imageKey(image.attrs.src as string))
-            decorations.push(
-              Decoration.node(pos, pos + node.nodeSize, {
-                class: 'is-figure',
-                'data-image-size': size,
-                'data-image-align': align,
-              }),
-            )
-          }
+          if (node.type !== nodes.figure) return !node.isTextblock
+          const { size, align } = effectiveLayout(layout, imageKey(node.attrs.src as string))
+          decorations.push(
+            Decoration.node(pos, pos + node.nodeSize, {
+              class: 'is-figure',
+              'data-image-size': size,
+              'data-image-align': align,
+            }),
+          )
           return false
         })
         return DecorationSet.create(state.doc, decorations)
@@ -163,8 +154,7 @@ export interface SelectedFigure {
 /** 当前选中的独立成段的图片（有图片文件键的）；否则返回 null。 */
 export function selectedFigure(state: EditorState): SelectedFigure | null {
   const { selection } = state
-  if (!(selection instanceof NodeSelection) || selection.node.type !== nodes.image) return null
-  if (figureImage(selection.$from.parent) !== selection.node) return null
+  if (!(selection instanceof NodeSelection) || selection.node.type !== nodes.figure) return null
   const key = imageKey(selection.node.attrs.src as string)
   const layout = imageLayoutKey.getState(state)
   if (key === null || !layout) return null

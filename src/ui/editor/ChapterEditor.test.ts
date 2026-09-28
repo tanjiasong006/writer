@@ -174,6 +174,21 @@ test('工具栏命令作用于选区并发出 change', async () => {
   expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', '> **引言**'])
 })
 
+test('点击工具栏不会让正文失去焦点与选区：按钮在 mousedown 时不抢焦点，命令之后可以直接继续输入', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '引言' })
+  const view = viewOf(wrapper)
+  view.focus()
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 3)))
+  const bold = wrapper.find('button[aria-label="粗体"]')
+  const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+  bold.element.dispatchEvent(mousedown)
+  expect(mousedown.defaultPrevented).toBe(true)
+  await bold.trigger('click')
+  expect(view.hasFocus()).toBe(true)
+  expect(view.state.selection.from).toBe(1)
+  expect(view.state.selection.to).toBe(3)
+})
+
 test('代码块中粗体按钮不可用', async () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '```\ncode\n```\n' })
   const view = viewOf(wrapper)
@@ -224,6 +239,23 @@ test('切换到没有打开过的章节时从顶部开始，回到章节时恢�
   expect(scroller(wrapper).scrollTop).toBe(0)
   await wrapper.setProps({ chapterId: 'a', content: '很长的正文\n\n'.repeat(200) })
   expect(scroller(wrapper).scrollTop).toBe(500)
+})
+
+test('从编辑器之外聚焦正文（章节树中按 Enter）：光标与滚动位置不变', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '很长的正文\n\n'.repeat(200) })
+  const view = viewOf(wrapper)
+  const cursor = TextSelection.create(view.state.doc, 300)
+  view.dispatch(view.state.tr.setSelection(cursor))
+  scroller(wrapper).scrollTop = 500
+  // WebKit：焦点从别处移入时先把光标放到正文开头并滚动到顶部。
+  const focus = view.focus.bind(view)
+  view.focus = () => {
+    scroller(wrapper).scrollTop = 0
+    focus()
+  }
+  ;(wrapper.vm as unknown as { focus(): void }).focus()
+  expect(scroller(wrapper).scrollTop).toBe(500)
+  expect(view.state.selection.eq(cursor)).toBe(true)
 })
 
 test('卸载时销毁 EditorView', () => {
@@ -279,7 +311,7 @@ test('修改主题：不产生 change、不进入撤销历史、不重建视图�
 function selectFirstImage(view: EditorView): void {
   let found = -1
   view.state.doc.descendants((node, pos) => {
-    if (found < 0 && node.type.name === 'image') found = pos
+    if (found < 0 && node.type.name === 'figure') found = pos
   })
   view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, found)))
 }

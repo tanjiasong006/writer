@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { Selection, TextSelection } from 'prosemirror-state'
+import { NodeSelection, Selection, TextSelection } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { createEditorState } from './plugins.ts'
@@ -184,6 +184,18 @@ test('表格是章节的第一个 / 最后一个块时，方向键可以把光�
   press(view, 'ArrowUp')
   expect(view.state.selection).toBeInstanceOf(GapCursor)
   expect(view.state.selection.from).toBe(0)
+
+  // 不在最后一列时同样离开表格，而不是在同一行内横向移动。
+  const other = viewOf('| a | b |\n| --- | --- |\n| c | d |\n')
+  other.endOfTextblock = () => true
+  cursorAfter(other, 'c')
+  press(other, 'ArrowDown')
+  expect(other.state.selection).toBeInstanceOf(GapCursor)
+  expect(other.state.selection.from).toBe(tableSize)
+  cursorAfter(other, 'b')
+  press(other, 'ArrowUp')
+  expect(other.state.selection).toBeInstanceOf(GapCursor)
+  expect(other.state.selection.from).toBe(0)
 })
 
 test('粘贴：单元格中的多段压成一行；只接受正文中的相对图片引用', () => {
@@ -195,4 +207,256 @@ test('粘贴：单元格中的多段压成一行；只接受正文中的相对�
     '<img src="data:image/png;base64,AAAA" alt="内嵌"><img src="file:///tmp/clip.png" alt="临时"></p>'
   view.pasteHTML(html)
   expect(markdown(view)).toBe('| 第一段 **第二段** | 乙 |\n| --- | --- |\n| 1 | 2 |\n\n图：![本地](../assets/a.png)\n')
+})
+
+test('Tab / Shift+Tab 永远由编辑器处理：普通段落、第一个列表项中什么也不做，焦点不会移出正文', () => {
+  const view = viewOf('段落')
+  cursorAfter(view, '段')
+  expect(press(view, 'Tab')).toBe(true)
+  expect(press(view, 'Tab', { shift: true })).toBe(true)
+  expect(markdown(view)).toBe('段落\n')
+
+  const list = viewOf('- 甲')
+  cursorAfter(list, '甲')
+  expect(press(list, 'Tab')).toBe(true)
+  expect(markdown(list)).toBe('- 甲\n')
+})
+
+test('先按 Esc 再按 Tab / Shift+Tab：编辑器不处理，焦点按浏览器默认方式离开正文（列表中也一样）', () => {
+  const view = viewOf('- 甲\n- 乙')
+  cursorAfter(view, '乙')
+  press(view, 'Escape')
+  expect(press(view, 'Tab')).toBe(false)
+  press(view, 'Escape')
+  press(view, 'Shift')
+  expect(press(view, 'Tab', { shift: true })).toBe(false)
+  expect(markdown(view)).toBe('- 甲\n- 乙\n')
+  // 其他按键之后 Tab 恢复为缩进。
+  cursorAfter(view, '乙')
+  press(view, 'Escape')
+  press(view, 'ArrowLeft')
+  expect(press(view, 'Tab')).toBe(true)
+  expect(markdown(view)).toBe('- 甲\n  - 乙\n')
+})
+
+test('表格最后一个单元格中按 Tab：新增一行，光标进入新行的第一个单元格', () => {
+  const view = viewOf('| a | b |\n| --- | --- |\n| c | d |\n')
+  cursorAfter(view, 'd')
+  press(view, 'Tab')
+  typeText(view, '新')
+  expect(markdown(view)).toBe('| a | b |\n| --- | --- |\n| c | d |\n| 新 |  |\n')
+  press(view, 'z', { mod: true })
+  expect(markdown(view)).toBe('| a | b |\n| --- | --- |\n| c | d |\n')
+})
+
+test('代码块：Tab 缩进两个空格，Shift+Tab 取消缩进；末尾连续两个空行后 Enter 离开代码块', () => {
+  const view = viewOf('```\na\n```')
+  cursorAfter(view, 'a')
+  press(view, 'Enter')
+  press(view, 'Tab')
+  typeText(view, 'b')
+  expect(markdown(view)).toBe('```\na\n  b\n```\n')
+  press(view, 'Tab', { shift: true })
+  expect(markdown(view)).toBe('```\na\nb\n```\n')
+
+  press(view, 'Enter')
+  press(view, 'Enter')
+  expect(view.state.doc.firstChild!.textContent).toBe('a\nb\n\n')
+  press(view, 'Enter')
+  typeText(view, '正文')
+  expect(markdown(view)).toBe('```\na\nb\n```\n\n正文\n')
+})
+
+test('代码块是章节的最后 / 第一个块时，↓ / ↑ 在其后 / 前新建段落；后面还有内容时照常移动', () => {
+  const view = viewOf('```\ncode\n```')
+  // happy-dom 没有排版：代码只有一行，"已在文本块的首 / 末行"恒为真。
+  view.endOfTextblock = () => true
+  cursorAfter(view, 'code')
+  expect(press(view, 'ArrowDown')).toBe(true)
+  typeText(view, '后')
+  expect(markdown(view)).toBe('```\ncode\n```\n\n后\n')
+
+  cursorAfter(view, 'co')
+  press(view, 'ArrowUp')
+  typeText(view, '前')
+  expect(markdown(view)).toBe('前\n\n```\ncode\n```\n\n后\n')
+
+  cursorAfter(view, 'code')
+  press(view, 'ArrowDown')
+  expect(view.state.doc.childCount).toBe(3)
+})
+
+test('刚由输入规则转换后按 Mod+Z：回到转换前的文字', () => {
+  for (const input of ['- ', '1. ', '> ', '## ', '```']) {
+    const view = viewOf('')
+    typeText(view, input)
+    press(view, 'z', { mod: true })
+    expect(view.state.doc.firstChild!.type.name).toBe('paragraph')
+    expect(view.state.doc.textContent).toBe(input)
+  }
+})
+
+test('标题开头按 Backspace 先变回正文段落，再按一次才与上一段合并', () => {
+  const view = viewOf('正文\n\n## 标题')
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, view.state.doc.firstChild!.nodeSize + 1)))
+  press(view, 'Backspace')
+  expect(markdown(view)).toBe('正文\n\n标题\n')
+  press(view, 'Backspace')
+  expect(markdown(view)).toBe('正文标题\n')
+
+  const first = viewOf('# 标题')
+  first.dispatch(first.state.tr.setSelection(Selection.atStart(first.state.doc)))
+  press(first, 'Backspace')
+  expect(markdown(first)).toBe('标题\n')
+})
+
+test('系统的撤销 / 重做（编辑菜单、焦点不在正文时的 Cmd+Z）使用编辑器的撤销历史（prosemirror-history 处理）', () => {
+  const view = viewOf('引言')
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
+  typeText(view, '补充')
+  const undoEvent = new InputEvent('beforeinput', { inputType: 'historyUndo', cancelable: true })
+  view.dom.dispatchEvent(undoEvent)
+  expect(undoEvent.defaultPrevented).toBe(true)
+  expect(markdown(view)).toBe('引言\n')
+  view.dom.dispatchEvent(new InputEvent('beforeinput', { inputType: 'historyRedo', cancelable: true }))
+  expect(markdown(view)).toBe('引言补充\n')
+})
+
+test('粘贴：去掉网页、Word、WPS 用来制造段间距的空段落', () => {
+  const view = viewOf('')
+  view.pasteHTML('<p>第一段</p><p>&nbsp;</p><p><br></p><p><span>\u3000</span></p><p><o:p></o:p></p><p>第二段</p>')
+  expect(view.state.doc.childCount).toBe(2)
+  expect(markdown(view)).toBe('第一段\n\n第二段\n')
+})
+
+const FIGURE = '![图](../assets/图.png)'
+
+/** 文档中第一张独立成段的图片（figure）的位置。 */
+function figurePos(view: EditorView): number {
+  let found = -1
+  view.state.doc.descendants((node, pos) => {
+    if (found < 0 && node.type.name === 'figure') found = pos
+  })
+  return found
+}
+
+function selectFigure(view: EditorView): void {
+  view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, figurePos(view))))
+}
+
+function cursorAt(view: EditorView, pos: number): void {
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)))
+}
+
+test('独占一段的图片是块级原子节点：文档中没有"图片旁边"的文字位置', () => {
+  const view = viewOf(`前文\n\n${FIGURE}\n\n后文`)
+  const { doc } = view.state
+  const figure = figurePos(view)
+  expect(doc.child(1).type.name).toBe('figure')
+  for (let pos = 0; pos <= doc.content.size; pos++) {
+    expect(doc.resolve(pos).parent.type.name).not.toBe('figure')
+  }
+  // 从图片前后找最近的光标位置，只会落在前后的段落里。
+  expect(Selection.near(doc.resolve(figure), -1).$from.parent.textContent).toBe('前文')
+  expect(Selection.near(doc.resolve(figure + 1), 1).$from.parent.textContent).toBe('后文')
+})
+
+test('图片：选中图片按 Enter 在其后新建段落；图片之前 / 之后的空隙处按 Enter 在空隙处新建段落', async () => {
+  const { GapCursor } = await import('prosemirror-gapcursor')
+  const view = viewOf(`前文\n\n${FIGURE}`)
+  selectFigure(view)
+  press(view, 'Enter')
+  typeText(view, '图后')
+  expect(markdown(view)).toBe(`前文\n\n${FIGURE}\n\n图后\n`)
+
+  const gap = viewOf(`${FIGURE}\n\n${FIGURE}`)
+  gap.dispatch(gap.state.tr.setSelection(new GapCursor(gap.state.doc.resolve(1))))
+  press(gap, 'Enter')
+  typeText(gap, '两图之间')
+  expect(markdown(gap)).toBe(`${FIGURE}\n\n两图之间\n\n${FIGURE}\n`)
+})
+
+test('图片是章节的最后 / 第一个块时，↓ / ↑ 移到它之后 / 之前的空隙，直接输入即成为新段落', async () => {
+  const { GapCursor } = await import('prosemirror-gapcursor')
+  const view = viewOf(FIGURE)
+  selectFigure(view)
+  press(view, 'ArrowDown')
+  expect(view.state.selection).toBeInstanceOf(GapCursor)
+  typeText(view, '后')
+  selectFigure(view)
+  press(view, 'ArrowUp')
+  expect(view.state.selection).toBeInstanceOf(GapCursor)
+  typeText(view, '前')
+  expect(markdown(view)).toBe(`前\n\n${FIGURE}\n\n后\n`)
+})
+
+test('图片：后一段段首 Backspace / 前一段段尾 Delete 先选中图片，再按一次删除，可撤销', () => {
+  const view = viewOf(`${FIGURE}\n\n正文`)
+  cursorAt(view, view.state.doc.firstChild!.nodeSize + 1)
+  press(view, 'Backspace')
+  expect(view.state.selection).toBeInstanceOf(NodeSelection)
+  expect(markdown(view)).toBe(`${FIGURE}\n\n正文\n`)
+  press(view, 'Backspace')
+  expect(markdown(view)).toBe('正文\n')
+  press(view, 'z', { mod: true })
+  expect(markdown(view)).toBe(`${FIGURE}\n\n正文\n`)
+
+  const before = viewOf(`正文\n\n${FIGURE}`)
+  cursorAfter(before, '正文')
+  press(before, 'Delete')
+  expect(before.state.selection).toBeInstanceOf(NodeSelection)
+  expect(markdown(before)).toBe(`正文\n\n${FIGURE}\n`)
+
+  // 图片后的空段落：Backspace 删掉空段落并选中图片。
+  const empty = viewOf(FIGURE)
+  selectFigure(empty)
+  press(empty, 'Enter')
+  press(empty, 'Backspace')
+  expect(empty.state.doc.childCount).toBe(1)
+  expect(empty.state.selection).toBeInstanceOf(NodeSelection)
+})
+
+test('编辑使段落只剩一张图片时（删掉旁边的文字、粘贴只含图片的段落）成为 figure；带链接的图片与仍有文字的段落不变', () => {
+  const view = viewOf('![图](../assets/图.png)文')
+  expect(view.state.doc.firstChild!.type.name).toBe('paragraph')
+  // 删掉"文"（段落内的删字由浏览器完成，这里直接用事务）。
+  const textEnd = view.state.doc.firstChild!.nodeSize - 1
+  view.dispatch(view.state.tr.delete(textEnd - 1, textEnd))
+  expect(view.state.doc.firstChild!.type.name).toBe('figure')
+  expect(view.state.selection).toBeInstanceOf(NodeSelection)
+  // 一次撤销回到删除之前，图片仍在原来的段落中。
+  press(view, 'z', { mod: true })
+  expect(markdown(view)).toBe('![图](../assets/图.png)文\n')
+
+  const pasted = viewOf('')
+  pasted.pasteHTML('<p>前文</p><p><img src="../assets/图.png" alt="图"></p><p>后文</p>')
+  expect(pasted.state.doc.child(1).type.name).toBe('figure')
+
+  const linked = viewOf('[![图](../assets/图.png)](https://example.com)文')
+  const linkedEnd = linked.state.doc.firstChild!.nodeSize - 1
+  linked.dispatch(linked.state.tr.delete(linkedEnd - 1, linkedEnd))
+  expect(linked.state.doc.firstChild!.type.name).toBe('paragraph')
+  expect(markdown(linked)).toBe('[![图](../assets/图.png)](https://example.com)\n')
+})
+
+test('输入法组字中的修改不转换成 figure，组字结束后的下一次修改才转换', () => {
+  const view = viewOf('![图](../assets/图.png)文\n\n下一段')
+  const end = view.state.doc.firstChild!.nodeSize - 1
+  view.dispatch(view.state.tr.delete(end - 1, end).setMeta('composition', 1))
+  expect(view.state.doc.firstChild!.type.name).toBe('paragraph')
+  view.dispatch(view.state.tr.insertText('。', view.state.doc.content.size - 1))
+  expect(view.state.doc.firstChild!.type.name).toBe('figure')
+})
+
+test('点击最后一块（代码块、表格、图片、分隔线）下方的空白：在章节末尾新建段落；最后是普通段落时照常处理', () => {
+  // happy-dom 没有排版，块的下边缘都是 0：任何 clientY > 0 的点击都在其下方。
+  const click = (view: EditorView) =>
+    view.someProp('handleClick', (handle) => handle(view, 1, new MouseEvent('click', { clientY: 100 }))) ?? false
+  for (const source of ['```\ncode\n```', FIGURE, '---', '| a |\n| - |\n| b |']) {
+    const view = viewOf(source)
+    expect(click(view)).toBe(true)
+    typeText(view, '继续')
+    expect(markdown(view)).toBe(`${serializeChapter(parseMarkdown(source)).trimEnd()}\n\n继续\n`)
+  }
+  expect(click(viewOf('段落'))).toBe(false)
 })

@@ -37,17 +37,17 @@ function setup(markdown: string, layouts: ImageLayouts = new Map()) {
   return { view, reported }
 }
 
-/** 选中第 index 张图片（节点选区）。 */
+/** 选中第 index 张图片（独立成段的 figure 或行内图片，按文档顺序；节点选区）。 */
 function selectImage(view: EditorView, index: number): void {
   const positions: number[] = []
   view.state.doc.descendants((node, pos) => {
-    if (node.type.name === 'image') positions.push(pos)
+    if (node.type.name === 'figure' || node.type.name === 'image') positions.push(pos)
   })
   view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, positions[index])))
 }
 
 function figures(view: EditorView): Array<{ size: string | null; align: string | null }> {
-  return [...view.dom.querySelectorAll('p.is-figure')].map((p) => ({
+  return [...view.dom.querySelectorAll('.is-figure')].map((p) => ({
     size: p.getAttribute('data-image-size'),
     align: p.getAttribute('data-image-align'),
   }))
@@ -67,7 +67,7 @@ test('在前面插入另一张图片后，布局仍属于原来的图片（不�
   const { view } = setup(TWO_IMAGES, new Map([['assets/甲.png', { size: 'large' }]]))
   view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, 0)))
   // 在文档开头插入新图片。
-  const tr = view.state.tr.insert(0, view.state.schema.nodes.paragraph.create(null, view.state.schema.nodes.image.create({ src: '../assets/新.png' })))
+  const tr = view.state.tr.insert(0, view.state.schema.nodes.figure.create({ src: '../assets/新.png' }))
   view.dispatch(tr)
   expect(figures(view).map((f) => f.size)).toEqual(['original', 'large', 'original'])
   // 删除第一张图片后同样不串图。

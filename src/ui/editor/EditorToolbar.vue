@@ -7,6 +7,7 @@ import type { ToolbarCommand, ToolbarState } from './commands.ts'
  * 按钮的可用 / 激活状态来自编辑器当前状态（state），不提供时全部可用。
  * 按钮在 mousedown 时阻止默认行为，点击后焦点仍留在编辑器中。
  * context 插槽显示在工具栏右侧，用于与当前选中内容相关的按钮（如图片布局）。
+ * 工具栏始终只有一行：窄到放不下两者时，context 按钮出现期间暂时代替格式按钮，正文不会因此上下跳动。
  */
 const props = defineProps<{ state?: ToolbarState | null }>()
 
@@ -64,7 +65,12 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
 </script>
 
 <template>
-  <div class="editor-toolbar" role="toolbar" aria-label="正文格式">
+  <div
+    class="editor-toolbar"
+    :class="{ 'editor-toolbar--context': $slots.context }"
+    role="toolbar"
+    aria-label="正文格式"
+  >
     <div v-for="(group, index) in groups" :key="index" class="editor-toolbar__group">
       <button
         v-for="item in group"
@@ -101,9 +107,9 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
 
 <style scoped>
 .editor-toolbar {
+  container-type: inline-size;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: 12px;
   width: 100%;
   max-width: 760px;
   box-sizing: border-box;
@@ -120,6 +126,13 @@ const groups: ReadonlyArray<ReadonlyArray<ToolbarItem>> = [
 .editor-toolbar__context {
   display: flex;
   margin-left: auto;
+}
+
+/* 格式按钮与 context 按钮并排需要约 600px（含左右内边距）。 */
+@container (max-width: 620px) {
+  .editor-toolbar--context .editor-toolbar__group {
+    display: none;
+  }
 }
 
 .editor-toolbar__button {

@@ -5,7 +5,7 @@ import { appendImage, parseChapter, parseMarkdown, serializeChapter } from './ma
 import { marks, nodes, schema } from './schema.ts'
 
 const { doc, paragraph: p, heading, blockquote, code_block, bullet_list, ordered_list, list_item } = nodes
-const { table, table_row, table_header, table_cell, image, hard_break, horizontal_rule } = nodes
+const { table, table_row, table_header, table_cell, image, figure, hard_break, horizontal_rule } = nodes
 
 function text(value: string, ...markNames: Array<keyof typeof marks>) {
   return schema.text(value, markNames.map((name) => marks[name].create()))
@@ -99,8 +99,32 @@ describe('Markdown → 文档', () => {
   })
 
   test('图片保留原始引用（不做百分号编码），alt 合并全部文字', () => {
-    const img = parseMarkdown('![实验*装置*](../assets/实验装置.png "说明")').child(0).child(0)
+    const img = parseMarkdown('![实验*装置*](../assets/实验装置.png "说明")').child(0)
+    expect(img.type).toBe(figure)
     expect(img.attrs).toEqual({ src: '../assets/实验装置.png', alt: '实验装置', title: '说明' })
+  })
+
+  test('独占一段的图片解析为块级的 figure；与文字同处一段的图片仍是段落中的行内图片，文字不丢失', () => {
+    const parsed = parseMarkdown(
+      '![图一](../assets/1.png)\n\n说明文字 ![图二](../assets/2.png) 之后\n\n![a](a.png)\n![b](b.png)\n\n> ![引用中](q.png)\n\n- ![列表中](l.png)\n- [ ] ![任务](t.png)\n\n| ![单元格](c.png) |\n| - |\n',
+    )
+    const types = Array.from({ length: parsed.childCount }, (_, i) => parsed.child(i).type)
+    expect(types).toEqual([figure, p, p, blockquote, bullet_list, table])
+    expect(parsed.child(1).textContent).toBe('说明文字  之后')
+    expect(parsed.child(1).child(1).type).toBe(image)
+    expect(parsed.child(2).childCount).toBe(3)
+    expect(parsed.child(3).firstChild!.type).toBe(figure)
+    expect(parsed.child(4).child(0).firstChild!.type).toBe(figure)
+    expect(parsed.child(4).child(1).attrs.checked).toBe(false)
+    expect(parsed.child(4).child(1).firstChild!.type).toBe(figure)
+    expect(parsed.child(5).firstChild!.firstChild!.firstChild!.type).toBe(image)
+  })
+
+  test('figure 写回的 Markdown 与只含这张图片的段落完全相同，没有新语法', () => {
+    const source = '![图一](../assets/1.png "标题")\n\n> ![引用中](q.png)\n\n- ![列表中](l.png)\n- [ ] ![任务](t.png)\n'
+    expect(write(parseMarkdown(source))).toBe(source)
+    const attrs = { src: '../assets/实验 图.png', alt: '图[1]', title: null }
+    expect(write(doc.create(null, figure.create(attrs)))).toBe(write(doc.create(null, p.create(null, image.create(attrs)))))
   })
 
   test('原始 HTML 是文字（与 Rust 渲染器一致），不会成为结构', () => {
@@ -179,11 +203,11 @@ describe('文档 → Markdown', () => {
   })
 
   test('图片：含空格的引用用尖括号包裹，括号转义', () => {
-    const one = (src: string) => write(doc.create(null, p.create(null, image.create({ src, alt: '图' }))))
+    const one = (src: string) => write(doc.create(null, figure.create({ src, alt: '图' })))
     expect(one('../assets/实验 图.png')).toBe('![图](<../assets/实验 图.png>)\n')
     expect(one('../assets/a(1).png')).toBe('![图](../assets/a\\(1\\).png)\n')
     for (const src of ['../assets/实验 图.png', '../assets/a(1).png', '../assets/%E5%9B%BE.png']) {
-      expect(parseMarkdown(one(src)).child(0).child(0).attrs.src).toBe(src)
+      expect(parseMarkdown(one(src)).child(0).attrs.src).toBe(src)
     }
   })
 
@@ -192,6 +216,14 @@ describe('文档 → Markdown', () => {
       type.create(null, list_item.create(null, p.create(null, text(value))))
     const node = doc.create(null, [list(bullet_list, '一'), list(bullet_list, '二'), list(ordered_list, '三'), list(ordered_list, '四')])
     expect(expectStable(node)).toBe('- 一\n\n\n* 二\n\n1. 三\n\n\n1) 四\n')
+  })
+
+  test('按块缓存的写法随位置更新：删掉两个列表之间的段落后，后一个列表换用另一种标记', () => {
+    const first = bullet_list.create(null, list_item.create(null, p.create(null, text('一'))))
+    const second = bullet_list.create(null, list_item.create(null, p.create(null, text('二'))))
+    expect(write(doc.create(null, [first, p.create(null, text('中间')), second]))).toBe('- 一\n\n中间\n\n- 二\n')
+    expect(write(doc.create(null, [first, second]))).toBe('- 一\n\n\n* 二\n')
+    expect(write(doc.create(null, [first, p.create(null, text('中间')), second]))).toBe('- 一\n\n中间\n\n- 二\n')
   })
 
   test('任务列表', () => {
@@ -349,8 +381,17 @@ describe('往返', () => {
       if (roll === 7) return horizontal_rule.create()
       return p.create(null, inline(true))
     }
+    // 除空白与硬换行外只有一张（不带链接的）图片的段落，写出后就是独立成段的图，再次解析得到 figure。
+    const soleImage = (node: Node) => {
+      const content = node.children.filter((c) => !(c.isText && /^[ \t]*$/.test(c.text!)) && c.type !== hard_break)
+      return node.type === p && content.length === 1 && content[0].type === image && content[0].marks.length === 0
+    }
     const shape = (node: Node): unknown =>
-      node.isTextblock ? node.type.name : [node.type.name, ...Array.from({ length: node.childCount }, (_, i) => shape(node.child(i)))]
+      soleImage(node)
+        ? 'figure'
+        : node.isTextblock || node.isLeaf
+          ? node.type.name
+          : [node.type.name, ...Array.from({ length: node.childCount }, (_, i) => shape(node.child(i)))]
     const visible = (node: Node) => node.textContent.replace(/\s+/g, '')
 
     for (let round = 0; round < 1000; round++) {
@@ -447,6 +488,6 @@ describe('appendImage', () => {
   test('替代文字中的方括号被转义，引用中的空格用尖括号包裹', () => {
     const appended = appendImage('', '../assets/实验 图.png', '图[1]')
     expect(appended).toBe('![图\\[1\\]](<../assets/实验 图.png>)\n')
-    expect(parseMarkdown(appended).child(0).child(0).attrs).toMatchObject({ src: '../assets/实验 图.png', alt: '图[1]' })
+    expect(parseMarkdown(appended).child(0).attrs).toMatchObject({ src: '../assets/实验 图.png', alt: '图[1]' })
   })
 })

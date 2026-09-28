@@ -102,6 +102,21 @@ test('Header + 无选中：追加根章节为未命名章节，选中并进入�
   expect(renameInput(wrapper).element.value).toBe('未命名章节')
 })
 
+test('新建章节后输入标题按 Enter 直接进入正文；重命名已有章节按 Enter 留在章节树', async () => {
+  const wrapper = mountManager()
+  await wrapper.find('.chapter-tree__add').trigger('click')
+  await renameInput(wrapper).setValue('新的一章')
+  await renameInput(wrapper).trigger('keydown.enter')
+  expect(rowTexts(wrapper)).toContain('3新的一章')
+  expect(wrapper.emitted('open')).toHaveLength(1)
+
+  await rows(wrapper)[0].find('.chapter-tree__label').trigger('keydown', { key: 'F2' })
+  await renameInput(wrapper).setValue('A 改')
+  await renameInput(wrapper).trigger('keydown.enter')
+  expect(rowTexts(wrapper)[0]).toBe('1A 改')
+  expect(wrapper.emitted('open')).toHaveLength(1)
+})
+
 test('Header + 有选中：在选中章节之后新建同级', async () => {
   const wrapper = mountManager()
   await rows(wrapper)[0].trigger('click') // a

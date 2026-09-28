@@ -15,7 +15,7 @@ import { tableNodes } from 'prosemirror-tables'
  *
  * 只包含正文持久化格式（Markdown，docs/decisions.md 第 2 节）能表达、且预览与导出
  * （Rust pulldown-cmark）能渲染的结构：段落、标题、引用、列表（含任务列表标记）、代码块、
- * 分隔线、表格、图片、硬换行，以及粗体、斜体、删除线、行内代码、链接。
+ * 分隔线、表格、图片（独占一段的 figure 与行内图片）、硬换行，以及粗体、斜体、删除线、行内代码、链接。
  * 不能用 Markdown 表达的结构（合并单元格、单元格内多段落等）不进入 schema。
  */
 
@@ -55,6 +55,7 @@ function inlineCellContent(dom: HTMLElement | globalThis.Node, schema: Schema): 
   }
   parsed.descendants((node) => {
     if (node.isText || node.type === schema.nodes.image) push(node)
+    else if (node.type === schema.nodes.figure) push(schema.nodes.image.create(node.attrs))
     else if (node.isBlock || node.type === schema.nodes.hard_break) space = true
     return !node.isText
   })
@@ -72,6 +73,23 @@ function withInlineCellContent(spec: NodeSpec): NodeSpec {
  */
 function isContentReference(src: string): boolean {
   return src.length > 0 && !/^[a-z][a-z0-9+.-]*:/i.test(src) && !/^[\\/]/.test(src)
+}
+
+const imageAttrs = {
+  /** 正文中的原始引用（如 ../assets/图.png），不做任何改写。 */
+  src: { validate: 'string' },
+  alt: { default: '', validate: 'string' },
+  title: { default: null, validate: 'string|null' },
+}
+
+function imageDOMAttrs(dom: HTMLElement): { src: string; alt: string; title: string | null } | false {
+  const src = dom.getAttribute('src') ?? ''
+  if (!isContentReference(src)) return false
+  return { src, alt: dom.getAttribute('alt') ?? '', title: dom.getAttribute('title') }
+}
+
+function imageOutputAttrs(node: Node): Record<string, string | null> {
+  return { src: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title }
 }
 
 export const schema = new Schema({
@@ -191,30 +209,35 @@ export const schema = new Schema({
 
     text: { group: 'inline' },
 
-    image: {
-      inline: true,
-      attrs: {
-        /** 正文中的原始引用（如 ../assets/图.png），不做任何改写。 */
-        src: { validate: 'string' },
-        alt: { default: '', validate: 'string' },
-        title: { default: null, validate: 'string|null' },
-      },
-      group: 'inline',
+    /**
+     * 独占一段的图片（Markdown 中单独成段的 ![alt](src)）：块级、原子节点，与预览 / 导出中的图（figure）对应，
+     * 有尺寸与对齐布局。它是一个整体：光标只能在它之前 / 之后的段落中，不能停在图片旁边。
+     */
+    figure: {
+      attrs: imageAttrs,
+      group: 'block',
+      atom: true,
       draggable: true,
       parseDOM: [
         {
-          tag: 'img[src]',
+          tag: 'figure',
           getAttrs: (dom) => {
-            const src = dom.getAttribute('src') ?? ''
-            if (!isContentReference(src)) return false
-            return { src, alt: dom.getAttribute('alt') ?? '', title: dom.getAttribute('title') }
+            const image = dom.querySelector('img')
+            return image ? imageDOMAttrs(image) : false
           },
         },
       ],
-      toDOM: (node): DOMOutputSpec => [
-        'img',
-        { src: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title },
-      ],
+      toDOM: (node): DOMOutputSpec => ['figure', ['img', imageOutputAttrs(node)]],
+    },
+
+    /** 行内图片：与文字同处一段（或在表格单元格、标题中）的图片。 */
+    image: {
+      inline: true,
+      attrs: imageAttrs,
+      group: 'inline',
+      draggable: true,
+      parseDOM: [{ tag: 'img[src]', getAttrs: imageDOMAttrs }],
+      toDOM: (node): DOMOutputSpec => ['img', imageOutputAttrs(node)],
     },
 
     hard_break: {

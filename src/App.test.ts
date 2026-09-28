@@ -623,7 +623,7 @@ test('图片布局：在编辑器中调整后按图片保存到文档样式，�
   const view = editorView(wrapper)
   let second = -1
   view.state.doc.descendants((node, pos) => {
-    if (node.type.name === 'image' && node.attrs.src === '../assets/曲线.png') second = pos
+    if (node.type.name === 'figure' && node.attrs.src === '../assets/曲线.png') second = pos
   })
   view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, second)))
   await flushPromises()

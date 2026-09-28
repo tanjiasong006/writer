@@ -28,6 +28,8 @@ const props = defineProps<{
   selectedId?: ChapterId | null
   /** 正在内联重命名的章节 id；由上层在新建后或用户触发时设置。 */
   editingId?: ChapterId | null
+  /** 正在重命名的是刚新建的章节：按 Enter 确认标题后直接进入正文（发出 open），可以马上开始写。 */
+  editingNew?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -49,7 +51,7 @@ const emit = defineEmits<{
   'cancel-rename': []
   /** 请求删除章节，由上层决定是否确认。 */
   delete: [chapterId: ChapterId]
-  /** Enter：进入当前章节的正文编辑。 */
+  /** Enter：进入当前章节的正文编辑（包括为新章节确认标题后）。 */
   open: [chapterId: ChapterId]
 }>()
 
@@ -457,6 +459,19 @@ function cancelRename(): void {
   emit('cancel-rename')
 }
 
+/**
+ * 用键盘结束重命名（Enter 确认 / Esc 放弃）：输入框随之消失，焦点回到该章节所在行，不会掉到页面上；
+ * 新章节按 Enter 确认标题后进入正文。失焦提交时焦点已经在别处，不再移动。
+ */
+function finishRenameByKey(submit: boolean): void {
+  const id = props.editingId
+  if (id === null || id === undefined || renameDone) return
+  if (submit) commitRename()
+  else cancelRename()
+  if (submit && props.editingNew) emit('open', id)
+  else void focusRow(id)
+}
+
 /** 把树摊平成带层级的显示行；折叠节点不展开其后代。 */
 const rows = computed<ChapterRow[]>(() => {
   const numbers = computeChapterNumbers(props.tree)
@@ -555,8 +570,8 @@ const rows = computed<ChapterRow[]>(() => {
               autocomplete="off"
               :value="draft"
               @input="draft = ($event.target as HTMLInputElement).value"
-              @keydown.enter.prevent="commitRename"
-              @keydown.esc.prevent="cancelRename"
+              @keydown.enter.prevent="finishRenameByKey(true)"
+              @keydown.esc.prevent="finishRenameByKey(false)"
               @blur="commitRename"
             />
           </div>

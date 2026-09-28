@@ -89,6 +89,26 @@ tokenizer.core.ruler.push('writer_task_list', (state) => {
 })
 
 /**
+ * 只含一张图片的段落是独立的图（figure），与预览 / 导出的判断相同：把 paragraph_open、inline（只有一张图片）、
+ * paragraph_close 合成一个 figure 记号。任务列表标记去掉后留下的空文字不算内容。图片与文字同处一段时仍是段落。
+ */
+tokenizer.core.ruler.push('writer_figure', (state) => {
+  const tokens = state.tokens
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    if (tokens[i].type !== 'paragraph_open' || tokens[i + 2].type !== 'paragraph_close') continue
+    const content = (tokens[i + 1].children ?? []).filter((child) => !(child.type === 'text' && child.content === ''))
+    if (content.length !== 1 || content[0].type !== 'image') continue
+    const figure = new state.Token('figure', '', 0)
+    figure.attrs = content[0].attrs
+    figure.children = content[0].children
+    figure.map = tokens[i].map
+    // 紧凑列表的判断读取列表项第一个记号的 hidden（见 listIsTight）。
+    figure.hidden = tokens[i].hidden
+    tokens.splice(i, 3, figure)
+  }
+})
+
+/**
  * 软换行（源文件中段落内的折行）按渲染结果处理：一般是空格；
  * 两侧都是中文时什么都没有——与 Rust 渲染器去掉中文之间软换行的规则一致。
  */
@@ -138,6 +158,10 @@ function imageAlt(token: Token): string {
   return (token.children ?? []).map((child) => child.content).join('')
 }
 
+function imageAttrs(token: Token) {
+  return { src: token.attrGet('src') ?? '', alt: imageAlt(token), title: token.attrGet('title') || null }
+}
+
 const parser = new MarkdownParser(schema, tokenizer, {
   blockquote: { block: 'blockquote' },
   paragraph: { block: 'paragraph' },
@@ -163,14 +187,8 @@ const parser = new MarkdownParser(schema, tokenizer, {
   tr: { block: 'table_row' },
   th: { block: 'table_header', getAttrs: (token) => ({ align: cellAlign(token) }) },
   td: { block: 'table_cell', getAttrs: (token) => ({ align: cellAlign(token) }) },
-  image: {
-    node: 'image',
-    getAttrs: (token) => ({
-      src: token.attrGet('src') ?? '',
-      alt: imageAlt(token),
-      title: token.attrGet('title') || null,
-    }),
-  },
+  image: { node: 'image', getAttrs: imageAttrs },
+  figure: { node: 'figure', getAttrs: imageAttrs },
   hardbreak: { node: 'hard_break' },
   em: { mark: 'em' },
   strong: { mark: 'strong' },
@@ -194,6 +212,10 @@ export function parseMarkdown(markdown: string): Node {
 function destination(url: string): string {
   if (/[\s<>]/.test(url)) return `<${url.replace(/[<>]/g, (c) => encodeURIComponent(c))}>`
   return url.replace(/[()\\]/g, '\\$&')
+}
+
+function imageMarkdown(state: MarkdownSerializerState, node: Node): string {
+  return `![${state.esc(node.attrs.alt)}](${destination(node.attrs.src)}${titlePart(node.attrs.title)})`
 }
 
 function titlePart(title: string | null): string {
@@ -248,6 +270,7 @@ function renderList(
  * 返回该列表在连续同类列表中的序号是否为奇数。
  */
 function alternateMarker(node: Node, parent: Node, index: number): boolean {
+  if (alternateTopLevel.has(parent)) return true
   let run = 0
   while (index - run - 1 >= 0 && parent.child(index - run - 1).type === node.type) run++
   return run % 2 === 1
@@ -324,7 +347,12 @@ const serializer = new MarkdownSerializer(
     },
     table: serializeTable,
     image(state, node) {
-      state.write(`![${state.esc(node.attrs.alt)}](${destination(node.attrs.src)}${titlePart(node.attrs.title)})`)
+      state.write(imageMarkdown(state, node))
+    },
+    // 与只含这张图片的段落写法相同：Markdown 中没有新的语法。
+    figure(state, node) {
+      state.write(imageMarkdown(state, node))
+      state.closeBlock(node)
     },
     text(state, node, parent, index) {
       const text = node.text ?? ''
@@ -357,8 +385,41 @@ const serializer = new MarkdownSerializer(
   },
 )
 
+/**
+ * 逐个顶层块序列化，并按块对象缓存结果：编辑长章节时每次只重新序列化改动过的块
+ * （prosemirror-markdown 在整篇输出上反复检查行首，一次整篇序列化的耗时随篇幅平方增长）。
+ * 顶层块之间与整篇序列化相同：一个空行；相邻的同类列表之间两个空行。
+ * 块的写法只取决于它自身，以及它在相邻同类列表中是否使用交替标记（记在 alternateTopLevel 中）。
+ */
 function serializeMarkdown(doc: Node): string {
-  return serializer.serialize(representable(doc)).replace(/\s+$/, '')
+  let out = ''
+  let previous: Node | null = null
+  doc.forEach((block, _, index) => {
+    const text = serializeBlock(block, isList(block) && alternateMarker(block, doc, index))
+    if (text.length === 0) return
+    if (previous) out += isList(block) && previous.type === block.type ? '\n\n\n' : '\n\n'
+    out += text
+    previous = block
+  })
+  return out
+}
+
+/** 单独序列化时应使用交替标记的顶层列表所在的文档。 */
+const alternateTopLevel = new WeakSet<Node>()
+const blockMarkdown = new WeakMap<Node, { readonly alternate: boolean; readonly text: string }>()
+
+function serializeBlock(block: Node, alternate: boolean): string {
+  const cached = blockMarkdown.get(block)
+  if (cached && cached.alternate === alternate) return cached.text
+  const doc = representable(nodes.doc.create(null, block))
+  if (alternate) alternateTopLevel.add(doc)
+  const text = serializer.serialize(doc).replace(/\s+$/, '')
+  blockMarkdown.set(block, { alternate, text })
+  return text
+}
+
+function isList(node: Node): boolean {
+  return node.type === nodes.bullet_list || node.type === nodes.ordered_list
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +589,7 @@ function adjustEmphasis(block: Node): Node {
 /** 把图片作为新的一段追加到正文末尾，保留原有正文的每一个字节。 */
 export function appendImage(text: string, reference: string, alt: string): string {
   const image = serializeMarkdown(
-    nodes.doc.create(null, nodes.paragraph.create(null, nodes.image.create({ src: reference, alt }))),
+    nodes.doc.create(null, nodes.figure.create({ src: reference, alt })),
   )
   const lead = text.length === 0 ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? '\n' : '\n\n'
   return `${text}${lead}${image}\n`

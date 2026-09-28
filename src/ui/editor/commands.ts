@@ -1,5 +1,5 @@
 import type { Node, NodeType, ResolvedPos } from 'prosemirror-model'
-import { TextSelection, type Command, type EditorState } from 'prosemirror-state'
+import { TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state'
 import { lift, setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
 import { liftListItem, wrapInList } from 'prosemirror-schema-list'
 import { marks, nodes } from './schema.ts'
@@ -111,11 +111,11 @@ function inTableCell($pos: ResolvedPos): boolean {
 }
 
 /**
- * 在选区处插入一个块（表格、图片段落）：先删除选中内容；光标在段落中间时拆开段落，
+ * 在选区处插入一个块（表格、图）：先删除选中内容；光标在段落中间时拆开段落，
  * 在段首 / 段尾时插在段落之前 / 之后，空段落直接被替换。
- * 代码块与表格单元格中不能插入块。插入后光标放在 cursor(块起点) 处。
+ * 代码块与表格单元格中不能插入块。插入后由 place(事务, 块起点) 放置光标。
  */
-function insertBlock(block: Node, cursor: (start: number) => number): Command {
+function insertBlock(block: Node, place: (tr: Transaction, start: number) => void): Command {
   return (state, dispatch) => {
     const { $from } = state.selection
     if ($from.parent.type.spec.code || inTableCell($from)) return false
@@ -144,7 +144,7 @@ function insertBlock(block: Node, cursor: (start: number) => number): Command {
       start = $pos.pos + 1
       tr.insert(start, block)
     }
-    tr.setSelection(TextSelection.near(tr.doc.resolve(cursor(start))))
+    place(tr, start)
     dispatch(tr.scrollIntoView())
     return true
   }
@@ -159,21 +159,27 @@ export const insertTable: Command = (state, dispatch) => {
     row(nodes.table_cell),
     row(nodes.table_cell),
   ])
-  return insertBlock(table, (start) => start + 3)(state, dispatch)
+  return insertBlock(table, (tr, start) => tr.setSelection(TextSelection.create(tr.doc, start + 3)))(state, dispatch)
 }
 
 /**
  * 图片：reference 是正文可用的相对路径（如 ../assets/图.png）。
- * 正文中作为独立的一段插入；表格单元格与标题中作为行内图片插入。
+ * 正文中（段落里，或选中了一个块、光标在块之间的空隙时）作为独立的图（figure）插入，
+ * 光标放在图片之后的段落中，可以直接继续写（之后不是普通段落时新建一个空段落）；
+ * 表格单元格与标题中作为行内图片插入。
  */
 export function insertImage(reference: string, alt: string): Command {
-  const image = nodes.image.create({ src: reference, alt })
-  const paragraph = nodes.paragraph.create(null, image)
-  const asBlock = insertBlock(paragraph, (start) => start + paragraph.nodeSize)
+  const figure = nodes.figure.create({ src: reference, alt })
+  const asBlock = insertBlock(figure, (tr, start) => {
+    const after = start + figure.nodeSize
+    if (tr.doc.resolve(after).nodeAfter?.type !== nodes.paragraph) tr.insert(after, nodes.paragraph.create())
+    tr.setSelection(TextSelection.create(tr.doc, after + 1))
+  })
   return (state, dispatch) => {
     const { $from } = state.selection
-    if ($from.parent.type === nodes.paragraph) return asBlock(state, dispatch)
+    if ($from.parent.type === nodes.paragraph || !$from.parent.isTextblock) return asBlock(state, dispatch)
     if (!$from.parent.canReplaceWith($from.index(), $from.indexAfter(), nodes.image)) return false
+    const image = nodes.image.create({ src: reference, alt })
     if (dispatch) dispatch(state.tr.replaceSelectionWith(image).scrollIntoView())
     return true
   }

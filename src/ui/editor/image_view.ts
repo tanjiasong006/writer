@@ -7,17 +7,18 @@ export type ImageResolver = (reference: string) => string | null
 /**
  * 编辑器中的图片：按项目资源显示；无法解析或加载失败时显示占位，引用本身不变。
  * 图片节点本身只保存正文中的引用，显示地址不进入文档。
+ * 行内图片放在 span 中；独立成段的图（figure）放在块级的 div 中，布局装饰（is-figure、data-image-*）加在这个 div 上。
  */
 class ImageView implements NodeView {
   readonly dom: HTMLElement
   private node: Node
   private readonly resolve: ImageResolver
 
-  constructor(node: Node, resolve: ImageResolver) {
+  constructor(node: Node, resolve: ImageResolver, block: boolean) {
     this.node = node
     this.resolve = resolve
-    this.dom = document.createElement('span')
-    this.dom.className = 'editor-image'
+    this.dom = document.createElement(block ? 'div' : 'span')
+    this.dom.className = block ? 'editor-image editor-figure' : 'editor-image'
     this.render()
   }
 
@@ -60,5 +61,9 @@ class ImageView implements NodeView {
 }
 
 export function imageNodeView(resolve: ImageResolver): NodeViewConstructor {
-  return (node) => new ImageView(node, resolve)
+  return (node) => new ImageView(node, resolve, false)
+}
+
+export function figureNodeView(resolve: ImageResolver): NodeViewConstructor {
+  return (node) => new ImageView(node, resolve, true)
 }

@@ -8,7 +8,7 @@ import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import EditorToolbar from './EditorToolbar.vue'
 import { ChapterDocuments } from './chapter_documents.ts'
 import { insertImage, toolbarCommands, toolbarState, type ToolbarCommand, type ToolbarState } from './commands.ts'
-import { imageNodeView, type ImageResolver } from './image_view.ts'
+import { figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
 import ImageLayoutControls from './ImageLayoutControls.vue'
 import {
   layoutChanges,
@@ -77,6 +77,12 @@ const scrolls = new Map<ChapterId, number>()
 let view: EditorView | null = null
 let currentId = props.chapterId
 
+/**
+ * 光标滚动到可见区域时与滚动容器边缘保持的距离：连续输入、换段时光标所在行不会贴在窗口底边，
+ * 下方始终能看到一点空白。只在光标接近边缘时滚动，不会每次输入都滚动。
+ */
+const CARET_MARGIN = { top: 40, bottom: 96, left: 0, right: 0 }
+
 function dispatchTransaction(tr: Transaction): void {
   if (!view) return
   const { state } = view.state.applyTransaction(tr)
@@ -104,10 +110,13 @@ function stateFor(chapterId: ChapterId, text: string): EditorState {
 
 onMounted(() => {
   const state = stateFor(currentId, props.content)
+  const resolveImage = props.resolveImage ?? (() => null)
   view = new EditorView(mountPoint.value!, {
     state,
     dispatchTransaction,
-    nodeViews: { image: imageNodeView(props.resolveImage ?? (() => null)) },
+    scrollThreshold: CARET_MARGIN,
+    scrollMargin: CARET_MARGIN,
+    nodeViews: { image: imageNodeView(resolveImage), figure: figureNodeView(resolveImage) },
     attributes: { class: 'chapter-editor__content', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '正文' },
   })
   showState(state)
@@ -159,7 +168,7 @@ function runCommand(command: ToolbarCommand): void {
     return
   }
   toolbarCommands[command](view.state, view.dispatch)
-  view.focus()
+  focus()
 }
 
 /**
@@ -169,15 +178,27 @@ function runCommand(command: ToolbarCommand): void {
 function insertImageAt(chapterId: ChapterId, reference: string, alt: string): boolean {
   if (!view || chapterId !== currentId) return false
   if (!insertImage(reference, alt)(view.state, view.dispatch)) return false
-  view.focus()
+  focus()
   return true
+}
+
+/**
+ * 从编辑器之外（如章节树中按 Enter）把焦点交给正文，光标与滚动位置都保持原样。
+ * 焦点来自别处时正文中还没有 DOM 选区，WebKit 聚焦时会先把光标放到正文开头并滚动到顶部，
+ * 随后 ProseMirror 才恢复真正的选区（不滚动），因此聚焦前后保持滚动位置不变。
+ */
+function focus(): void {
+  if (!view || !scroller.value) return
+  const top = scroller.value.scrollTop
+  view.focus()
+  scroller.value.scrollTop = top
 }
 
 defineExpose({
   insertImage: insertImageAt,
   /** 当前的 EditorView（测试与调试用）。 */
   getView: (): EditorView | null => view,
-  focus: () => view?.focus(),
+  focus,
 })
 </script>
 
@@ -418,7 +439,7 @@ defineExpose({
 }
 
 /*
- * 独占一段的图片（figure）：布局来自图片自己的设置或主题默认（image_layout.ts 的装饰）。
+ * 独占一段的图片（figure 节点，块级的 .editor-figure）：布局来自图片自己的设置或主题默认（image_layout.ts 的装饰）。
  * 尺寸规则与 Word / PDF 导出相同（export::images::display_size_pt）：原始尺寸不超过正文宽度；
  * 其他尺寸是正文宽度的固定比例；任何尺寸下高度不超过 560px（420 磅），超出时保持比例缩小。
  */
@@ -442,27 +463,27 @@ defineExpose({
   object-fit: contain;
 }
 
-.chapter-editor__body :deep(.is-figure[data-image-size='small'] .editor-image img) {
+.chapter-editor__body :deep(.is-figure[data-image-size='small'] img) {
   width: var(--doc-image-small);
 }
 
-.chapter-editor__body :deep(.is-figure[data-image-size='medium'] .editor-image img) {
+.chapter-editor__body :deep(.is-figure[data-image-size='medium'] img) {
   width: var(--doc-image-medium);
 }
 
-.chapter-editor__body :deep(.is-figure[data-image-size='large'] .editor-image img) {
+.chapter-editor__body :deep(.is-figure[data-image-size='large'] img) {
   width: var(--doc-image-large);
 }
 
-.chapter-editor__body :deep(.is-figure[data-image-size='full'] .editor-image img) {
+.chapter-editor__body :deep(.is-figure[data-image-size='full'] img) {
   width: var(--doc-image-full);
 }
 
-.chapter-editor__body :deep(.is-figure[data-image-align='left'] .editor-image img) {
+.chapter-editor__body :deep(.is-figure[data-image-align='left'] img) {
   object-position: left;
 }
 
-.chapter-editor__body :deep(.is-figure[data-image-align='right'] .editor-image img) {
+.chapter-editor__body :deep(.is-figure[data-image-align='right'] img) {
   object-position: right;
 }
 

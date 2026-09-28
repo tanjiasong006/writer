@@ -134,6 +134,18 @@ describe('插入表格与图片', () => {
     expect(markdown(middle)).toBe('前文\n\n![图](../assets/图.png)\n\n后文\n')
   })
 
+  test('插入图片后光标在图片之后的段落中，可以直接继续写；之后没有段落时新建一个', () => {
+    const atEnd = run(stateOf('引言', { cursorAfter: '引言' }), insertImage('../assets/图.png', '图'))
+    expect(atEnd.doc.childCount).toBe(3)
+    expect(atEnd.selection.$from.parent).toBe(atEnd.doc.lastChild)
+    expect(atEnd.selection.$from.parent.content.size).toBe(0)
+    expect(markdown(atEnd)).toBe('引言\n\n![图](../assets/图.png)\n')
+
+    const middle = run(stateOf('前文后文', { cursorAfter: '前文' }), insertImage('../assets/图.png', '图'))
+    expect(middle.doc.childCount).toBe(3)
+    expect(middle.selection.from).toBe(find(middle, '后文'))
+  })
+
   test('表格单元格中图片作为行内图片插入；代码块中不能插入', () => {
     const inCell = run(
       stateOf('| a | b |\n| --- | --- |\n| c | d |\n', { cursorAfter: 'c' }),
