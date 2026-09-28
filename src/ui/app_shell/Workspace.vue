@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ProjectSession } from '../../application/project_session.ts'
 import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { findChapter } from '../../domain/chapter_tree/chapter_tree.ts'
@@ -190,6 +190,13 @@ async function insertImage(chapterId: ChapterId): Promise<void> {
   if (text !== undefined) props.session.setContent(chapterId, appendImage(text, reference, alt))
 }
 
+/** 章节树中按 Enter：回到编辑模式并把焦点交给正文编辑器。 */
+async function openChapter(): Promise<void> {
+  mode.value = 'edit'
+  await nextTick()
+  editor.value?.focus()
+}
+
 function chapterHasContent(chapterId: ChapterId): boolean {
   return hasContent(document.value, chapterId)
 }
@@ -275,6 +282,7 @@ const selectedNumber = computed(() =>
           :tree="document.tree"
           :has-content="chapterHasContent"
           @update:tree="applyTree"
+          @open="openChapter"
         />
       </aside>
 

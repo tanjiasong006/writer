@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { canMoveChapter, moveChapterTo } from './move_chapter.ts'
+import { canMoveChapter, keyboardMoveIntent, moveChapterTo } from './move_chapter.ts'
 import { validateTree } from '../domain/chapter_tree/chapter_tree.ts'
 import type { ChapterTree } from '../domain/chapter_tree/chapter_tree.ts'
 
@@ -171,4 +171,45 @@ test('canMoveChapter：只读校验，不修改也不重建输入树', () => {
   // 返回布尔值而非新树，原树内容与引用都不变。
   assert.equal(JSON.stringify(frozen), snapshot)
   assert.equal(JSON.stringify(outline), snapshot)
+})
+
+test('keyboardMoveIntent：up / down 与相邻兄弟交换', () => {
+  assert.deepEqual(keyboardMoveIntent(outline, 'a2', 'up'), {
+    chapterId: 'a2',
+    targetChapterId: 'a1',
+    position: 'before',
+  })
+  assert.deepEqual(keyboardMoveIntent(outline, 'a', 'down'), {
+    chapterId: 'a',
+    targetChapterId: 'b',
+    position: 'after',
+  })
+
+  const up = moveChapterTo(outline, keyboardMoveIntent(outline, 'a2', 'up')!)
+  assert.equal(up.ok, true)
+  if (up.ok) assert.deepEqual(childIds(up.tree, 'a'), ['a2', 'a1'])
+})
+
+test('keyboardMoveIntent：outdent 成为父章节的下一个兄弟', () => {
+  const intent = keyboardMoveIntent(outline, 'a1', 'outdent')!
+  assert.deepEqual(intent, { chapterId: 'a1', targetChapterId: 'a', position: 'after' })
+  const result = moveChapterTo(outline, intent)
+  assert.equal(result.ok, true)
+  if (result.ok) assert.deepEqual(result.tree.map((n) => n.id), ['a', 'a1', 'b'])
+})
+
+test('keyboardMoveIntent：indent 成为上一个兄弟的最后一个子章节', () => {
+  const intent = keyboardMoveIntent(outline, 'b', 'indent')!
+  assert.deepEqual(intent, { chapterId: 'b', targetChapterId: 'a', position: 'inside' })
+  const result = moveChapterTo(outline, intent)
+  assert.equal(result.ok, true)
+  if (result.ok) assert.deepEqual(childIds(result.tree, 'a'), ['a1', 'a2', 'b'])
+})
+
+test('keyboardMoveIntent：已在边界时返回 null', () => {
+  assert.equal(keyboardMoveIntent(outline, 'a1', 'up'), null)
+  assert.equal(keyboardMoveIntent(outline, 'a2', 'down'), null)
+  assert.equal(keyboardMoveIntent(outline, 'a', 'outdent'), null)
+  assert.equal(keyboardMoveIntent(outline, 'a1', 'indent'), null)
+  assert.equal(keyboardMoveIntent(outline, 'missing', 'up'), null)
 })

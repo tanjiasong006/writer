@@ -3,13 +3,18 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { findChapter, type ChapterId, type ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { resolveDropPosition, type DropPosition } from './drop_target.ts'
-import { canMoveChapter, type MoveIntent } from '../../application/move_chapter.ts'
+import {
+  canMoveChapter,
+  keyboardMoveIntent,
+  type KeyboardMoveDirection,
+  type MoveIntent,
+} from '../../application/move_chapter.ts'
 
 /**
  * 章节树组件。
  *
  * 负责：按 tree 渲染层级、选择、折叠/展开、拖拽落点反馈、Tree Header、
- * 节点菜单、F2 内联重命名、空状态。
+ * 节点菜单、F2 内联重命名、键盘导航与键盘移动、空状态。
  *
  * 所有会产生结构变化的行为都只发出意图事件，由上层（Application）执行；
  * 组件不判断移动是否合法、不构造新树，也不包含任何章节结构规则。
@@ -44,6 +49,8 @@ const emit = defineEmits<{
   'cancel-rename': []
   /** 请求删除章节，由上层决定是否确认。 */
   delete: [chapterId: ChapterId]
+  /** Enter：进入当前章节的正文编辑。 */
+  open: [chapterId: ChapterId]
 }>()
 
 interface ChapterRow {
@@ -235,11 +242,121 @@ function requestDelete(chapterId: ChapterId): void {
   emit('delete', chapterId)
 }
 
-/** 键盘 F2 进入重命名；其余按键不拦截（完整方向键导航属于 P1）。 */
-function onLabelKeydown(event: KeyboardEvent, chapterId: ChapterId): void {
-  if (event.key !== 'F2') return
+/**
+ * 键盘焦点所在章节（ui-spec §30）。与 selectedId 是两个概念：
+ * 选中章节变化时焦点跟随，但焦点可以停在未选中的行（如尚无选中时 Tab 进入树）。
+ */
+const focusedId = ref<ChapterId | null>(null)
+
+watch(
+  () => props.selectedId,
+  (id) => {
+    if (id !== null && id !== undefined) focusedId.value = id
+  },
+  { immediate: true },
+)
+
+/**
+ * 树内只有一行可以被 Tab 聚焦（roving tabindex）：焦点行可见时是它，
+ * 否则是可见的选中行，再否则是第一行。
+ */
+const tabbableId = computed<ChapterId | null>(() => {
+  const visible = (id: ChapterId | null | undefined): boolean =>
+    id !== null && id !== undefined && rows.value.some((row) => row.id === id)
+  if (visible(focusedId.value)) return focusedId.value
+  if (visible(props.selectedId)) return props.selectedId ?? null
+  return rows.value[0]?.id ?? null
+})
+
+/** 把键盘焦点移到某一行；等 DOM 更新后再聚焦，行在重排后是新位置。 */
+async function focusRow(chapterId: ChapterId): Promise<void> {
+  focusedId.value = chapterId
+  await nextTick()
+  const label = listElement.value?.querySelector<HTMLElement>(
+    `.chapter-tree__label[data-chapter-id="${CSS.escape(chapterId)}"]`,
+  )
+  label?.focus()
+}
+
+function selectAndFocus(chapterId: ChapterId): void {
+  if (chapterId !== props.selectedId) emit('select', chapterId)
+  void focusRow(chapterId)
+}
+
+/** 从根到 id 的父章节 id；根章节或找不到时为 null。 */
+function parentOf(chapterId: ChapterId): ChapterId | null {
+  const path = ancestorPath(props.tree, chapterId)
+  return path === null || path.length === 0 ? null : path[path.length - 1]
+}
+
+const MOVE_KEYS: Readonly<Record<string, KeyboardMoveDirection>> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'outdent',
+  ArrowRight: 'indent',
+}
+
+/**
+ * 树的键盘交互（ui-spec §29，WAI-ARIA tree 模式）：
+ * ↑ / ↓ 选择上一 / 下一可见章节，Home / End 到首 / 末；
+ * → 展开，已展开时进入第一个子章节；← 折叠，已折叠或无子章节时回到父章节；
+ * Enter 进入正文；F2 重命名；Alt+Shift+方向键 移动章节（上移 / 下移 / 提升 / 降级）。
+ * Delete 不删除章节，避免误删。
+ */
+function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
+  if (event.altKey && event.shiftKey && !event.metaKey && !event.ctrlKey) {
+    const direction = MOVE_KEYS[event.key]
+    if (direction === undefined) return
+    event.preventDefault()
+    const intent = keyboardMoveIntent(props.tree, row.id, direction)
+    if (intent === null) return
+    if (row.id !== props.selectedId) emit('select', row.id)
+    emit('move', intent)
+    // 行在 DOM 中被重排后会失去焦点，移动后把焦点放回原章节。
+    void focusRow(row.id)
+    return
+  }
+  if (event.altKey || event.shiftKey || event.metaKey || event.ctrlKey) return
+
+  const index = rows.value.findIndex((candidate) => candidate.id === row.id)
+  const expanded = row.hasChildren && !collapsedIds.value.has(row.id)
+  let target: ChapterId | null = null
+
+  switch (event.key) {
+    case 'ArrowUp':
+      target = rows.value[index - 1]?.id ?? null
+      break
+    case 'ArrowDown':
+      target = rows.value[index + 1]?.id ?? null
+      break
+    case 'Home':
+      target = rows.value[0]?.id ?? null
+      break
+    case 'End':
+      target = rows.value[rows.value.length - 1]?.id ?? null
+      break
+    case 'ArrowRight':
+      if (row.hasChildren && !expanded) toggle(row.id)
+      else if (expanded) target = rows.value[index + 1]?.id ?? null
+      break
+    case 'ArrowLeft':
+      if (expanded) toggle(row.id)
+      else target = parentOf(row.id)
+      break
+    case 'Enter':
+      event.preventDefault()
+      if (row.id !== props.selectedId) emit('select', row.id)
+      emit('open', row.id)
+      return
+    case 'F2':
+      event.preventDefault()
+      requestStartRename(row.id)
+      return
+    default:
+      return
+  }
   event.preventDefault()
-  requestStartRename(chapterId)
+  if (target !== null) selectAndFocus(target)
 }
 
 /** 内联重命名的临时文本；由 editingId 驱动初始化。 */
@@ -366,6 +483,7 @@ const rows = computed<ChapterRow[]>(() => {
             v-if="row.hasChildren"
             type="button"
             class="chapter-tree__toggle"
+            tabindex="-1"
             :aria-expanded="!collapsedIds.has(row.id)"
             :aria-label="collapsedIds.has(row.id) ? '展开' : '折叠'"
             @click.stop="toggle(row.id)"
@@ -394,8 +512,11 @@ const rows = computed<ChapterRow[]>(() => {
             v-else
             type="button"
             class="chapter-tree__label"
+            :data-chapter-id="row.id"
+            :tabindex="row.id === tabbableId ? 0 : -1"
             @click="toggleFromTitle(row)"
-            @keydown="onLabelKeydown($event, row.id)"
+            @focus="focusedId = row.id"
+            @keydown="onLabelKeydown($event, row)"
           >
             <span class="chapter-tree__number">{{ row.number }}</span>
             <span class="chapter-tree__title" :title="row.title">{{ row.title }}</span>
@@ -407,6 +528,7 @@ const rows = computed<ChapterRow[]>(() => {
             :class="{ 'chapter-tree__more--open': openMenuId === row.id }"
             aria-label="更多操作"
             aria-haspopup="menu"
+            :tabindex="row.id === tabbableId ? 0 : -1"
             @click.stop="toggleMenu(row.id)"
           ></button>
         </div>
@@ -511,6 +633,15 @@ const rows = computed<ChapterRow[]>(() => {
   left: 0;
   width: 3px;
   background: #3b82f6;
+}
+
+/* 键盘焦点：整行内描边，与选中态（背景 + 左侧强调条）区分。 */
+.chapter-tree__label:focus-visible {
+  outline: none;
+}
+
+.chapter-tree__row:has(.chapter-tree__label:focus-visible) {
+  box-shadow: inset 0 0 0 2px #93c5fd;
 }
 
 .chapter-tree__row--dragging {

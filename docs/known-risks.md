@@ -16,7 +16,11 @@
 - 把 `validateTree` 改成显式栈遍历，或
 - 明确并验证一个最大章节深度，超限直接拒绝导入。
 
-## 2. 章节重排只有鼠标拖拽
+## 2. 章节重排只有鼠标拖拽（已解决）
+
+> 已处理：选中章节可用 Alt+Shift+↑ / ↓ / ← / → 上移 / 下移 / 提升 / 降级。
+> Application `keyboardMoveIntent` 把方向换算成与拖拽相同的 `MoveIntent`，仍由 `moveChapterTo` 执行，
+> 没有新增移动规则。以下为原始记录。
 
 `ChapterTree` 仅实现 HTML5 拖拽，键盘用户无法重排章节。
 

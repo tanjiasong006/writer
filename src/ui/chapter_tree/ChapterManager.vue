@@ -42,6 +42,11 @@ const collapsedIds = defineModel<ReadonlySet<ChapterId>>('collapsedIds', {
   default: () => new Set<ChapterId>(),
 })
 
+const emit = defineEmits<{
+  /** 用户在章节树中按 Enter，要求进入该章节的正文。 */
+  open: [chapterId: ChapterId]
+}>()
+
 const props = defineProps<{
   /**
    * 章节是否有正文。没有子章节且没有正文的章节直接删除，不需要确认（ui-spec §23）。
@@ -286,6 +291,7 @@ function messageForMove(reason: MoveReason): string {
       @rename="commitRename"
       @cancel-rename="cancelRename"
       @delete="requestDelete"
+      @open="emit('open', $event)"
     />
   </section>
 </template>

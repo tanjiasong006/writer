@@ -207,10 +207,22 @@
 - 已知风险补充（known-risks #4–#6）：外部程序同时修改项目文件、真实桌面端到端验证、安装包体积。
 - 验证：npm test 304/304，vue-tsc、vite build、build-storybook 通过；cargo test 69 项，clippy 无警告。
 
+### 后续 2：章节树键盘导航与键盘移动（完成）
+
+- ChapterTree（ui-spec §29 / §30，WAI-ARIA tree 模式）：↑ / ↓ / Home / End 选择可见章节；
+  → 展开 / 进入第一个子章节，← 折叠 / 回到父章节；Enter 进入正文（预览中也回到编辑）；F2 重命名；
+  Delete 不删除。键盘焦点（focusedId）与选中章节分开建模，选中变化时焦点跟随。
+- Roving tabindex：Tab 只停在焦点行（及其 ··· 菜单按钮），折叠箭头不进 Tab 顺序；焦点行整行描边。
+- 键盘移动：Alt+Shift+↑ / ↓ / ← / → 上移 / 下移 / 提升 / 降级（known-risks #2 关闭）。
+  Application `keyboardMoveIntent` 只把方向换算成 `MoveIntent`，规则仍由 `moveChapterTo` / Domain 负责，
+  超过层级上限时显示原有的错误文案；移动后焦点留在被移动的章节（含降级进已折叠章节时自动展开）。
+- Storybook：`UI/ChapterTree/KeyboardNavigation`。
+- 验证：npm test 320/320（含变异检查：去掉移动后的重新聚焦，3 项测试失败），vue-tsc、vite build、build-storybook 通过。
+
 ## 后续（MVP 之外，按价值排序）
 
 1. 手动验收清单全部走一遍（需要真实桌面环境与 Word / WPS）。
-2. 章节树键盘导航与键盘移动章节（ui-spec §29、known-risks #2）。
+2. ~~章节树键盘导航与键盘移动章节（ui-spec §29、known-risks #2）~~ 已完成。
 3. 拖入折叠节点自动展开、拖拽时自动滚动、大量章节虚拟滚动（ui-spec P1）。
 4. 结构操作撤销（删除章节后可恢复）。
 5. 外部修改检测（文件监听 + 冲突提示）。
@@ -229,3 +241,4 @@
 7. 编辑正文后立即 Cmd+Q（Windows：关闭窗口）→ 修改已保存；保存失败时出现确认而不是直接退出。
 8. 同一项目在第二个 Writer 实例中打开 → 提示"已在另一个 Writer 窗口中打开"。
 9. 在 content/ 中放一张损坏的图片并引用 → 预览显示占位、导出成功并提示图片无法嵌入。
+10. 章节树中用 Tab 进入 → ↑↓←→ 浏览、Enter 进入正文；Alt+Shift+方向键 移动章节，确认 macOS / Windows 上这些组合键未被系统或输入法占用。

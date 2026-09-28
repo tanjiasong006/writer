@@ -329,6 +329,32 @@ test('新建章节后编辑器切换到新章节', async () => {
   expect(editorView(wrapper).state.doc.toString()).toBe('')
 })
 
+test('键盘：↓ 切换章节，Enter 进入正文（预览中也回到编辑），Alt+Shift+↑ 移动章节并保存', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  const label = (id: string) => wrapper.find(`.chapter-tree__label[data-chapter-id="${id}"]`)
+
+  await label('a').trigger('keydown', { key: 'ArrowDown' })
+  await label('a1').trigger('keydown', { key: 'ArrowDown' })
+  await flushPromises()
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('2方法')
+
+  await button(wrapper, '预览').trigger('click')
+  await label('b').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(editorView(wrapper).hasFocus).toBe(true)
+
+  await label('b').trigger('keydown', { key: 'ArrowUp', altKey: true, shiftKey: true })
+  await flushPromises()
+  expect(rowTexts(wrapper)).toEqual(['1方法', '2绪论', '2.1背景'])
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  expect(services.storage.committed(PATH)!.tree.map((node) => node.id)).toEqual(['b', 'a'])
+  expect(services.storage.committed(PATH)!.contents.get('b')).toBe('方法正文')
+})
+
 test('工具栏：粗体作用于编辑器选区并进入正文', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH

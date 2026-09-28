@@ -221,3 +221,18 @@ export const DragAndDrop: Story = {
 export const DragBoundaries: Story = {
   args: { tree: nested, selectedId: null },
 }
+
+/**
+ * 键盘导航与键盘移动（ui-spec §29）：焦点已在「1.1 环境准备」，可直接按键验证。
+ *
+ * - ↑ / ↓ / Home / End：选择上一 / 下一 / 第一 / 最后一个可见章节。
+ * - → / ←：展开 / 进入子章节；折叠 / 回到父章节。
+ * - Alt+Shift+↑ / ↓：同级上移 / 下移；Alt+Shift+← / →：提升 / 降级；焦点跟随被移动的章节。
+ * - F2 重命名；Delete 不删除章节。Tab 只停在当前行（整行蓝色描边为键盘焦点）。
+ */
+export const KeyboardNavigation: Story = {
+  args: { tree: nested, selectedId: 'sec-1-1' },
+  play: async ({ canvasElement }) => {
+    canvasElement.querySelector<HTMLElement>('.chapter-tree__label[data-chapter-id="sec-1-1"]')?.focus()
+  },
+}

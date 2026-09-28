@@ -59,6 +59,44 @@ export function canMoveChapter(tree: ChapterTree, intent: MoveIntent): boolean {
   return validateMove(tree, intent.chapterId, plan.targetParentId, plan.index) === null
 }
 
+/** 键盘移动方向：同级上移 / 下移，提升为父章节的下一个兄弟，降级为上一个兄弟的最后一个子章节。 */
+export type KeyboardMoveDirection = 'up' | 'down' | 'outdent' | 'indent'
+
+/**
+ * 把键盘移动（known-risks #2）换算成与拖拽相同的 MoveIntent，之后仍由 moveChapterTo 执行。
+ *
+ * - up：放到上一个兄弟之前；down：放到下一个兄弟之后。
+ * - outdent：放到父章节之后；indent：放进上一个兄弟，作为最后一个子章节。
+ * - 没有对应的兄弟 / 父章节（已在边界）或章节不存在时返回 null。
+ * - 层级上限等移动规则不在这里判断，由 moveChapterTo 返回原因。
+ *
+ * 前置条件：tree 是一棵已通过 validateTree 的可信树。
+ */
+export function keyboardMoveIntent(
+  tree: ChapterTree,
+  chapterId: ChapterId,
+  direction: KeyboardMoveDirection,
+): MoveIntent | null {
+  const location = locate(tree, chapterId)
+  if (!location) return null
+  const siblings = location.parentId === null ? tree : (locate(tree, location.parentId)?.node.children ?? [])
+  const previous = siblings[location.index - 1]
+  const next = siblings[location.index + 1]
+
+  switch (direction) {
+    case 'up':
+      return previous ? { chapterId, targetChapterId: previous.id, position: 'before' } : null
+    case 'down':
+      return next ? { chapterId, targetChapterId: next.id, position: 'after' } : null
+    case 'outdent':
+      return location.parentId === null
+        ? null
+        : { chapterId, targetChapterId: location.parentId, position: 'after' }
+    case 'indent':
+      return previous ? { chapterId, targetChapterId: previous.id, position: 'inside' } : null
+  }
+}
+
 type TargetPlan = {
   readonly moving: Location
   readonly targetParentId: ChapterId | null
