@@ -25,6 +25,11 @@ tauri-plugin-dialog = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
 docx-rs = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+typst = "0.15"
+typst-pdf = "0.15"
+typst-kit = { version = "0.15", default-features = false, features = ["scan-fonts", "embedded-fonts"] }
+typst-layout = "0.15"
+comemo = "0.5"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -32,7 +37,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 codegen-units = 1
 lto = true
 opt-level = 3
-panic = "abort"
+# unwind：第三方排版库（Typst、docx-rs）遇到异常输入 panic 时，只让本次导出失败，
+# 而不是让整个应用退出（见 docs/decisions.md 第 7 节）。
+panic = "unwind"
 strip = true
 
 [dev-dependencies]

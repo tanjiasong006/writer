@@ -86,6 +86,8 @@ pub fn export(
     Ok((bytes.into_inner(), writer.report))
 }
 
+// 只在构建期间短暂存在、随后整体移入 Docx，变体大小差异无关紧要。
+#[allow(clippy::large_enum_variant)]
 enum Item {
     Paragraph(Paragraph),
     Table(Table),

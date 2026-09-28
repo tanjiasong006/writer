@@ -645,3 +645,38 @@ fn ui_state_round_trip_and_is_independent_of_the_document() {
     assert_eq!(read_ui_state(&RealFs, &root), Ok(None));
     assert_disk_is(&root, &state);
 }
+
+/// 性能测量：`cargo test --release bench_insert_at_top -- --ignored --nocapture`
+/// 在 500 个章节的最前面插入一章，所有正文文件都需要换名。
+#[test]
+#[ignore]
+fn bench_insert_at_top_of_500_chapters() {
+    let dir = TempDir::new().unwrap();
+    let root = project_root(&dir);
+    let ids: Vec<&'static str> = (1..=500).map(|i| &*Box::leak(format!("c{i}").into_boxed_str())).collect();
+    let text = "长文档正文。".repeat(200);
+    let old = State {
+        title: "大文档",
+        files: ids.iter().enumerate().map(|(i, id)| (*id, format!("ch_{}.md", i + 1))).collect(),
+        contents: ids.iter().map(|id| (*id, text.clone())).collect(),
+    };
+    old.write_to(&root);
+    let mut new = State { title: "大文档", files: vec![("x", "ch_1.md".into())], contents: vec![("x", String::new())] };
+    new.files.extend(ids.iter().enumerate().map(|(i, id)| (*id, format!("ch_{}.md", i + 2))));
+    new.contents.extend(ids.iter().map(|id| (*id, text.clone())));
+
+    let started = std::time::Instant::now();
+    save_project(&RealFs, &root, &new.request(&["x"])).unwrap();
+    let rename_all = started.elapsed();
+
+    let edit = State { contents: new.contents.iter().map(|(id, t)| (*id, if *id == "c250" { format!("{t}!") } else { t.clone() })).collect(), ..new.clone() };
+    let started = std::time::Instant::now();
+    save_project(&RealFs, &root, &edit.request(&["c250"])).unwrap();
+    let single_edit = started.elapsed();
+
+    let started = std::time::Instant::now();
+    open_project(&RealFs, &root).unwrap();
+    let open = started.elapsed();
+    println!("rename 501 files: {rename_all:?}; single edit save: {single_edit:?}; open: {open:?}");
+    assert_disk_is(&root, &edit);
+}

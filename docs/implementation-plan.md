@@ -21,8 +21,8 @@
 | S6 | 插入内容：工具栏、图片资源导入、表格等 | ✅ 完成 |
 | S7 | 全文预览（Rust pulldown-cmark 渲染） | ✅ 完成 |
 | S8 | Word 导出（docx-rs） | ✅ 完成 |
-| S9 | PDF 导出（Typst）+ 字体 fallback | ⏳ 进行中 |
-| S10 | 加固：大文档、深层嵌套、极端输入、回归 | 待开始 |
+| S9 | PDF 导出（Typst）+ 字体 fallback | ✅ 完成 |
+| S10 | 加固：大文档、深层嵌套、极端输入、回归 | ⏳ 进行中 |
 
 ## S1 文档模型 + 项目格式
 
@@ -179,6 +179,21 @@
 - 验证：cargo test 通过（docx 7 项 + 图片 5 项，含 500 章、32 级、控制字符、损坏 / 超大图片），
   生成的样例能被 docx-rs 读取器与 macOS textutil 独立解析；npm test 301/301。
 - 限制：本机没有 Word / LibreOffice，Word 中的最终排版需手动核对（见验收清单）。
+
+### S9（完成）
+
+- Rust `export/pdf.rs`：统一模型 → Typst 源码 → 内嵌 Typst（typst / typst-pdf / typst-kit 0.15）→ PDF。
+  A4、页码、PDF 书签（来自标题，含编号）、标题 / 正文 / 等宽字体按 `fonts.rs` 的角色 fallback 链选择。
+- 用户文本全部以 Typst 字符串字面量注入；测试覆盖 `"]#panic(...)[`、`$`、`#import` 等注入尝试，输出为原样文字。
+- 文档含中文而本机没有中文字体时返回 `no-cjk-font`，纯英文文档不受影响（用只含内嵌字体的字体库测试）。
+- Typst 文件 id 全局驻留且有上限 → 虚拟路径固定；每次导出后 `comemo::evict(0)`，长时间运行不累积内存。
+- 字体库全进程扫描一次，应用启动后后台预热。
+- 稳定性：release 改为 `panic = "unwind"`，第三方排版库 panic 只让本次导出失败（docs/decisions.md 第 7 节）。
+- 独立验证：PyMuPDF 解析样例 PDF —— 文字、编号、中文折行、书签结构、图片、嵌入字体
+  （宋体 / Times New Roman / 黑体 / Arial / Menlo）均正确。
+- 体积：release 可执行文件 46 MB（strip + LTO），gzip 后约 21 MB；其中 Typst 内嵌字体约 9.6 MB
+  （若需要可去掉 `embedded-fonts`，改为完全依赖系统拉丁字体，体积约减少 9.6 MB）。
+- 验证：cargo test 66 项 + 3 项手动样例 / 性能测量，clippy 无警告；npm test 302/302。
 
 ## 手动验收清单（需要在真实桌面环境执行）
 

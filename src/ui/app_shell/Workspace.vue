@@ -204,14 +204,20 @@ function commitTitle(event: Event): void {
   props.session.setTitle(title)
 }
 
+/**
+ * 只依赖章节树：编辑正文不改变树的引用，computed 值不变时不会触发下游重算，
+ * 输入时不必为每次按键重新计算整棵树的编号。
+ */
+const tree = computed(() => document.value.tree)
+const numbers = computed(() => computeChapterNumbers(tree.value))
+
 const selectedChapter = computed(() =>
-  selectedId.value === null ? null : findChapter(document.value.tree, selectedId.value),
+  selectedId.value === null ? null : findChapter(tree.value, selectedId.value),
 )
 
-const selectedNumber = computed(() => {
-  if (selectedId.value === null) return ''
-  return (computeChapterNumbers(document.value.tree).get(selectedId.value) ?? []).join('.')
-})
+const selectedNumber = computed(() =>
+  selectedId.value === null ? '' : (numbers.value.get(selectedId.value) ?? []).join('.'),
+)
 </script>
 
 <template>

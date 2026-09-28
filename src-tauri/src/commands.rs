@@ -110,3 +110,24 @@ pub fn reveal_in_file_manager(path: PathBuf) -> Result<(), String> {
         .spawn();
     result.map(|_| ()).map_err(|error| error.to_string())
 }
+
+/// 导出 PDF：内嵌 Typst 排版，原子写入目标文件。
+#[tauri::command]
+pub async fn export_pdf(
+    app: tauri::AppHandle,
+    path: PathBuf,
+    document: RenderRequest,
+    target: PathBuf,
+) -> Result<ExportReport, ExportError> {
+    let resource_dir = app.path().resource_dir().ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        let fonts = export::pdf::font_store(resource_dir.as_deref());
+        let (bytes, report) = export::pdf::export(&render::build(&document), &path, fonts)?;
+        export::write_output(&target, &bytes)?;
+        Ok(report)
+    })
+    .await
+    .map_err(|error| ExportError::RenderFailed {
+        message: error.to_string(),
+    })?
+}

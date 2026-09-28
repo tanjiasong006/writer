@@ -489,3 +489,38 @@ test('导出：取消选择位置不导出；失败时显示原因；图片缺�
   await flushPromises()
   expect(wrapper.find('.workspace__notice').text()).toContain('1 张图片无法嵌入')
 })
+
+test('大文档：1000 个章节、多级嵌套可以打开、编辑、保存', async () => {
+  const services = createMemoryServices()
+  const tree: ChapterTree = Array.from({ length: 100 }, (_, i) => ({
+    id: `c${i}`,
+    title: `第 ${i + 1} 章`,
+    children: Array.from({ length: 9 }, (_, j) => ({
+      id: `c${i}-${j}`,
+      title: `第 ${j + 1} 节`,
+      children: [],
+    })),
+  }))
+  const contents = new Map<string, string>()
+  for (const chapter of tree) {
+    contents.set(chapter.id, '正文'.repeat(100))
+    for (const child of chapter.children) contents.set(child.id, '')
+  }
+  const document = createDocument('大文档', tree, contents)
+  if (!document.ok) throw new Error('fixture')
+  services.storage.seed(PATH, document.document)
+  services.shell.lastProjectPath = PATH
+
+  const started = performance.now()
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  expect(wrapper.findAll('.chapter-tree__row')).toHaveLength(1000)
+  expect(wrapper.findAll('.chapter-tree__row').at(-1)!.text()).toBe('100.9第 9 节')
+
+  typeAtEnd(editorView(wrapper), '！')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  expect([...services.storage.saves[0].changed]).toEqual(['c0'])
+  // 宽松上限，只用于发现数量级的退化（happy-dom 比真实浏览器慢）。
+  expect(performance.now() - started).toBeLessThan(10_000)
+})

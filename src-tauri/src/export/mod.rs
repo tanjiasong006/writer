@@ -8,6 +8,7 @@
 pub mod docx;
 pub mod fonts;
 pub mod images;
+pub mod pdf;
 
 use std::fs::{self, File};
 use std::io::Write;

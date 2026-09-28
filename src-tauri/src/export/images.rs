@@ -69,19 +69,6 @@ fn decode(bytes: &[u8]) -> Option<image::DynamicImage> {
     reader.decode().ok()
 }
 
-/// 读取图片像素尺寸（不解码像素），失败返回 None。
-pub fn dimensions(path: &Path) -> Option<(u32, u32)> {
-    let bytes = std::fs::read(path).ok()?;
-    let mut reader = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .ok()?;
-    reader.limits(limits());
-    reader
-        .into_dimensions()
-        .ok()
-        .filter(|(w, h)| *w > 0 && *h > 0)
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -138,7 +125,6 @@ pub mod tests {
         fs::write(&text, "这不是图片").unwrap();
         assert!(load_for_docx(&text).is_none());
         assert!(load_for_docx(&dir.path().join("无.png")).is_none());
-        assert!(dimensions(&broken).is_none());
     }
 
     #[test]
