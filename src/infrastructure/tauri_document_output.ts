@@ -11,6 +11,19 @@ export function createTauriDocumentOutput(): DocumentOutput {
     async renderPreview(projectPath, request) {
       return call(() => invoke<string>('render_preview', { path: projectPath, document: request }))
     },
+
+    async exportDocument(projectPath, request, format, targetPath) {
+      const command = format === 'docx' ? 'export_docx' : 'export_pdf'
+      const result = await call(() =>
+        invoke<unknown>(command, { path: projectPath, document: request, target: targetPath }),
+      )
+      if (!result.ok) return result
+      const raw = result.value as { missingImages?: unknown } | null
+      const missing = Array.isArray(raw?.missingImages)
+        ? raw.missingImages.filter((item): item is string => typeof item === 'string')
+        : []
+      return { ok: true, value: { missingImages: missing } }
+    },
   }
 }
 

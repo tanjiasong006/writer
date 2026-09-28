@@ -5,19 +5,31 @@
 
 use std::iter::Peekable;
 
-use pulldown_cmark::{
-    Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd,
-};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     /// 正文内部的标题；level 为 Markdown 中的级别（1..=6），渲染时再叠加章节深度。
-    Heading { level: u8, inlines: Vec<Inline> },
+    Heading {
+        level: u8,
+        inlines: Vec<Inline>,
+    },
     Paragraph(Vec<Inline>),
-    List { ordered: bool, start: u64, items: Vec<Vec<Block>> },
+    List {
+        ordered: bool,
+        start: u64,
+        items: Vec<Vec<Block>>,
+    },
     Quote(Vec<Block>),
-    Code { language: Option<String>, text: String },
-    Table { alignments: Vec<Align>, header: Vec<Vec<Inline>>, rows: Vec<Vec<Vec<Inline>>> },
+    Code {
+        language: Option<String>,
+        text: String,
+    },
+    Table {
+        alignments: Vec<Align>,
+        header: Vec<Vec<Inline>>,
+        rows: Vec<Vec<Vec<Inline>>>,
+    },
     Rule,
 }
 
@@ -36,9 +48,15 @@ pub enum Inline {
     Emphasis(Vec<Inline>),
     Strike(Vec<Inline>),
     Code(String),
-    Link { url: String, children: Vec<Inline> },
+    Link {
+        url: String,
+        children: Vec<Inline>,
+    },
     /// src 为正文中的原始引用（如 ../assets/图.png），由各渲染器自行解析。
-    Image { src: String, alt: String },
+    Image {
+        src: String,
+        alt: String,
+    },
     SoftBreak,
     HardBreak,
 }
@@ -60,7 +78,8 @@ impl Block {
 const MAX_NESTING: usize = 32;
 
 pub fn parse(markdown: &str) -> Vec<Block> {
-    let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let options =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let mut events = Parser::new_ext(markdown, options).peekable();
     blocks(&mut events, &|_| false, 0)
 }
@@ -121,7 +140,9 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
             Event::Start(Tag::HtmlBlock) => {
                 flush(&mut pending, &mut out);
                 let text = raw_text(events, TagEnd::HtmlBlock);
-                out.push(Block::Paragraph(vec![Inline::Text(text.trim_end().to_owned())]));
+                out.push(Block::Paragraph(vec![Inline::Text(
+                    text.trim_end().to_owned(),
+                )]));
             }
             Event::Start(Tag::List(start)) => {
                 flush(&mut pending, &mut out);
@@ -173,7 +194,11 @@ fn list(events: &mut Events, start: Option<u64>, depth: usize) -> Block {
             _ => {}
         }
     }
-    Block::List { ordered: start.is_some(), start: start.unwrap_or(1), items }
+    Block::List {
+        ordered: start.is_some(),
+        start: start.unwrap_or(1),
+        items,
+    }
 }
 
 fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
@@ -203,7 +228,11 @@ fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
             _ => {}
         }
     }
-    Block::Table { alignments, header, rows }
+    Block::Table {
+        alignments,
+        header,
+        rows,
+    }
 }
 
 /// 读取行内内容直到指定结束标记。
@@ -301,16 +330,45 @@ fn raw_text(events: &mut Events, end: TagEnd) -> String {
     text
 }
 
-/// 合并相邻文本（pulldown-cmark 会在特殊字符处拆分文本）。
+/// 合并相邻文本（pulldown-cmark 会在特殊字符处拆分文本），并去掉中文字符之间的软换行：
+/// 软换行按 CommonMark 渲染为空格，中文在编辑器里折行后会凭空多出空格。
 fn normalize(inlines: Vec<Inline>) -> Vec<Inline> {
     let mut out: Vec<Inline> = Vec::with_capacity(inlines.len());
-    for inline in inlines {
+    let mut iter = inlines.into_iter().peekable();
+    while let Some(inline) = iter.next() {
+        if inline == Inline::SoftBreak {
+            let before = match out.last() {
+                Some(Inline::Text(text)) => text.chars().last(),
+                _ => None,
+            };
+            let after = match iter.peek() {
+                Some(Inline::Text(text)) => text.chars().next(),
+                _ => None,
+            };
+            if before.is_some_and(is_cjk) && after.is_some_and(is_cjk) {
+                continue;
+            }
+        }
         match (out.last_mut(), inline) {
             (Some(Inline::Text(previous)), Inline::Text(text)) => previous.push_str(&text),
             (_, inline) => out.push(inline),
         }
     }
     out
+}
+
+/// 中日韩文字与全角标点：它们之间的换行不应变成空格。
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{2E80}'..='\u{2FFF}'   // 部首
+        | '\u{3000}'..='\u{303F}' // 中文标点
+        | '\u{3040}'..='\u{30FF}' // 假名
+        | '\u{3400}'..='\u{4DBF}' // 扩展 A
+        | '\u{4E00}'..='\u{9FFF}' // 基本汉字
+        | '\u{AC00}'..='\u{D7AF}' // 韩文
+        | '\u{F900}'..='\u{FAFF}' // 兼容汉字
+        | '\u{FF00}'..='\u{FFEF}' // 全角形式
+        | '\u{20000}'..='\u{2FA1F}')
 }
 
 /// 行内内容的纯文本（用于图片 alt 等）。
@@ -364,7 +422,10 @@ mod tests {
         assert_eq!(
             parse("## 小节\n\n> 引用\n\n---"),
             vec![
-                Block::Heading { level: 2, inlines: vec![text("小节")] },
+                Block::Heading {
+                    level: 2,
+                    inlines: vec![text("小节")]
+                },
                 Block::Quote(vec![Block::Paragraph(vec![text("引用")])]),
                 Block::Rule,
             ]
@@ -391,14 +452,24 @@ mod tests {
                 ],
             }]
         );
-        assert!(matches!(parse("3. 从三开始")[0], Block::List { ordered: true, start: 3, .. }));
+        assert!(matches!(
+            parse("3. 从三开始")[0],
+            Block::List {
+                ordered: true,
+                start: 3,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn code_blocks_keep_text_verbatim() {
         assert_eq!(
             parse("```rust\nfn main() {}\n  <b>\n```"),
-            vec![Block::Code { language: Some("rust".into()), text: "fn main() {}\n  <b>".into() }]
+            vec![Block::Code {
+                language: Some("rust".into()),
+                text: "fn main() {}\n  <b>".into()
+            }]
         );
     }
 
@@ -421,7 +492,10 @@ mod tests {
     #[test]
     fn standalone_image_is_a_figure() {
         let blocks = parse("![实验 装置](../assets/图.png)");
-        assert_eq!(blocks[0].as_figure(), Some(("../assets/图.png", "实验 装置")));
+        assert_eq!(
+            blocks[0].as_figure(),
+            Some(("../assets/图.png", "实验 装置"))
+        );
         assert_eq!(parse("文字 ![a](b.png)")[0].as_figure(), None);
     }
 
@@ -467,8 +541,34 @@ mod tests {
         assert_eq!(depth, MAX_NESTING);
         assert_eq!(current, &vec![Block::Paragraph(vec![text("深处")])]);
 
-        let lists: String = (0..5_000).map(|i| format!("{}- 项\n", "  ".repeat(i))).collect();
+        let lists: String = (0..5_000)
+            .map(|i| format!("{}- 项\n", "  ".repeat(i)))
+            .collect();
         assert!(!parse(&lists).is_empty());
+    }
+
+    #[test]
+    fn soft_breaks_between_chinese_disappear() {
+        assert_eq!(
+            parse("第一行\n第二行，"),
+            vec![Block::Paragraph(vec![text("第一行第二行，")])]
+        );
+        assert_eq!(
+            parse("English\nwords"),
+            vec![Block::Paragraph(vec![
+                text("English"),
+                Inline::SoftBreak,
+                text("words")
+            ])]
+        );
+        assert_eq!(
+            parse("中文\nEnglish"),
+            vec![Block::Paragraph(vec![
+                text("中文"),
+                Inline::SoftBreak,
+                text("English")
+            ])]
+        );
     }
 
     #[test]

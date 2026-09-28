@@ -9,7 +9,11 @@ use super::{resolve_image, Document, Section};
 
 pub fn render(document: &Document, project_root: &Path) -> String {
     let mut out = String::new();
-    let _ = write!(out, "<h1 class=\"doc-title\">{}</h1>", escape(&document.title));
+    let _ = write!(
+        out,
+        "<h1 class=\"doc-title\">{}</h1>",
+        escape(&document.title)
+    );
     for section in &document.sections {
         render_section(&mut out, section, project_root);
     }
@@ -54,7 +58,11 @@ fn render_block(out: &mut String, block: &Block, section: &Section, root: &Path)
             render_inlines(out, inlines, root);
             out.push_str("</p>");
         }
-        Block::List { ordered, start, items } => {
+        Block::List {
+            ordered,
+            start,
+            items,
+        } => {
             if *ordered {
                 let _ = write!(out, "<ol start=\"{start}\">");
             } else {
@@ -79,7 +87,11 @@ fn render_block(out: &mut String, block: &Block, section: &Section, root: &Path)
         Block::Code { text, .. } => {
             let _ = write!(out, "<pre><code>{}</code></pre>", escape(text));
         }
-        Block::Table { alignments, header, rows } => {
+        Block::Table {
+            alignments,
+            header,
+            rows,
+        } => {
             out.push_str("<table><thead><tr>");
             for (i, cell) in header.iter().enumerate() {
                 render_cell(out, "th", cell, alignments.get(i), root);
@@ -202,13 +214,18 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let html = render_chapters(
             dir.path(),
-            &[("a", vec![1], "绪论", "正文"), ("b", vec![1, 1], "背景", "## 小节")],
+            &[
+                ("a", vec![1], "绪论", "正文"),
+                ("b", vec![1, 1], "背景", "## 小节"),
+            ],
         );
         assert!(html.starts_with("<h1 class=\"doc-title\">论文 &lt;标题&gt;</h1>"));
         assert!(html.contains(
             "<section class=\"chapter\" data-chapter-id=\"a\"><h2 class=\"chapter-heading\"><span class=\"chapter-number\">1</span>绪论</h2><p>正文</p></section>"
         ));
-        assert!(html.contains("<h3 class=\"chapter-heading\"><span class=\"chapter-number\">1.1</span>背景</h3>"));
+        assert!(html.contains(
+            "<h3 class=\"chapter-heading\"><span class=\"chapter-number\">1.1</span>背景</h3>"
+        ));
         // 第 2 级章节里的 ## 标题：2 + 2 + 1 = 5 级 HTML 标题。
         assert!(html.contains("<h5 class=\"body-heading\">小节</h5>"));
     }
@@ -218,7 +235,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let html = render_chapters(
             dir.path(),
-            &[("x\"><script>", vec![1], "<img onerror=x>", "<script>alert(1)</script>\n\n`<b>`\n\n[a](javascript:alert(1))")],
+            &[(
+                "x\"><script>",
+                vec![1],
+                "<img onerror=x>",
+                "<script>alert(1)</script>\n\n`<b>`\n\n[a](javascript:alert(1))",
+            )],
         );
         assert!(!html.contains("<script>"));
         assert!(!html.contains("<img onerror"));
@@ -236,7 +258,12 @@ mod tests {
         fs::write(root.join("assets/图.png"), b"x").unwrap();
         let html = render_chapters(
             &root,
-            &[("a", vec![1], "图", "![装置](../assets/图.png)\n\n![丢失](../assets/无.png)")],
+            &[(
+                "a",
+                vec![1],
+                "图",
+                "![装置](../assets/图.png)\n\n![丢失](../assets/无.png)",
+            )],
         );
         let expected = root.join("assets/图.png");
         assert!(html.contains(&format!(
@@ -251,7 +278,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let html = render_chapters(
             dir.path(),
-            &[("a", vec![1], "表", "| a | b |\n| :-: | --: |\n| 1 | 2 |\n\n3. 三\n4. 四")],
+            &[(
+                "a",
+                vec![1],
+                "表",
+                "| a | b |\n| :-: | --: |\n| 1 | 2 |\n\n3. 三\n4. 四",
+            )],
         );
         assert!(html.contains("<table><thead><tr><th style=\"text-align:center\">a</th><th style=\"text-align:right\">b</th></tr></thead><tbody><tr><td style=\"text-align:center\">1</td><td style=\"text-align:right\">2</td></tr></tbody></table>"));
         assert!(html.contains("<ol start=\"3\"><li><p>三</p></li><li><p>四</p></li></ol>"));
@@ -260,6 +292,9 @@ mod tests {
     #[test]
     fn empty_document() {
         let dir = TempDir::new().unwrap();
-        assert_eq!(render_chapters(dir.path(), &[]), "<h1 class=\"doc-title\">论文 &lt;标题&gt;</h1>");
+        assert_eq!(
+            render_chapters(dir.path(), &[]),
+            "<h1 class=\"doc-title\">论文 &lt;标题&gt;</h1>"
+        );
     }
 }

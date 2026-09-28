@@ -36,6 +36,25 @@ function createTauriShell(): DesktopShell {
       return typeof picked === 'string' ? picked : null
     },
 
+    async pickExportPath(format, defaultName) {
+      const extension = format === 'docx' ? 'docx' : 'pdf'
+      const picked = await save({
+        title: format === 'docx' ? '导出 Word' : '导出 PDF',
+        defaultPath: `${defaultName}.${extension}`,
+        filters: [{ name: format === 'docx' ? 'Word 文档' : 'PDF 文档', extensions: [extension] }],
+      })
+      if (picked === null) return null
+      return picked.toLowerCase().endsWith(`.${extension}`) ? picked : `${picked}.${extension}`
+    },
+
+    async revealFile(filePath) {
+      try {
+        await invoke('reveal_in_file_manager', { path: filePath })
+      } catch {
+        // 打不开文件管理器不影响导出结果。
+      }
+    },
+
     async confirm(message, labels) {
       return ask(message, {
         title: 'Writer',

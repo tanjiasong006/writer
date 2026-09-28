@@ -20,8 +20,8 @@
 | S5 | CodeMirror 正文编辑 | ✅ 完成 |
 | S6 | 插入内容：工具栏、图片资源导入、表格等 | ✅ 完成 |
 | S7 | 全文预览（Rust pulldown-cmark 渲染） | ✅ 完成 |
-| S8 | Word 导出（docx-rs） | ⏳ 进行中 |
-| S9 | PDF 导出（Typst）+ 字体 fallback | 待开始 |
+| S8 | Word 导出（docx-rs） | ✅ 完成 |
+| S9 | PDF 导出（Typst）+ 字体 fallback | ⏳ 进行中 |
 | S10 | 加固：大文档、深层嵌套、极端输入、回归 | 待开始 |
 
 ## S1 文档模型 + 项目格式
@@ -163,9 +163,29 @@
 - 工作区"预览 / 返回编辑"切换；预览随编辑防抖刷新、只采用最新结果；点击预览中的章节同步选中，树中选中章节时预览滚动到该处。
 - 验证：npm test 297/297，vue-tsc、build-storybook 通过；cargo test（render 18 项）通过，clippy 无警告。
 
+### S8（完成）
+
+- Rust `export/`：`docx.rs`（A4、页脚页码、Title / Heading1–9 / Quote / Code / Caption 样式、
+  标题带大纲级别可用于导航窗格、编号为静态文本与预览一致、列表编号实例互不接续、表格、链接、图片按正文宽度缩放）；
+  `fonts.rs`（全项目唯一的字体配置：按角色的跨平台 fallback 链 + Word 字体名）；`images.rs`（安全加载图片）；
+  `write_output`（临时文件 + fsync + rename，失败不留半个文件、不破坏旧文件）。
+- 发现并修正：
+  - docx-rs 的 `Pic::new` 对损坏图片直接 `expect`，release 构建 `panic = abort` 会让整个应用退出 →
+    自行解码（带尺寸 / 内存上限），损坏图片输出占位文字并记入报告。
+  - docx-rs 默认已定义 numbering id 1，与自定义编号重复 → 自定义 id 从 10 开始，测试断言 id 唯一。
+  - XML 1.0 不允许的控制字符会让 Word 拒绝打开整个文件 → 所有文本过滤；不安全的链接只保留文字。
+  - 中文正文中的软换行在预览 / Word / PDF 中都会变成多余空格 → 统一在 Markdown 模型中去除中文之间的软换行。
+- 前端：导出菜单（Word / PDF）、选择保存位置、导出当前内存文档（含未保存修改）、完成提示与"在文件夹中显示"、图片缺失提示。
+- 验证：cargo test 通过（docx 7 项 + 图片 5 项，含 500 章、32 级、控制字符、损坏 / 超大图片），
+  生成的样例能被 docx-rs 读取器与 macOS textutil 独立解析；npm test 301/301。
+- 限制：本机没有 Word / LibreOffice，Word 中的最终排版需手动核对（见验收清单）。
+
 ## 手动验收清单（需要在真实桌面环境执行）
 
 1. 新建文档 → 选择位置 → 出现空状态；新建章节、子章节，输入正文。
 2. 拖动章节改变结构 → 等待"已保存" → 在 Finder 中确认 `content/ch_*.md` 文件名随编号变化、内容正确。
 3. 退出应用重开 → 自动打开上次项目，选中章节与折叠状态恢复。
 4. 把项目文件夹设为只读 → 编辑 → 状态显示"保存失败"；关闭窗口时出现确认。
+5. 导出 Word 后用 Word / WPS 打开：标题层级出现在导航窗格；有序列表显示为 1. 2.（macOS textutil 会把所有列表显示成圆点，属于 textutil 限制）；
+   表格、图片、代码块、引用样式正确；中文字体为宋体 / 黑体。
+   样例生成：`WRITER_SAMPLE_DIR=<目录> cargo test write_sample_docx -- --ignored`。

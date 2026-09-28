@@ -1,4 +1,5 @@
 mod commands;
+mod export;
 mod render;
 mod storage;
 
@@ -14,6 +15,8 @@ pub fn run() {
             commands::project_write_ui_state,
             commands::project_import_asset,
             commands::render_preview,
+            commands::export_docx,
+            commands::reveal_in_file_manager,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

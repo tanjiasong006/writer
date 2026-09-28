@@ -62,7 +62,12 @@ pub fn build(request: &RenderRequest) -> Document {
             .iter()
             .map(|chapter| Section {
                 chapter_id: chapter.id.clone(),
-                number: chapter.number.iter().map(u32::to_string).collect::<Vec<_>>().join("."),
+                number: chapter
+                    .number
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join("."),
                 title: chapter.title.clone(),
                 depth: chapter.number.len().max(1),
                 blocks: markdown::parse(&chapter.markdown),
@@ -131,8 +136,18 @@ mod tests {
         let document = build(&RenderRequest {
             title: "论文".into(),
             chapters: vec![
-                RenderChapter { id: "a".into(), number: vec![1], title: "绪论".into(), markdown: "正文".into() },
-                RenderChapter { id: "b".into(), number: vec![1, 2], title: "方法".into(), markdown: String::new() },
+                RenderChapter {
+                    id: "a".into(),
+                    number: vec![1],
+                    title: "绪论".into(),
+                    markdown: "正文".into(),
+                },
+                RenderChapter {
+                    id: "b".into(),
+                    number: vec![1, 2],
+                    title: "方法".into(),
+                    markdown: String::new(),
+                },
             ],
         });
         assert_eq!(document.sections[0].number, "1");

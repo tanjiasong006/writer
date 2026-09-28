@@ -1,5 +1,7 @@
 import type {
   DocumentOutput,
+  ExportFormat,
+  ExportReport,
   OutputFailure,
   OutputResult,
   RenderRequest,
@@ -12,6 +14,22 @@ import type {
 export class MemoryDocumentOutput implements DocumentOutput {
   readonly previews: RenderRequest[] = []
   private failures: OutputFailure[] = []
+
+  readonly exports: Array<{ format: ExportFormat; targetPath: string; request: RenderRequest }> = []
+  /** 下一次导出报告中缺失的图片。 */
+  missingImages: string[] = []
+
+  async exportDocument(
+    _projectPath: string,
+    request: RenderRequest,
+    format: ExportFormat,
+    targetPath: string,
+  ): Promise<OutputResult<ExportReport>> {
+    this.exports.push({ format, targetPath, request })
+    const failure = this.failures.shift()
+    if (failure) return { ok: false, error: failure }
+    return { ok: true, value: { missingImages: this.missingImages } }
+  }
 
   failNext(...failures: OutputFailure[]): void {
     this.failures.push(...failures)

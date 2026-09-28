@@ -7,6 +7,8 @@ export class MemoryShell implements DesktopShell {
   newProjectPath: string | null = null
   projectPath: string | null = null
   imagePath: string | null = null
+  exportPath: string | null = null
+  readonly revealed: string[] = []
   confirmAnswer = true
   readonly confirmations: string[] = []
   readonly uiStates = new Map<string, string>()
@@ -23,6 +25,14 @@ export class MemoryShell implements DesktopShell {
 
   async pickImageFile() {
     return this.imagePath
+  }
+
+  async pickExportPath() {
+    return this.exportPath
+  }
+
+  async revealFile(filePath: string) {
+    this.revealed.push(filePath)
   }
 
   async confirm(message: string) {

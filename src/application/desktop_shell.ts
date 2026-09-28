@@ -12,6 +12,13 @@ export interface DesktopShell {
   pickProjectPath(): Promise<string | null>
   /** 让用户选择一张要插入的图片；取消返回 null。 */
   pickImageFile(): Promise<string | null>
+  /**
+   * 让用户选择导出文件的保存位置；取消返回 null。
+   * defaultName 不含扩展名，扩展名由 format 决定。
+   */
+  pickExportPath(format: 'docx' | 'pdf', defaultName: string): Promise<string | null>
+  /** 在系统文件管理器中显示文件。失败静默忽略。 */
+  revealFile(filePath: string): Promise<void>
   /** 需要用户明确决定的确认框。 */
   confirm(message: string, labels?: { ok?: string; cancel?: string }): Promise<boolean>
   /**

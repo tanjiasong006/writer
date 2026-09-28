@@ -14,7 +14,11 @@ import { restoreUiState, serializeUiState } from './ui_state.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown_commands.ts'
 import DocumentPreview from '../preview/DocumentPreview.vue'
-import { previewDocument } from '../../application/document_output.ts'
+import {
+  exportDocument,
+  previewDocument,
+  type ExportFormat,
+} from '../../application/document_output.ts'
 import { messageForOutputFailure } from './output_messages.ts'
 
 /**
@@ -130,6 +134,44 @@ onBeforeUnmount(() => {
   if (previewTimer !== null) clearTimeout(previewTimer)
 })
 
+const exportMenuOpen = ref(false)
+/** 正在导出的格式；导出期间禁用导出菜单，避免重复写同一文件。 */
+const exporting = ref<ExportFormat | null>(null)
+const exportNotice = ref<{ readonly message: string; readonly path: string } | null>(null)
+
+/** 文件名中不允许的字符替换为 -，空标题使用默认名。 */
+function exportBaseName(title: string): string {
+  const name = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim()
+  return name.length > 0 ? name : '未命名文档'
+}
+
+async function exportAs(format: ExportFormat): Promise<void> {
+  exportMenuOpen.value = false
+  actionError.value = null
+  exportNotice.value = null
+  const target = await shell.pickExportPath(format, exportBaseName(document.value.title))
+  if (target === null) return
+  exporting.value = format
+  try {
+    const result = await exportDocument(output, props.session.path, document.value, format, target)
+    if (!result.ok) {
+      actionError.value = messageForOutputFailure(result.error)
+      return
+    }
+    const fileName = target.split(/[\\/]/).pop() ?? target
+    const missing = result.value.missingImages.length
+    exportNotice.value = {
+      message:
+        missing > 0
+          ? `已导出 ${fileName}，其中 ${missing} 张图片无法嵌入，已用文字占位。`
+          : `已导出 ${fileName}`,
+      path: target,
+    }
+  } finally {
+    exporting.value = null
+  }
+}
+
 /** 插入图片：选择文件 → 复制进项目 assets/ → 在发起请求的章节中插入引用。 */
 async function insertImage(chapterId: ChapterId): Promise<void> {
   actionError.value = null
@@ -188,11 +230,32 @@ const selectedNumber = computed(() => {
         <button type="button" class="workspace__preview-toggle" @click="togglePreview">
           {{ mode === 'preview' ? '返回编辑' : '预览' }}
         </button>
+        <div class="workspace__export">
+          <button
+            type="button"
+            aria-haspopup="menu"
+            :disabled="exporting !== null"
+            @click="exportMenuOpen = !exportMenuOpen"
+          >
+            {{ exporting ? '正在导出…' : '导出' }}
+          </button>
+          <ul v-if="exportMenuOpen" class="workspace__export-menu" role="menu">
+            <li><button type="button" role="menuitem" @click="exportAs('docx')">导出 Word（.docx）</button></li>
+            <li><button type="button" role="menuitem" @click="exportAs('pdf')">导出 PDF</button></li>
+          </ul>
+        </div>
         <button type="button" @click="emit('new-project')">新建</button>
         <button type="button" @click="emit('open-project')">打开</button>
       </div>
     </header>
 
+    <p v-if="exportNotice" class="workspace__notice" role="status">
+      <span>{{ exportNotice.message }}</span>
+      <span>
+        <button type="button" @click="shell.revealFile(exportNotice.path)">在文件夹中显示</button>
+        <button type="button" aria-label="关闭提示" @click="exportNotice = null">×</button>
+      </span>
+    </p>
     <p v-if="actionError" class="workspace__error" role="alert">
       {{ actionError }}
       <button type="button" aria-label="关闭提示" @click="actionError = null">×</button>
@@ -287,6 +350,53 @@ const selectedNumber = computed(() => {
   color: inherit;
   font-size: 13px;
   cursor: pointer;
+}
+
+.workspace__export {
+  position: relative;
+}
+
+.workspace__export-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 11rem;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.workspace__actions .workspace__export-menu button {
+  display: block;
+  width: 100%;
+  border: none;
+  text-align: left;
+}
+
+.workspace__notice {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0;
+  padding: 6px 12px;
+  background: #ecfdf5;
+  color: #065f46;
+  font-size: 13px;
+}
+
+.workspace__notice button {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .workspace__error {

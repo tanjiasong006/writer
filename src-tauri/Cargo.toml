@@ -23,6 +23,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 tauri-plugin-dialog = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
+docx-rs = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -35,3 +37,4 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }

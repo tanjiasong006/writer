@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use tauri::Manager;
 
+use crate::export::{self, ExportError, ExportReport};
 use crate::render::{self, RenderRequest};
 use crate::storage::{self, fs::RealFs, OpenedProject, SaveRequest, StorageError};
 
@@ -73,4 +74,39 @@ pub async fn render_preview(
     })
     .await
     .map_err(|error| error.to_string())
+}
+
+/// 导出 Word：在后台线程生成，原子写入目标文件。
+#[tauri::command]
+pub async fn export_docx(
+    path: PathBuf,
+    document: RenderRequest,
+    target: PathBuf,
+) -> Result<ExportReport, ExportError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (bytes, report) = export::docx::export(&render::build(&document), &path)?;
+        export::write_output(&target, &bytes)?;
+        Ok(report)
+    })
+    .await
+    .map_err(|error| ExportError::RenderFailed {
+        message: error.to_string(),
+    })?
+}
+
+/// 在系统文件管理器中显示文件（导出完成后使用）。
+#[tauri::command]
+pub fn reveal_in_file_manager(path: PathBuf) -> Result<(), String> {
+    use std::process::Command;
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg("-R").arg(&path).spawn();
+    #[cfg(target_os = "windows")]
+    let result = Command::new("explorer")
+        .arg(format!("/select,{}", path.display()))
+        .spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = Command::new("xdg-open")
+        .arg(path.parent().unwrap_or(&path))
+        .spawn();
+    result.map(|_| ()).map_err(|error| error.to_string())
 }

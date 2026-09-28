@@ -441,3 +441,51 @@ test('全文预览失败时显示原因', async () => {
   await flushPromises()
   expect(wrapper.find('.workspace__preview-error').text()).toContain('渲染进程无响应')
 })
+
+test('导出 Word：选择位置后导出当前文档（含未保存修改），完成后提示', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.exportPath = '/导出/毕业论文.docx'
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  typeAtEnd(editorView(wrapper), '（未保存）')
+
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出 Word（.docx）').trigger('click')
+  await flushPromises()
+
+  expect(services.output.exports).toHaveLength(1)
+  const exported = services.output.exports[0]
+  expect(exported.format).toBe('docx')
+  expect(exported.targetPath).toBe('/导出/毕业论文.docx')
+  expect(exported.request.chapters[0].markdown).toBe('引言（未保存）')
+  expect(wrapper.find('.workspace__notice').text()).toContain('已导出 毕业论文.docx')
+
+  await button(wrapper, '在文件夹中显示').trigger('click')
+  expect(services.shell.revealed).toEqual(['/导出/毕业论文.docx'])
+})
+
+test('导出：取消选择位置不导出；失败时显示原因；图片缺失时提示', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出 PDF').trigger('click')
+  await flushPromises()
+  expect(services.output.exports).toHaveLength(0)
+
+  services.shell.exportPath = '/导出/a.pdf'
+  services.output.failNext({ code: 'no-cjk-font' })
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出 PDF').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.workspace__error').text()).toContain('中文的字体')
+
+  services.output.missingImages = ['../assets/丢失.png']
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出 PDF').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.workspace__notice').text()).toContain('1 张图片无法嵌入')
+})
