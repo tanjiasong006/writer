@@ -17,3 +17,22 @@ export type RemoveChapterResult = RemoveResult
 export function removeChapter(tree: ChapterTree, chapterId: ChapterId): RemoveChapterResult {
   return removeChapterInTree(tree, chapterId)
 }
+
+/**
+ * 删除 chapterId 之后应选中的章节：下一个兄弟，否则上一个兄弟，否则父章节；
+ * 删除后树为空时为 null。让用户删除正在写的章节后可以直接继续写相邻章节。
+ *
+ * 前置条件：tree 是删除前的可信树。
+ */
+export function selectionAfterRemove(tree: ChapterTree, chapterId: ChapterId): ChapterId | null {
+  const visit = (siblings: ChapterTree, parent: ChapterId | null): ChapterId | null | undefined => {
+    const index = siblings.findIndex((node) => node.id === chapterId)
+    if (index >= 0) return siblings[index + 1]?.id ?? siblings[index - 1]?.id ?? parent
+    for (const node of siblings) {
+      const found = visit(node.children, node.id)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  return visit(tree, null) ?? null
+}

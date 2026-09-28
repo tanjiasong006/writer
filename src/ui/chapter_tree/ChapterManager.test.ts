@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import ChapterManager from './ChapterManager.vue'
 import type { ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
@@ -227,26 +227,46 @@ test('删除：先显示确认，确认前不改树', async () => {
   expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X', '2B'])
 })
 
-test('删除确认：整棵子树被删除，选择清空', async () => {
+test('删除确认：整棵子树被删除，改为选中相邻章节', async () => {
   const wrapper = mountManager()
   await rows(wrapper)[0].trigger('click') // a
   await openMenu(wrapper, 0)
   await menuItem(wrapper, '删除')
   await button(wrapper, '确认删除').trigger('click')
+  await flushPromises()
 
   expect(rowTexts(wrapper)).toEqual(['1B'])
-  expect(wrapper.find('.chapter-tree__row--selected').exists()).toBe(false)
+  expect(wrapper.props('selectedId' as never)).toBe('b')
+  expect(rowText(wrapper.find('.chapter-tree__row--selected'))).toBe('1B')
 })
 
-test('删除子节点所在子树时，指向被删节点的选择会被清空', async () => {
+test('选中章节在被删除的子树中：改为选中被删章节的相邻章节', async () => {
   const wrapper = mountManager()
   await rows(wrapper)[1].trigger('click') // a1
   await openMenu(wrapper, 0) // a
   await menuItem(wrapper, '删除')
   await button(wrapper, '确认删除').trigger('click')
+  await flushPromises()
 
   expect(rowTexts(wrapper)).toEqual(['1B'])
-  expect(wrapper.find('.chapter-tree__row--selected').exists()).toBe(false)
+  expect(wrapper.props('selectedId' as never)).toBe('b')
+})
+
+test('删除唯一的章节后没有选中章节', async () => {
+  const wrapper = mountManager([{ id: 'only', title: '唯一', children: [] }], 'only')
+  await openMenu(wrapper, 0)
+  await menuItem(wrapper, '删除')
+  await button(wrapper, '确认删除').trigger('click')
+  await flushPromises()
+  expect(wrapper.props('selectedId' as never)).toBeNull()
+})
+
+test('删除其他章节不改变当前选中', async () => {
+  const wrapper = mountManager(undefined, 'b')
+  await openMenu(wrapper, 1) // a1
+  await menuItem(wrapper, '删除')
+  await flushPromises()
+  expect(wrapper.props('selectedId' as never)).toBe('b')
 })
 
 test('删除取消：保留章节与选择', async () => {

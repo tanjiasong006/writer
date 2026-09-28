@@ -188,6 +188,27 @@ test('删除空白章节不确认；删除有正文的章节需要确认', async
   expect(wrapper.find('.chapter-manager__confirm').text()).toContain('包含正文')
 })
 
+test('删除正在编辑的章节：编辑器切到相邻章节，之后新建章节正常', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('1绪论')
+
+  await wrapper.findAll('.chapter-tree__row')[0].find('.chapter-tree__more').trigger('click')
+  await button(wrapper, '删除').trigger('click')
+  await button(wrapper, '确认删除').trigger('click')
+  await flushPromises()
+  expect(rowTexts(wrapper)).toEqual(['1方法'])
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('1方法')
+
+  await button(wrapper, '+').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.chapter-manager__error').exists()).toBe(false)
+  await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Escape' })
+  expect(rowTexts(wrapper)).toEqual(['1方法', '2未命名章节'])
+})
+
 test('修改文档标题', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
@@ -284,6 +305,36 @@ test('导出菜单：点击别处或按 Esc 关闭', async () => {
   await button(wrapper, '导出').trigger('click')
   await wrapper.find('.workspace__export-menu').trigger('keydown', { key: 'Escape' })
   expect(wrapper.find('.workspace__export-menu').exists()).toBe(false)
+})
+
+test('从系统拖入的文件落在编辑器以外：被取消，不会让页面打开该文件', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+
+  const drag = (type: 'dragover' | 'drop', types: string[]) => {
+    const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(event, 'dataTransfer', { value: { types, dropEffect: 'copy' } })
+    wrapper.find('.chapter-tree').element.dispatchEvent(event)
+    return event
+  }
+  expect(drag('dragover', ['Files']).defaultPrevented).toBe(true)
+  expect(drag('drop', ['Files']).defaultPrevented).toBe(true)
+  // 章节拖拽（非文件）不受影响：是否可放置由章节树自己决定。
+  expect(drag('drop', ['text/plain']).defaultPrevented).toBe(false)
+})
+
+test('刷新页面的快捷键被屏蔽，不会绕过保存流程', async () => {
+  await mountApp()
+  const press = (init: KeyboardEventInit) => {
+    const event = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  }
+  expect(press({ key: 'F5' })).toBe(true)
+  expect(press({ key: 'r', ctrlKey: true })).toBe(true)
+  expect(press({ key: 'R', metaKey: true, shiftKey: true })).toBe(true)
+  expect(press({ key: 'r' })).toBe(false)
 })
 
 test('孤儿文件：打开后提示已原样保留', async () => {

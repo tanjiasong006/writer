@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { removeChapter } from './remove_chapter.ts'
+import { removeChapter, selectionAfterRemove } from './remove_chapter.ts'
 import { validateTree } from '../domain/chapter_tree/chapter_tree.ts'
 import type { ChapterTree } from '../domain/chapter_tree/chapter_tree.ts'
 
@@ -45,4 +45,14 @@ test('removeChapter：不修改原树', () => {
   const snapshot = JSON.stringify(outline)
   removeChapter(outline, 'a')
   assert.equal(JSON.stringify(outline), snapshot)
+})
+
+test('selectionAfterRemove：下一个兄弟，否则上一个兄弟，否则父章节', () => {
+  assert.equal(selectionAfterRemove(outline, 'a1'), 'a2')
+  assert.equal(selectionAfterRemove(outline, 'a2'), 'a1')
+  assert.equal(selectionAfterRemove(outline, 'a2x'), 'a2')
+  assert.equal(selectionAfterRemove(outline, 'a'), 'b')
+  assert.equal(selectionAfterRemove(outline, 'b'), 'a')
+  assert.equal(selectionAfterRemove([{ id: 'x', title: 'X', children: [] }], 'x'), null)
+  assert.equal(selectionAfterRemove(outline, 'missing'), null)
 })

@@ -8,7 +8,7 @@ import {
 } from '../../application/create_chapter.ts'
 import { moveChapterTo, type MoveIntent } from '../../application/move_chapter.ts'
 import { renameChapter } from '../../application/rename_chapter.ts'
-import { removeChapter } from '../../application/remove_chapter.ts'
+import { removeChapter, selectionAfterRemove } from '../../application/remove_chapter.ts'
 import {
   countDescendants,
   findChapter,
@@ -162,15 +162,17 @@ async function focusConfirmCancel(): Promise<void> {
 function confirmDelete(): void {
   const id = deletingId.value
   if (id === null) return
+  const next = selectionAfterRemove(tree.value, id)
   const result = removeChapter(tree.value, id)
   if (!result.ok) {
     errorMessage.value = messageForRemove(result.reason)
     return
   }
   tree.value = result.tree
-  // 选中章节被删除（或被删章节的子树包含选中章节）时，选择必须清空。
-  if (selectedId.value !== null && findChapter(tree.value, selectedId.value) === null) {
-    selectedId.value = null
+  // 选中章节被删除（或在被删章节的子树中）时，改为选中相邻章节，可以直接继续写作。
+  // 必须对照 result.tree：受控模式下 tree.value 要等上层更新 props 后才是新树。
+  if (selectedId.value !== null && findChapter(result.tree, selectedId.value) === null) {
+    selectedId.value = next
   }
   editingId.value = null
   deletingId.value = null

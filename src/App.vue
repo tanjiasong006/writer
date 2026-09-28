@@ -33,6 +33,45 @@ let nextKey = 0
 
 let stopCloseGuard: (() => void) | null = null
 
+/**
+ * 从系统拖入的文件：没有被编辑器处理（编辑器会插入文本文件的内容）的一律取消。
+ * webview 对未处理的文件拖放的默认行为是打开该文件，整个应用页面会被替换。
+ */
+function isFileDrag(event: DragEvent): boolean {
+  return event.dataTransfer?.types.includes('Files') ?? false
+}
+
+function blockFileDragOver(event: DragEvent): void {
+  if (!isFileDrag(event) || event.defaultPrevented) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
+}
+
+function blockFileDrop(event: DragEvent): void {
+  if (isFileDrag(event) && !event.defaultPrevented) event.preventDefault()
+}
+
+/**
+ * 刷新页面（F5、Ctrl/Cmd+R；Windows 的 WebView2 默认响应）会绕过关闭时的保存流程，
+ * 丢掉尚未自动保存的输入。桌面应用中没有需要刷新的场景，直接屏蔽。
+ */
+function blockReload(event: KeyboardEvent): void {
+  const reload = event.key === 'F5' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r')
+  if (reload) event.preventDefault()
+}
+
+onMounted(() => {
+  window.addEventListener('dragover', blockFileDragOver)
+  window.addEventListener('drop', blockFileDrop)
+  window.addEventListener('keydown', blockReload)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('dragover', blockFileDragOver)
+  window.removeEventListener('drop', blockFileDrop)
+  window.removeEventListener('keydown', blockReload)
+})
+
 onMounted(async () => {
   stopCloseGuard = shell.onCloseRequested(leaveCurrent)
   const last = shell.getLastProjectPath()
