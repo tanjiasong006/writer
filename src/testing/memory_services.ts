@@ -13,6 +13,7 @@ export class MemoryShell implements DesktopShell {
   readonly confirmations: string[] = []
   readonly uiStates = new Map<string, string>()
   lastProjectPath: string | null = null
+  windowTitle = 'Writer'
   closeHandler: (() => Promise<boolean>) | null = null
 
   async pickNewProjectPath() {
@@ -62,6 +63,10 @@ export class MemoryShell implements DesktopShell {
 
   toDisplayUrl(filePath: string) {
     return `file://${filePath}`
+  }
+
+  setWindowTitle(title: string) {
+    this.windowTitle = title
   }
 
   getLastProjectPath() {

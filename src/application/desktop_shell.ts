@@ -31,6 +31,8 @@ export interface DesktopShell {
   saveUiState(projectPath: string, state: string): Promise<void>
   /** 把本地文件路径转换成界面可以显示的地址（如预览中的图片）。 */
   toDisplayUrl(filePath: string): string
+  /** 设置窗口标题（系统标题栏、窗口列表中显示）。失败静默忽略。 */
+  setWindowTitle(title: string): void
   getLastProjectPath(): string | null
   setLastProjectPath(path: string | null): void
 }

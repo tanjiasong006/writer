@@ -209,6 +209,22 @@ test('删除正在编辑的章节：编辑器切到相邻章节，之后新建�
   expect(rowTexts(wrapper)).toEqual(['1方法', '2未命名章节'])
 })
 
+test('窗口标题显示当前文档名，回到欢迎页时恢复', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  expect(services.shell.windowTitle).toBe('毕业论文 — Writer')
+
+  const input = wrapper.find<HTMLInputElement>('.workspace__title')
+  input.element.value = '终稿'
+  await input.trigger('change')
+  expect(services.shell.windowTitle).toBe('终稿 — Writer')
+
+  await services.shell.requestClose()
+  await flushPromises()
+  expect(services.shell.windowTitle).toBe('Writer')
+})
+
 test('修改文档标题', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH

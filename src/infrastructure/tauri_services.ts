@@ -102,6 +102,14 @@ function createTauriShell(): DesktopShell {
       return convertFileSrc(filePath)
     },
 
+    setWindowTitle(title) {
+      void getCurrentWindow()
+        .setTitle(title)
+        .catch(() => {
+          // 标题只是便利，设置失败不影响使用。
+        })
+    },
+
     getLastProjectPath() {
       try {
         return localStorage.getItem(LAST_PROJECT_KEY)

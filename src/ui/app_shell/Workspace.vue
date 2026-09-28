@@ -83,6 +83,14 @@ onBeforeUnmount(() => {
   if (uiStateTimer !== null) persistUiState()
 })
 
+/** 窗口标题显示当前文档名；离开工作区时恢复为应用名。 */
+watch(
+  () => document.value.title,
+  (title) => shell.setWindowTitle(`${title.trim() || '未命名文档'} — Writer`),
+  { immediate: true },
+)
+onBeforeUnmount(() => shell.setWindowTitle('Writer'))
+
 function applyTree(tree: ChapterTree): void {
   props.session.applyTree(tree)
 }
