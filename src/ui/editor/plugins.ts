@@ -29,6 +29,7 @@ import { toggleBold, toggleCode, toggleItalic } from './commands.ts'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { imageLayoutPlugin } from './image_layout.ts'
 import { drawCaret } from './caret.ts'
+import { drawSelection } from './selection.ts'
 import { figureEditing, newParagraphAtBlock, selectFigureBackward, selectFigureForward } from './figure_editing.ts'
 
 /**
@@ -366,6 +367,7 @@ export const editorPlugins: readonly Plugin[] = [
   imageLayoutPlugin(),
   markdownClipboard(),
   drawCaret(),
+  drawSelection(),
 ]
 
 export function createEditorState(doc: Node): EditorState {

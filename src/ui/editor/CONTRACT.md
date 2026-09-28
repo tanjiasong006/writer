@@ -14,6 +14,7 @@
 | `commands.ts` | 编辑命令与工具栏状态（`toolbarState` 只从 EditorState 推导）。 |
 | `plugins.ts` | 快捷键、输入规则、撤销历史、表格编辑、占位提示、剪贴板；`createEditorState`。 |
 | `caret.ts` | 自绘文字光标：WebKit 原生光标在段落第二行起高度不对，改为按文字高度绘制（输入法组字期间用原生光标）。 |
+| `selection.ts` | 自绘选区底色：WebKit 原生底色从段落中间开始选择时第一行偏高，改为每行一整行行高、行与行首尾相接。 |
 | `figure_editing.ts` | 独立成段的图片（figure 节点）的编辑：Enter、Backspace / Delete，以及把只剩一张图片的段落转成 figure。 |
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |
 | `image_view.ts` | 图片节点视图（figure 与行内图片）：按项目资源显示，无法显示时占位。 |

@@ -33,10 +33,15 @@ async fn run_storage<T: Send + 'static>(
 }
 
 #[tauri::command]
-pub async fn project_create(path: PathBuf, request: SaveRequest) -> Result<(), StorageError> {
+pub async fn project_create(
+    app: tauri::AppHandle,
+    path: PathBuf,
+    request: SaveRequest,
+) -> Result<(), StorageError> {
     run_storage(move || {
         storage::create_project(&RealFs, &path, &request)?;
         let lock = lock_project(&path)?;
+        allow_project_files(&app, &path);
         hold_lock(path, lock);
         Ok(())
     })
@@ -44,14 +49,24 @@ pub async fn project_create(path: PathBuf, request: SaveRequest) -> Result<(), S
 }
 
 #[tauri::command]
-pub async fn project_open(path: PathBuf) -> Result<OpenedProject, StorageError> {
+pub async fn project_open(
+    app: tauri::AppHandle,
+    path: PathBuf,
+) -> Result<OpenedProject, StorageError> {
     run_storage(move || {
         let lock = lock_project(&path)?;
         let opened = storage::open_project(&RealFs, &path)?;
+        allow_project_files(&app, &path);
         hold_lock(path, lock);
         Ok(opened)
     })
     .await
+}
+
+/// 把项目目录加入 asset 协议的允许范围：编辑器与预览中的图片由 webview 直接读取项目内的文件。
+/// 必须在打开 / 新建项目时就加入，编辑器一挂载就会加载图片。
+fn allow_project_files(app: &tauri::AppHandle, path: &Path) {
+    let _ = app.asset_protocol_scope().allow_directory(path, true);
 }
 
 /// 当前打开项目的独占锁。应用一次只打开一个项目，切换项目时替换。
@@ -109,14 +124,9 @@ pub async fn project_import_asset(path: PathBuf, source: PathBuf) -> Result<Stri
     run_storage(move || storage::assets::import_asset(&RealFs, &path, &source)).await
 }
 
-/// 全文预览 HTML。图片以本地路径给出，这里把项目目录加入 asset 协议的允许范围供 webview 读取。
+/// 全文预览 HTML。图片以本地路径给出，由 webview 通过 asset 协议读取（打开项目时已允许项目目录）。
 #[tauri::command]
-pub async fn render_preview(
-    app: tauri::AppHandle,
-    path: PathBuf,
-    document: RenderRequest,
-) -> Result<String, String> {
-    let _ = app.asset_protocol_scope().allow_directory(&path, true);
+pub async fn render_preview(path: PathBuf, document: RenderRequest) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         render::html::render(&render::build(&document), &path)
     })

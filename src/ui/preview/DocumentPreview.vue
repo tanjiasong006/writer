@@ -91,6 +91,8 @@ function onClick(event: MouseEvent): void {
   font-size: var(--doc-body-size);
   line-height: var(--doc-line-height);
   color: #111827;
+  /* 应用界面关闭了字体合成（App.vue）；正文要像 Word / PDF 一样为没有斜体、粗体字形的中文字体合成斜体与粗体。 */
+  font-synthesis: weight style;
   /* 过长的 URL、路径与导出一致地在任意字符处折行，不撑出横向滚动。 */
   overflow-wrap: anywhere;
 }

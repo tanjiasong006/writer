@@ -267,6 +267,8 @@ defineExpose({
   font-size: var(--doc-body-size);
   line-height: var(--doc-line-height);
   color: #111827;
+  /* 应用界面关闭了字体合成（App.vue）；正文要像 Word / PDF 一样为没有斜体、粗体字形的中文字体合成斜体与粗体。 */
+  font-synthesis: weight style;
   /* 文字光标由 caret.ts 自绘（WebKit 的原生光标在段落第二行起高度不对）；输入法组字期间用原生光标。 */
   caret-color: transparent;
   outline: none;
@@ -293,6 +295,22 @@ defineExpose({
   50% {
     visibility: hidden;
   }
+}
+
+/* 选区底色由 selection.ts 按行自绘（WebKit 的原生底色从段落中间开始选择时第一行偏高）。 */
+.chapter-editor__body :deep(.chapter-editor__content ::selection) {
+  background: transparent;
+}
+
+.chapter-editor__body :deep(.editor-selection__box) {
+  position: absolute;
+  background: #b4d5fe;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.chapter-editor__body :deep(.editor-selection.is-inactive .editor-selection__box) {
+  background: #e2e4e8;
 }
 
 .chapter-editor__body :deep(p) {
