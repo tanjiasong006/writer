@@ -1,6 +1,7 @@
 import type { ChapterId } from '../domain/chapter_tree/chapter_tree.ts'
 import type { WriterDocument } from '../domain/document/document.ts'
 import type {
+  ImportedAsset,
   OpenedProject,
   ProjectStorage,
   StorageFailure,
@@ -61,6 +62,18 @@ export class MemoryProjectStorage implements ProjectStorage {
     const document = this.projects.get(path)
     if (!document) return { ok: false, error: { code: 'not-a-project' } }
     return { ok: true, value: { document, orphanFiles: [] } }
+  }
+
+  /** 导入过的资源：项目路径 → 源路径列表。 */
+  readonly importedAssets: Array<{ path: string; sourcePath: string }> = []
+
+  async importAsset(path: string, sourcePath: string): Promise<StorageResult<ImportedAsset>> {
+    const failure = this.failures.shift()
+    if (failure) return { ok: false, error: failure }
+    if (!this.projects.has(path)) return { ok: false, error: { code: 'not-a-project' } }
+    this.importedAssets.push({ path, sourcePath })
+    const fileName = sourcePath.split(/[\\/]/).pop() ?? 'image.png'
+    return { ok: true, value: { fileName, reference: `../assets/${fileName}` } }
   }
 
   async save(

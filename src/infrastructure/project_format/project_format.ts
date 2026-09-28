@@ -47,6 +47,11 @@ export function contentFiles(tree: ChapterTree): ReadonlyMap<ChapterId, string> 
   return files
 }
 
+/** 正文文件位于 content/，资源位于 assets/，因此正文中以 ../assets/<name> 引用资源。 */
+export function assetReference(fileName: string): string {
+  return `../assets/${fileName}`
+}
+
 /** 由文档生成 manifest；文件名总是按当前编号重新推导。 */
 export function buildManifest(document: WriterDocument): Manifest {
   return {

@@ -17,6 +17,9 @@ export type StorageFailure =
   | { readonly code: 'content-not-utf8'; readonly chapterId: ChapterId; readonly file: string }
   | { readonly code: 'content-required'; readonly chapterId: ChapterId }
   | { readonly code: 'content-orphan'; readonly chapterId: ChapterId }
+  | { readonly code: 'asset-unsupported' }
+  | { readonly code: 'asset-too-large' }
+  | { readonly code: 'asset-not-found' }
   | { readonly code: 'io'; readonly operation: string; readonly path: string; readonly message: string }
   | { readonly code: 'unknown'; readonly message: string }
 
@@ -44,4 +47,16 @@ export interface ProjectStorage {
     document: WriterDocument,
     changed: ReadonlySet<ChapterId>,
   ): Promise<StorageResult<void>>
+  /**
+   * 把外部图片复制进项目资源目录，返回正文中引用它的相对路径（如 ../assets/图.png）。
+   * 资源独立于保存事务：复制成功即落盘，不影响文档 dirty 状态。
+   */
+  importAsset(path: string, sourcePath: string): Promise<StorageResult<ImportedAsset>>
+}
+
+export interface ImportedAsset {
+  /** 正文 Markdown 中引用该资源的相对路径。 */
+  readonly reference: string
+  /** 资源在项目中的文件名。 */
+  readonly fileName: string
 }

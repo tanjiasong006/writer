@@ -328,3 +328,74 @@ test('新建章节后编辑器切换到新章节', async () => {
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('2未命名章节')
   expect(editorView(wrapper).state.doc.toString()).toBe('')
 })
+
+test('工具栏：粗体作用于编辑器选区并进入正文', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  const view = editorView(wrapper)
+  view.dispatch({ selection: { anchor: 0, head: 2 } })
+
+  await wrapper.find('button[aria-label="粗体"]').trigger('click')
+  expect(view.state.doc.toString()).toBe('**引言**')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('**引言**')
+})
+
+test('插入图片：复制进项目并在光标处插入引用', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.imagePath = '/Users/我/图片/实验装置.png'
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  editorView(wrapper).dispatch({ selection: { anchor: 2 } })
+
+  await wrapper.find('button[aria-label="图片"]').trigger('click')
+  await flushPromises()
+
+  expect(services.storage.importedAssets).toEqual([
+    { path: PATH, sourcePath: '/Users/我/图片/实验装置.png' },
+  ])
+  expect(editorView(wrapper).state.doc.toString()).toBe('引言\n\n![实验装置](../assets/实验装置.png)\n')
+})
+
+test('插入图片：取消选择不做任何事；导入失败显示原因', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  await wrapper.find('button[aria-label="图片"]').trigger('click')
+  await flushPromises()
+  expect(services.storage.importedAssets).toEqual([])
+
+  services.shell.imagePath = '/x/a.bmp'
+  services.storage.failNext({ code: 'asset-unsupported' })
+  await wrapper.find('button[aria-label="图片"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.workspace__error').text()).toContain('PNG、JPG 或 GIF')
+  expect(editorView(wrapper).state.doc.toString()).toBe('引言')
+})
+
+test('插入图片期间切换了章节：图片追加到发起请求的章节，不插错位置', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  services.shell.pickImageFile = async () => {
+    await wrapper.findAll('.chapter-tree__row')[2].trigger('click') // 切到「方法」
+    return '/图/a.png'
+  }
+  await wrapper.find('button[aria-label="图片"]').trigger('click')
+  await flushPromises()
+
+  expect(editorView(wrapper).state.doc.toString()).toBe('方法正文')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true }))
+  await flushPromises()
+  const contents = services.storage.committed(PATH)!.contents
+  expect(contents.get('a')).toBe('引言\n\n![a](../assets/a.png)\n')
+  expect(contents.get('b')).toBe('方法正文')
+})

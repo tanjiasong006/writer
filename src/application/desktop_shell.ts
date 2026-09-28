@@ -9,6 +9,8 @@ export interface DesktopShell {
   pickNewProjectPath(): Promise<string | null>
   /** 让用户选择一个已有项目目录；取消返回 null。 */
   pickProjectPath(): Promise<string | null>
+  /** 让用户选择一张要插入的图片；取消返回 null。 */
+  pickImageFile(): Promise<string | null>
   /** 需要用户明确决定的确认框。 */
   confirm(message: string, labels?: { ok?: string; cancel?: string }): Promise<boolean>
   /**

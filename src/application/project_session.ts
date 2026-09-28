@@ -5,7 +5,12 @@ import {
   setTitle,
   type WriterDocument,
 } from '../domain/document/document.ts'
-import type { ProjectStorage, StorageFailure, StorageResult } from './project_storage.ts'
+import type {
+  ImportedAsset,
+  ProjectStorage,
+  StorageFailure,
+  StorageResult,
+} from './project_storage.ts'
 
 /**
  * 一个已打开项目的编辑会话：持有当前文档，组织保存。
@@ -104,6 +109,11 @@ export class ProjectSession {
 
   setTitle(title: string): void {
     this.commit(setTitle(this.current, title))
+  }
+
+  /** 把外部图片导入项目资源目录，得到正文可用的引用路径。不改变文档。 */
+  importAsset(sourcePath: string): Promise<StorageResult<ImportedAsset>> {
+    return this.storage.importAsset(this.path, sourcePath)
   }
 
   /**

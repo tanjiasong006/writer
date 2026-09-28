@@ -22,6 +22,15 @@ function createTauriShell(): DesktopShell {
       return typeof picked === 'string' ? picked : null
     },
 
+    async pickImageFile() {
+      const picked = await open({
+        title: '插入图片',
+        multiple: false,
+        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif'] }],
+      })
+      return typeof picked === 'string' ? picked : null
+    },
+
     async confirm(message, labels) {
       return ask(message, {
         title: 'Writer',

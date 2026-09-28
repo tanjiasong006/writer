@@ -4,6 +4,7 @@
 //! 所有要变化的正文先完整放进 staging，原子写入 journal 作为提交点，再幂等地应用到 content/。
 //! 任何一步失败或崩溃后，下次打开/保存都会先恢复：有 journal 就前滚，没有就丢弃 staging。
 
+pub mod assets;
 pub mod fs;
 mod names;
 #[cfg(test)]
@@ -59,6 +60,12 @@ pub enum StorageError {
     ContentRequired { chapter_id: String },
     /// 提供了不属于任何章节的正文。
     ContentOrphan { chapter_id: String },
+    /// 不支持的资源格式。
+    AssetUnsupported,
+    /// 资源文件超过大小上限。
+    AssetTooLarge,
+    /// 要导入的资源文件不存在。
+    AssetNotFound,
     /// 文件系统操作失败。
     Io {
         operation: String,

@@ -20,6 +20,12 @@ export function messageForStorageFailure(failure: StorageFailure): string {
     case 'content-required':
     case 'content-orphan':
       return '保存数据不完整，已停止保存以保护现有文件。'
+    case 'asset-unsupported':
+      return '暂不支持该图片格式，请使用 PNG、JPG 或 GIF。'
+    case 'asset-too-large':
+      return '图片超过 50 MB，无法插入。'
+    case 'asset-not-found':
+      return '找不到所选图片文件。'
     case 'io':
       return `文件读写失败：${failure.message}`
     case 'unknown':

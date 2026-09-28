@@ -7,7 +7,7 @@ import type {
   StorageFailure,
   StorageResult,
 } from '../application/project_storage.ts'
-import { buildManifest, parseManifest } from './project_format/project_format.ts'
+import { assetReference, buildManifest, parseManifest } from './project_format/project_format.ts'
 
 /**
  * ProjectStorage 的 Tauri 实现：磁盘事务由 Rust `storage` 模块完成，
@@ -38,6 +38,12 @@ export function createTauriProjectStorage(): ProjectStorage {
         invoke('project_save', { path, request: { manifest: buildManifest(document), contents } }),
       ).then(toVoid)
     },
+
+    async importAsset(path, sourcePath) {
+      const result = await call(() => invoke<string>('project_import_asset', { path, source: sourcePath }))
+      if (!result.ok) return result
+      return { ok: true, value: { fileName: result.value, reference: assetReference(result.value) } }
+    },
   }
 }
 
@@ -63,6 +69,9 @@ const KNOWN_CODES = new Set<StorageFailure['code']>([
   'content-not-utf8',
   'content-required',
   'content-orphan',
+  'asset-unsupported',
+  'asset-too-large',
+  'asset-not-found',
   'io',
 ])
 

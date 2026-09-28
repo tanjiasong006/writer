@@ -18,8 +18,8 @@
 | S3 | Application：存储端口、项目会话（dirty 边界、串行保存、自动保存） | ✅ 完成 |
 | S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | ✅ 完成 |
 | S5 | CodeMirror 正文编辑 | ✅ 完成 |
-| S6 | 插入内容：工具栏、图片资源导入、表格等 | ⏳ 进行中 |
-| S7 | 全文预览（Rust pulldown-cmark 渲染） | 待开始 |
+| S6 | 插入内容：工具栏、图片资源导入、表格等 | ✅ 完成 |
+| S7 | 全文预览（Rust pulldown-cmark 渲染） | ⏳ 进行中 |
 | S8 | Word 导出（docx-rs） | 待开始 |
 | S9 | PDF 导出（Typst）+ 字体 fallback | 待开始 |
 | S10 | 加固：大文档、深层嵌套、极端输入、回归 | 待开始 |
@@ -143,6 +143,15 @@
   vue-tsc、vite build、build-storybook 通过。
 - 真实应用：Tauri 调试版可启动，dev server 能编译全部模块，无运行时错误日志。
   **限制**：本环境没有屏幕录制权限，无法截图或操作原生对话框；手动验收清单见文末。
+
+### S6（完成）
+
+- `ui/editor/markdown_commands.ts`：粗体 / 斜体（包裹与取消）、无序 / 有序列表 / 引用（按行切换，列表类型互换）、
+  代码块、表格模板、图片；块级内容自动与前后段落隔开空行。纯 StateCommand，逐一单测。
+- `EditorToolbar.vue` + 快捷键 Mod-B / Mod-I；按钮不抢编辑器焦点。
+- 图片：`storage::assets::import_asset`（Rust）复制进 `assets/`，清洗文件名、内容相同复用、重名加后缀、原子写入；
+  正文插入 `![名](../assets/名.png)`。选择文件期间切换了章节时，图片追加到发起请求的章节。
+- 验证：npm test 290/290，vue-tsc 通过，cargo test 29/29，clippy 无警告。
 
 ## 手动验收清单（需要在真实桌面环境执行）
 

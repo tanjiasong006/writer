@@ -11,6 +11,8 @@ import ChapterEditor from '../editor/ChapterEditor.vue'
 import { useServices } from '../services.ts'
 import { useSession } from './use_session.ts'
 import { restoreUiState, serializeUiState } from './ui_state.ts'
+import { messageForStorageFailure } from './storage_messages.ts'
+import { appendImage } from '../editor/markdown_commands.ts'
 
 /**
  * 已打开项目的工作区：顶栏（标题、保存状态、项目操作）+ 左侧章节树 + 右侧正文区。
@@ -29,6 +31,9 @@ const { shell } = useServices()
 const { document, status, lastError } = useSession(props.session)
 
 const selectedId = ref<ChapterId | null>(null)
+/** 工作区内操作（如插入图片）的错误说明；不属于保存状态。 */
+const actionError = ref<string | null>(null)
+const editor = ref<InstanceType<typeof ChapterEditor> | null>(null)
 const collapsedIds = shallowRef<ReadonlySet<ChapterId>>(new Set())
 /** 界面状态恢复完成前不回写，避免用默认值覆盖磁盘上的状态。 */
 const uiStateReady = ref(false)
@@ -79,6 +84,24 @@ function updateContent(chapterId: ChapterId, text: string): void {
   props.session.setContent(chapterId, text)
 }
 
+/** 插入图片：选择文件 → 复制进项目 assets/ → 在发起请求的章节中插入引用。 */
+async function insertImage(chapterId: ChapterId): Promise<void> {
+  actionError.value = null
+  const source = await shell.pickImageFile()
+  if (source === null) return
+  const result = await props.session.importAsset(source)
+  if (!result.ok) {
+    actionError.value = messageForStorageFailure(result.error)
+    return
+  }
+  const { reference, fileName } = result.value
+  const alt = fileName.replace(/\.[^.]+$/, '')
+  if (editor.value?.insertImage(chapterId, reference, alt)) return
+  // 选择文件期间切换了章节：追加到发起请求的章节末尾，不插错位置。
+  const text = props.session.document.contents.get(chapterId)
+  if (text !== undefined) props.session.setContent(chapterId, appendImage(text, reference, alt))
+}
+
 function chapterHasContent(chapterId: ChapterId): boolean {
   return hasContent(document.value, chapterId)
 }
@@ -121,6 +144,11 @@ const selectedNumber = computed(() => {
       </div>
     </header>
 
+    <p v-if="actionError" class="workspace__error" role="alert">
+      {{ actionError }}
+      <button type="button" aria-label="关闭提示" @click="actionError = null">×</button>
+    </p>
+
     <div class="workspace__body">
       <aside class="workspace__sidebar">
         <ChapterManager
@@ -135,11 +163,13 @@ const selectedNumber = computed(() => {
       <main class="workspace__main">
         <ChapterEditor
           v-if="selectedChapter && selectedId !== null"
+          ref="editor"
           :chapter-id="selectedId"
           :content="document.contents.get(selectedId) ?? ''"
           :number="selectedNumber"
           :title="selectedChapter.title"
           @change="updateContent"
+          @request-image="insertImage"
         />
         <p v-else class="workspace__placeholder">选择或新建一个章节开始写作。</p>
       </main>
@@ -198,6 +228,25 @@ const selectedNumber = computed(() => {
   background: #ffffff;
   color: inherit;
   font-size: 13px;
+  cursor: pointer;
+}
+
+.workspace__error {
+  flex: none;
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  padding: 6px 12px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.workspace__error button {
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 16px;
   cursor: pointer;
 }
 

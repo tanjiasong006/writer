@@ -5,6 +5,7 @@ import { MemoryProjectStorage } from './memory_project_storage.ts'
 export class MemoryShell implements DesktopShell {
   newProjectPath: string | null = null
   projectPath: string | null = null
+  imagePath: string | null = null
   confirmAnswer = true
   readonly confirmations: string[] = []
   readonly uiStates = new Map<string, string>()
@@ -17,6 +18,10 @@ export class MemoryShell implements DesktopShell {
 
   async pickProjectPath() {
     return this.projectPath
+  }
+
+  async pickImageFile() {
+    return this.imagePath
   }
 
   async confirm(message: string) {

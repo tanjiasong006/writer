@@ -51,3 +51,8 @@ pub async fn project_read_ui_state(path: PathBuf) -> Result<Option<String>, Stor
 pub async fn project_write_ui_state(path: PathBuf, state: String) -> Result<(), StorageError> {
     run_storage(move || storage::write_ui_state(&RealFs, &path, &state)).await
 }
+
+#[tauri::command]
+pub async fn project_import_asset(path: PathBuf, source: PathBuf) -> Result<String, StorageError> {
+    run_storage(move || storage::assets::import_asset(&RealFs, &path, &source)).await
+}

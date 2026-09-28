@@ -9,6 +9,18 @@ import { searchKeymap } from '@codemirror/search'
 import { tags } from '@lezer/highlight'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { createChapterState, readText } from './editor_state.ts'
+import EditorToolbar, { type ToolbarCommand } from './EditorToolbar.vue'
+import {
+  insertCodeBlock,
+  insertImage,
+  insertTable,
+  toggleBold,
+  toggleBulletList,
+  toggleItalic,
+  toggleOrderedList,
+  toggleQuote,
+} from './markdown_commands.ts'
+import type { StateCommand } from '@codemirror/state'
 
 /**
  * 章节正文编辑器：CodeMirror 6 Markdown 源码编辑（docs/decisions.md 第 2 节）。
@@ -27,6 +39,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   change: [chapterId: ChapterId, text: string]
+  /** 用户点击了"插入图片"；由上层选择并导入图片后调用 insertImage。 */
+  'request-image': [chapterId: ChapterId]
 }>()
 
 const host = ref<HTMLElement | null>(null)
@@ -71,7 +85,15 @@ const extensions = [
   EditorView.lineWrapping,
   markdown(),
   syntaxHighlighting(highlight),
-  keymap.of([...markdownKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+  keymap.of([
+    { key: 'Mod-b', run: toggleBold },
+    { key: 'Mod-i', run: toggleItalic },
+    ...markdownKeymap,
+    ...defaultKeymap,
+    ...historyKeymap,
+    ...searchKeymap,
+    indentWithTab,
+  ]),
   placeholder('开始写作…'),
   theme,
   EditorView.updateListener.of((update) => {
@@ -120,7 +142,39 @@ watch(
   },
 )
 
+const commands: Record<Exclude<ToolbarCommand, 'image'>, StateCommand> = {
+  bold: toggleBold,
+  italic: toggleItalic,
+  'bullet-list': toggleBulletList,
+  'ordered-list': toggleOrderedList,
+  quote: toggleQuote,
+  'code-block': insertCodeBlock,
+  table: insertTable,
+}
+
+function runCommand(command: ToolbarCommand): void {
+  if (!view) return
+  if (command === 'image') {
+    emit('request-image', currentId)
+    return
+  }
+  commands[command](view)
+  view.focus()
+}
+
+/**
+ * 在光标处插入图片引用。chapterId 是发起请求时的章节；
+ * 若期间已切换到其他章节则不插入并返回 false，由调用方另行处理，避免插错章节。
+ */
+function insertImageAt(chapterId: ChapterId, reference: string, alt: string): boolean {
+  if (!view || chapterId !== currentId) return false
+  insertImage(reference, alt)(view)
+  view.focus()
+  return true
+}
+
 defineExpose({
+  insertImage: insertImageAt,
   /** 供工具栏等在当前编辑器上执行命令。 */
   getView: (): EditorView | null => view,
   focus: () => view?.focus(),
@@ -133,7 +187,7 @@ defineExpose({
       <span class="chapter-editor__number">{{ number }}</span>
       <span class="chapter-editor__title">{{ title || '未命名章节' }}</span>
     </h2>
-    <slot name="toolbar" />
+    <EditorToolbar @command="runCommand" />
     <div ref="host" class="chapter-editor__host"></div>
   </div>
 </template>
