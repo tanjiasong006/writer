@@ -19,15 +19,13 @@ use typst_kit::fonts::FontStore;
 use typst_layout::PagedDocument;
 
 use super::fonts::{bundled_font_dirs, families, FontRole, CJK_PROBE};
-use super::images::load_for_docx;
+use super::images::{display_size_pt, load_for_docx};
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{plain_text, Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
 
 /// A4 正文宽度（210mm − 2 × 25mm = 160mm）对应的磅数。
 const TEXT_WIDTH_PT: f64 = 453.5;
-/// 96 DPI 下 1 像素 = 0.75 磅，与 Word 导出一致。
-const PT_PER_PX: f64 = 0.75;
 
 static FONTS: OnceLock<FontStore> = OnceLock::new();
 
@@ -46,11 +44,12 @@ pub fn font_store(resource_dir: Option<&Path>) -> &'static FontStore {
     })
 }
 
-pub fn export(
+/// 排版：生成 Typst 源码并编译成分页文档。
+fn layout(
     document: &Document,
     project_root: &Path,
     fonts: &'static FontStore,
-) -> Result<(Vec<u8>, ExportReport), ExportError> {
+) -> Result<(PagedDocument, ExportReport), ExportError> {
     let book = fonts.book();
     if document_has_cjk(document) && !book_has_cjk(book) {
         return Err(ExportError::NoCjkFont);
@@ -68,17 +67,25 @@ pub fn export(
     }
 
     let world = PdfWorld::new(writer.out, writer.images, fonts);
-    let compiled = typst::compile::<PagedDocument>(&world);
-    let result = compiled
+    let compiled = typst::compile::<PagedDocument>(&world)
         .output
-        .map_err(|errors| render_failed(&errors))
-        .and_then(|paged| {
-            typst_pdf::pdf(&paged, &typst_pdf::PdfOptions::default())
-                .map_err(|errors| render_failed(&errors))
-        });
+        .map_err(|errors| render_failed(&errors));
+    Ok((compiled?, writer.report))
+}
+
+pub fn export(
+    document: &Document,
+    project_root: &Path,
+    fonts: &'static FontStore,
+) -> Result<(Vec<u8>, ExportReport), ExportError> {
+    let result = layout(document, project_root, fonts).and_then(|(paged, report)| {
+        typst_pdf::pdf(&paged, &typst_pdf::PdfOptions::default())
+            .map(|pdf| (pdf, report))
+            .map_err(|errors| render_failed(&errors))
+    });
     // 一次性导出不需要保留增量编译缓存。
     comemo::evict(0);
-    Ok((result?, writer.report))
+    result
 }
 
 fn render_failed(errors: &[typst::diag::SourceDiagnostic]) -> ExportError {
@@ -236,8 +243,8 @@ impl Writer<'_> {
                 self.blocks(blocks, section)
             ),
             Block::Code { language, text } => match language.as_deref().filter(|l| is_identifier(l)) {
-                Some(language) => format!("#raw(block: true, lang: {}, {})", string(language), string(text)),
-                None => format!("#raw(block: true, {})", string(text)),
+                Some(language) => format!("#raw(block: true, lang: {}, {})", string(language), string(&breakable(text))),
+                None => format!("#raw(block: true, {})", string(&breakable(text))),
             },
             Block::Table { alignments, header, rows } => {
                 let columns = header.len().max(rows.iter().map(Vec::len).max().unwrap_or(0)).max(1);
@@ -282,7 +289,7 @@ impl Writer<'_> {
             match inline {
                 Inline::Text(text) => {
                     out.push('#');
-                    out.push_str(&string(text));
+                    out.push_str(&string(&breakable(text)));
                 }
                 Inline::Strong(children) => {
                     out.push_str(&format!("#strong[{}]", self.inlines(children)))
@@ -293,7 +300,7 @@ impl Writer<'_> {
                 Inline::Strike(children) => {
                     out.push_str(&format!("#strike[{}]", self.inlines(children)))
                 }
-                Inline::Code(code) => out.push_str(&format!("#raw({})", string(code))),
+                Inline::Code(code) => out.push_str(&format!("#raw({})", string(&breakable(code)))),
                 Inline::Link { url, children } => {
                     let content = self.inlines(children);
                     if is_safe_url(url) {
@@ -326,9 +333,44 @@ impl Writer<'_> {
         };
         let index = self.images.len();
         self.images.push(Bytes::new(image.png));
-        let width = (f64::from(image.width) * PT_PER_PX).min(TEXT_WIDTH_PT);
-        format!("image(\"/img/{index}.png\", width: {width:.2}pt)")
+        let (width, height) = display_size_pt(image.width, image.height, TEXT_WIDTH_PT);
+        format!("image(\"/img/{index}.png\", width: {width:.2}pt, height: {height:.2}pt)")
     }
+}
+
+/// 超过这个长度的连续无法断行的字符串（URL、路径、标识符）允许在任意字符间断行。
+const MAX_UNBREAKABLE_RUN: usize = 24;
+
+/// 相当于 CSS overflow-wrap: anywhere：Typst 没有这个选项，过长的字符串会超出页面右边界。
+/// 在这类字符串的字符之间插入零宽空格作为断行机会；每个字符都可断，两端对齐时行尾不会留下大段空白。
+/// 普通单词与中文（本来就可以在字间断行）不受影响。
+fn breakable(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut run: Vec<char> = Vec::new();
+    let flush = |run: &mut Vec<char>, out: &mut String| {
+        if run.len() > MAX_UNBREAKABLE_RUN {
+            for (i, c) in run.iter().enumerate() {
+                if i > 0 {
+                    out.push('\u{200B}');
+                }
+                out.push(*c);
+            }
+        } else {
+            out.extend(run.iter());
+        }
+        run.clear();
+    };
+    for c in text.chars() {
+        // 中文与全角标点本来就可以在字间断行。
+        if c.is_whitespace() || is_cjk(c) || matches!(c, '\u{3000}'..='\u{303F}' | '\u{FF00}'..='\u{FFEF}') {
+            flush(&mut run, &mut out);
+            out.push(c);
+        } else {
+            run.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
 }
 
 /// Typst 字符串字面量：转义反斜杠、引号与换行，去掉其余控制字符。
@@ -497,6 +539,77 @@ mod tests {
         let (pdf, report) = export(&document, dir.path(), system_fonts()).unwrap();
         assert!(pdf.starts_with(b"%PDF-"));
         assert_eq!(report.missing_images, vec!["../assets/无.png"]);
+    }
+
+    #[test]
+    fn long_unbroken_strings_get_break_opportunities() {
+        let url = format!("https://example.com/{}", "a".repeat(60));
+        let broken = breakable(&url);
+        assert_eq!(broken.replace('\u{200B}', ""), url);
+        assert!(broken.split('\u{200B}').all(|part| part.chars().count() == 1));
+        let word = "a".repeat(MAX_UNBREAKABLE_RUN);
+        assert_eq!(breakable(&word), word);
+        // 普通文字与中文不变。
+        for text in ["普通的英文 words and 中文段落没有多余字符", "中文".repeat(100).as_str()] {
+            assert_eq!(breakable(text), text);
+        }
+    }
+
+    #[test]
+    fn long_url_stays_inside_the_text_area() {
+        let dir = project();
+        let url = format!("https://example.com/{}", "a".repeat(200));
+        let markdown = format!("地址：{url}\n\n`{url}`\n\n```\n{url}\n```");
+        let document = build(&request("", &[("a", vec![1], "链接", &markdown)]));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let page_width = paged.pages()[0].frame.width().to_pt();
+        let right_margin = 25.0 / 25.4 * 72.0;
+        let mut texts = 0;
+        for page in paged.pages() {
+            for_each_text_right_edge(&page.frame, typst::layout::Point::zero(), &mut |x| {
+                texts += 1;
+                assert!(
+                    x <= page_width - right_margin + 0.5,
+                    "text ends at x={x}, past the right margin"
+                );
+            });
+        }
+        assert!(texts > 0);
+    }
+
+    /// 遍历分页结果中每段文字的右边界（磅）。
+    fn for_each_text_right_edge(
+        frame: &typst::layout::Frame,
+        offset: typst::layout::Point,
+        visit: &mut impl FnMut(f64),
+    ) {
+        use typst::layout::FrameItem;
+        for (position, item) in frame.items() {
+            let at = offset + *position;
+            match item {
+                FrameItem::Group(group) => for_each_text_right_edge(&group.frame, at, visit),
+                FrameItem::Text(text) => visit((at.x + text.width()).to_pt()),
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn tall_image_stays_on_the_page_with_its_heading() {
+        let dir = project();
+        write_image(
+            &dir.path().join("assets/竖图.png"),
+            400,
+            1600,
+            ImageFormat::Png,
+        );
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "图片", "![竖图](../assets/竖图.png)")],
+        ));
+        let (pdf, _) = export(&document, dir.path(), system_fonts()).unwrap();
+        // 按宽度缩放时这张图有 1200 磅高，会把标题单独留在第一页、图片挤到下一页。
+        assert_eq!(page_count(&pdf), 1);
     }
 
     #[test]

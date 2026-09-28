@@ -68,6 +68,8 @@ function onClick(event: MouseEvent): void {
   font-size: 16px;
   line-height: 1.8;
   color: #111827;
+  /* 过长的 URL、路径与导出一致地在任意字符处折行，不撑出横向滚动。 */
+  overflow-wrap: anywhere;
 }
 
 .document-preview :deep(.doc-title) {
@@ -152,8 +154,10 @@ function onClick(event: MouseEvent): void {
   text-align: center;
 }
 
+/* 与 Word / PDF 导出相同的尺寸规则：不超过正文宽度，高度不超过 420 磅（560px），保持比例。 */
 .document-preview :deep(img) {
   max-width: 100%;
+  max-height: 560px;
 }
 
 .document-preview :deep(figcaption) {

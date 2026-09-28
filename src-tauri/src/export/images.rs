@@ -12,6 +12,19 @@ const MAX_EMBED_PX: u32 = 2400;
 const MAX_DECODE_PX: u32 = 20_000;
 const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;
 
+/// 96 DPI 下 1 像素 = 0.75 磅（Word 与 PDF 导出一致）。
+const PT_PER_PX: f64 = 0.75;
+/// 图片显示高度上限（磅）：约为 A4 正文区高度的 60%，章节标题、图片与图注能排在同一页。
+pub const MAX_IMAGE_HEIGHT_PT: f64 = 420.0;
+
+/// 图片在正文中的显示尺寸（磅）：按 96 DPI 换算，保持比例缩小到不超过正文宽度与高度上限，不放大。
+pub fn display_size_pt(width_px: u32, height_px: u32, max_width_pt: f64) -> (f64, f64) {
+    let width = f64::from(width_px) * PT_PER_PX;
+    let height = f64::from(height_px) * PT_PER_PX;
+    let scale = (max_width_pt / width).min(MAX_IMAGE_HEIGHT_PT / height).min(1.0);
+    (width * scale, height * scale)
+}
+
 pub struct DocxImage {
     /// PNG 字节（docx-rs 以 png 形式存放媒体）。
     pub png: Vec<u8>,
@@ -82,6 +95,19 @@ pub mod tests {
             Rgb([(x % 256) as u8, (y % 256) as u8, 128])
         });
         image.save_with_format(path, format).unwrap();
+    }
+
+    #[test]
+    fn display_size_fits_width_and_height_keeping_aspect_ratio() {
+        // 小图不放大。
+        assert_eq!(display_size_pt(100, 50, 453.5), (75.0, 37.5));
+        // 宽图按正文宽度缩小。
+        let (w, h) = display_size_pt(3000, 300, 453.5);
+        assert!((w - 453.5).abs() < 1e-6 && (h - 45.35).abs() < 1e-6);
+        // 竖长图按高度上限缩小，比例不变。
+        let (w, h) = display_size_pt(400, 1600, 453.5);
+        assert!((h - MAX_IMAGE_HEIGHT_PT).abs() < 1e-6);
+        assert!((w / h - 0.25).abs() < 1e-9);
     }
 
     #[test]

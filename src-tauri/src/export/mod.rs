@@ -82,4 +82,67 @@ mod tests {
             Err(ExportError::Io { .. })
         ));
     }
+
+    /// 手动核对用的压力样例：多页表格、长代码块、竖长 / 超宽图片、长 URL、深层章节、空章节、
+    /// 原始 HTML、任务列表、正文内标题。生成 stress.docx 与 stress.pdf：
+    /// `WRITER_SAMPLE_DIR=<目录> cargo test write_stress_sample -- --ignored`
+    #[test]
+    #[ignore]
+    fn write_stress_sample() {
+        use crate::export::images::tests::write_image;
+        use crate::render::{build, RenderChapter, RenderRequest};
+        let out = std::path::PathBuf::from(std::env::var("WRITER_SAMPLE_DIR").expect("WRITER_SAMPLE_DIR"));
+        let root = out.join("stress-project");
+        fs::create_dir_all(root.join("assets")).unwrap();
+        fs::create_dir_all(root.join("content")).unwrap();
+        write_image(&root.join("assets/竖图.png"), 400, 1600, image::ImageFormat::Png);
+        write_image(&root.join("assets/宽图.jpg"), 3000, 300, image::ImageFormat::Jpeg);
+        write_image(&root.join("assets/小图.png"), 48, 48, image::ImageFormat::Png);
+
+        let mut table = String::from("| 序号 | 名称 | 说明 |\n| --: | --- | --- |\n");
+        for i in 1..=80 {
+            table.push_str(&format!("| {i} | 条目{i} | 这是第 {i} 行的说明文字，用来检查跨页表格的表头与行高。 |\n"));
+        }
+        let mut code = String::from("```rust\n");
+        for i in 1..=70 {
+            code.push_str(&format!("let value_{i} = compute({i}); // 第 {i} 行\n"));
+        }
+        code.push_str("```");
+        let long_paragraph = "长段落测试。".repeat(300);
+        let wide_table = "| A | B | C | D | E | F | G | H | I | J |\n|---|---|---|---|---|---|---|---|---|---|\n| 很长的单元格内容一 | 很长的单元格内容二 | 很长的单元格内容三 | 四 | 五 | 六 | 七 | 八 | 九 | 十 |";
+
+        let mut chapters = vec![
+            ("a", vec![1], "绪论", format!("{long_paragraph}\n\n一个很长的地址：https://example.com/{0}\n\n行内代码 `C:\\Users\\writer\\Documents\\{0}` 结束。\n\n```\nlet url = \"https://example.com/{0}\";\n```\n\n- [x] 已完成的任务\n- [ ] 未完成的任务\n\n> 第一层引用\n>\n> > 第二层引用\n\n<div>原始 HTML 应显示为文本</div>\n\n小图 ![小图](../assets/小图.png) 在行内。", "a".repeat(200))),
+            ("b", vec![1, 1], "长表格", table),
+            ("c", vec![1, 2], "长代码", code),
+            ("d", vec![2], "图片", "![竖图](../assets/竖图.png)\n\n![宽图](../assets/宽图.jpg)\n\n![缺失](../assets/不存在.png)".to_owned()),
+            ("e", vec![2, 1], "宽表格", wide_table.to_owned()),
+            ("f", vec![3], "空章节", String::new()),
+            ("g", vec![4], "正文内标题", "# 一级\n\n正文\n\n## 二级\n\n### 三级\n\n#### 四级\n\n1. 一\n   1. 一.一\n      1. 一.一.一\n         - 圆点\n2. 二".to_owned()),
+        ];
+        let mut number = vec![5];
+        for depth in 1..=12 {
+            chapters.push(("deep", number.clone(), "深层章节", format!("第 {depth} 层")));
+            number.push(1);
+        }
+        let request = RenderRequest {
+            title: "压力样例".into(),
+            chapters: chapters
+                .into_iter()
+                .enumerate()
+                .map(|(i, (id, number, title, markdown))| RenderChapter {
+                    id: format!("{id}{i}"),
+                    number,
+                    title: title.into(),
+                    markdown,
+                })
+                .collect(),
+        };
+        let document = build(&request);
+        let (docx, report) = docx::export(&document, &root).unwrap();
+        assert_eq!(report.missing_images, vec!["../assets/不存在.png".to_owned()]);
+        fs::write(out.join("stress.docx"), docx).unwrap();
+        let (pdf, _) = pdf::export(&document, &root, pdf::font_store(None)).unwrap();
+        fs::write(out.join("stress.pdf"), pdf).unwrap();
+    }
 }

@@ -18,7 +18,7 @@ use docx_rs::{
 };
 
 use super::fonts::{docx_fonts, FontRole};
-use super::images::load_for_docx;
+use super::images::{display_size_pt, load_for_docx};
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
@@ -28,10 +28,8 @@ const PAGE_WIDTH: u32 = 11906;
 const PAGE_HEIGHT: u32 = 16838;
 const MARGIN: i32 = 1440;
 const TEXT_WIDTH: u32 = PAGE_WIDTH - 2 * MARGIN as u32;
-/// 1 twip = 635 EMU。
-const EMU_PER_TWIP: u32 = 635;
-/// 96 DPI 下 1 像素 = 9525 EMU。
-const EMU_PER_PX: u64 = 9525;
+/// 1 磅 = 12700 EMU。
+const EMU_PER_PT: f64 = 12700.0;
 const LIST_INDENT: i32 = 420;
 // docx-rs 默认已定义 abstractNum 1 / num 1，这里的编号定义从 10 开始，避免重复 id。
 const BULLET_ABSTRACT: usize = 10;
@@ -348,17 +346,10 @@ impl Writer<'_> {
                 .color("B91C1C")
                 .add_text(xml_safe(&format!("[图片无法显示：{label}]")));
         };
-        let max_width = u64::from(TEXT_WIDTH * EMU_PER_TWIP);
-        let mut width = u64::from(image.width) * EMU_PER_PX;
-        let mut height = u64::from(image.height) * EMU_PER_PX;
-        if width > max_width {
-            height = height * max_width / width;
-            width = max_width;
-        }
-        let pic = Pic::new_with_dimensions(image.png, image.width, image.height).size(
-            u32::try_from(width).unwrap_or(u32::MAX),
-            u32::try_from(height).unwrap_or(u32::MAX),
-        );
+        let (width, height) =
+            display_size_pt(image.width, image.height, f64::from(TEXT_WIDTH) / 20.0);
+        let pic = Pic::new_with_dimensions(image.png, image.width, image.height)
+            .size(pt_to_emu(width), pt_to_emu(height));
         Run::new().add_image(pic)
     }
 
@@ -583,6 +574,10 @@ fn base_document() -> Docx {
         .add_numbering(Numbering::new(BULLET_NUMBERING, BULLET_ABSTRACT))
 }
 
+fn pt_to_emu(pt: f64) -> u32 {
+    (pt * EMU_PER_PT).round() as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,6 +731,12 @@ mod tests {
             1500,
             ImageFormat::Jpeg,
         );
+        write_image(
+            &dir.path().join("assets/竖图.png"),
+            400,
+            1600,
+            ImageFormat::Png,
+        );
         fs::write(dir.path().join("assets/坏.png"), b"not an image").unwrap();
         let (bytes, report) = export_ok(
             &dir,
@@ -743,10 +744,10 @@ mod tests {
                 "a",
                 vec![1],
                 "图",
-                "![小图](../assets/小图.png)\n\n![照片](../assets/照片.jpg)\n\n![坏](../assets/坏.png)\n\n![丢](../assets/丢.png)",
+                "![小图](../assets/小图.png)\n\n![照片](../assets/照片.jpg)\n\n![竖图](../assets/竖图.png)\n\n![坏](../assets/坏.png)\n\n![丢](../assets/丢.png)",
             )],
         );
-        assert_eq!(media_count(&bytes), 2);
+        assert_eq!(media_count(&bytes), 3);
         assert_eq!(
             report.missing_images,
             vec!["../assets/坏.png", "../assets/丢.png"]
@@ -758,6 +759,8 @@ mod tests {
         assert!(xml.contains(r#"cx="952500" cy="476250""#));
         // 宽图缩放到正文宽度（9026 twip × 635 = 5731510 EMU）。
         assert!(xml.contains(r#"cx="5731510" cy="2865755""#));
+        // 竖长图按高度上限（420 磅）缩小，不会超出页面：105×420 磅。
+        assert!(xml.contains(r#"cx="1333500" cy="5334000""#));
     }
 
     #[test]
