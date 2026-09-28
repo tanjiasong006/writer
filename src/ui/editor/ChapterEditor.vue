@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { EditorState } from '@codemirror/state'
+import type { EditorState, StateEffect } from '@codemirror/state'
 import { EditorView, drawSelection, keymap, placeholder } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
@@ -46,6 +46,8 @@ const emit = defineEmits<{
 const host = ref<HTMLElement | null>(null)
 let view: EditorView | null = null
 const states = new Map<ChapterId, EditorState>()
+/** 每个章节离开时的滚动位置；回到该章节时恢复，继续在原处写作。 */
+const scrolls = new Map<ChapterId, StateEffect<unknown>>()
 let currentId = props.chapterId
 /** 最近一次与编辑器同步的正文，用来区分"自己发出的修改"和外部修改。 */
 let lastText = props.content
@@ -125,9 +127,15 @@ watch(
     if (!view) return
     if (chapterId !== currentId) {
       states.set(currentId, view.state)
+      scrolls.set(currentId, view.scrollSnapshot())
       currentId = chapterId
       lastText = text
-      view.setState(stateFor(chapterId, text))
+      const next = stateFor(chapterId, text)
+      view.setState(next)
+      // 只有沿用了缓存状态（正文未被外部修改）时，保存的滚动位置才仍然对应同一份内容。
+      const scroll = scrolls.get(chapterId)
+      if (scroll && next === states.get(chapterId)) view.dispatch({ effects: scroll })
+      else view.scrollDOM.scrollTop = 0
       return
     }
     if (text === lastText) return

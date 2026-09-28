@@ -90,3 +90,11 @@ test('CRLF 正文编辑后发出的仍是 CRLF', () => {
   type(viewOf(wrapper), '三')
   expect(wrapper.emitted('change')).toEqual([['a', '一\r\n二三']])
 })
+
+test('切换到没有打开过的章节时从顶部开始', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '很长的正文\n'.repeat(200) })
+  const view = viewOf(wrapper)
+  view.scrollDOM.scrollTop = 500
+  await wrapper.setProps({ chapterId: 'b', content: 'B' })
+  expect(view.scrollDOM.scrollTop).toBe(0)
+})
