@@ -1,5 +1,10 @@
 import { expect, test } from 'vitest'
-import { resolveDropPosition } from './drop_target.ts'
+import {
+  AUTO_SCROLL_EDGE,
+  AUTO_SCROLL_MAX_STEP,
+  autoScrollStep,
+  resolveDropPosition,
+} from './drop_target.ts'
 
 // 目标行：top=100、height=30，四分边界在 107.5 与 122.5。
 const row = { top: 100, height: 30 }
@@ -56,4 +61,15 @@ test('不同行高按各自四分判定，边界随之移动', () => {
   expect(resolveDropPosition(20, tall)).toBe('inside')
   expect(resolveDropPosition(59.99, tall)).toBe('inside')
   expect(resolveDropPosition(60, tall)).toBe('after')
+})
+
+test('autoScrollStep：只在靠近上下边缘时滚动，越靠近越快', () => {
+  const container = { top: 100, height: 400 }
+  expect(autoScrollStep(300, container)).toBe(0)
+  expect(autoScrollStep(100 + AUTO_SCROLL_EDGE, container)).toBe(0)
+  expect(autoScrollStep(100, container)).toBe(-AUTO_SCROLL_MAX_STEP)
+  expect(autoScrollStep(500, container)).toBe(AUTO_SCROLL_MAX_STEP)
+  expect(autoScrollStep(130, container)).toBeLessThan(0)
+  expect(autoScrollStep(130, container)).toBeGreaterThan(autoScrollStep(110, container))
+  expect(autoScrollStep(480, container)).toBeGreaterThan(0)
 })

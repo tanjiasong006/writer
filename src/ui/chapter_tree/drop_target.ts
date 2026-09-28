@@ -22,3 +22,22 @@ export function resolveDropPosition(pointerY: number, row: DropTargetRow): DropP
   if (pointerY < row.top + row.height * 0.75) return 'inside'
   return 'after'
 }
+
+/** 拖拽时靠近滚动区域边缘多少像素开始自动滚动。 */
+export const AUTO_SCROLL_EDGE = 40
+/** 每次 dragover 最多滚动的像素（dragover 约每 50ms 触发一次）。 */
+export const AUTO_SCROLL_MAX_STEP = 16
+
+/**
+ * 拖拽自动滚动：指针距滚动区域上 / 下边缘不足 AUTO_SCROLL_EDGE 时返回滚动量（越靠近边缘越快），
+ * 向上为负；其余位置返回 0。container 与 pointerY 使用同一坐标系。
+ */
+export function autoScrollStep(pointerY: number, container: DropTargetRow): number {
+  const fromTop = pointerY - container.top
+  const fromBottom = container.top + container.height - pointerY
+  const speed = (distance: number) =>
+    Math.ceil(AUTO_SCROLL_MAX_STEP * (1 - Math.max(distance, 0) / AUTO_SCROLL_EDGE))
+  if (fromTop < AUTO_SCROLL_EDGE) return -speed(fromTop)
+  if (fromBottom < AUTO_SCROLL_EDGE) return speed(fromBottom)
+  return 0
+}

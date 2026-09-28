@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { findChapter, type ChapterId, type ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
-import { resolveDropPosition, type DropPosition } from './drop_target.ts'
+import { autoScrollStep, resolveDropPosition, type DropPosition } from './drop_target.ts'
 import {
   canMoveChapter,
   keyboardMoveIntent,
@@ -149,6 +149,27 @@ function startDrag(event: DragEvent, row: ChapterRow): void {
   dataTransfer.setDragImage(preview, 10, 16)
   // 浏览器已同步读取图像，下一帧移除即可。
   window.setTimeout(() => preview.remove(), 0)
+}
+
+/** 章节树所在的滚动区域（上层的侧栏）；找不到时为 null。 */
+function scrollContainer(): HTMLElement | null {
+  let node = listElement.value?.parentElement ?? null
+  while (node) {
+    const overflow = getComputedStyle(node).overflowY
+    if (overflow === 'auto' || overflow === 'scroll') return node
+    node = node.parentElement
+  }
+  return null
+}
+
+/** 拖拽到滚动区域上 / 下边缘附近时自动滚动，长章节树中也能把章节拖到很远的位置。 */
+function autoScroll(event: DragEvent): void {
+  if (draggingId.value === null) return
+  const container = scrollContainer()
+  if (!container) return
+  const rect = container.getBoundingClientRect()
+  const step = autoScrollStep(event.clientY, { top: rect.top, height: rect.height })
+  if (step !== 0) container.scrollTop += step
 }
 
 function updateDropTarget(event: DragEvent, chapterId: ChapterId): void {
@@ -463,7 +484,7 @@ const rows = computed<ChapterRow[]>(() => {
 </script>
 
 <template>
-  <div class="chapter-tree">
+  <div class="chapter-tree" @dragover="autoScroll">
     <div class="chapter-tree__header">
       <span class="chapter-tree__header-title">章节</span>
       <button
