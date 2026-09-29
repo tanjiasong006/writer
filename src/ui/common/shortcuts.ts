@@ -4,9 +4,10 @@
  * 菜单栏（app_menu.ts）、右键菜单、正文编辑器的按键表（editor/plugins.ts）、章节树的按键处理都从这里取值，
  * 菜单中显示的快捷键与实际响应的按键因此总是一致。
  *
- * 规则：Writer 自己定义的快捷键只用"⌘ + 一个键"（Windows / Linux：Ctrl + 一个键），不用两个及以上修饰键的组合；
- * 找不到自然、好记、不与 macOS 惯例冲突的单键时宁可不设快捷键，命令仍在菜单栏、右键菜单或工具栏中。
- * 例外只有组件规格规定的 F2（重命名章节）。系统菜单项（退出、隐藏、最小化、全屏……）的快捷键由系统提供。
+ * 规则：Writer 自己定义的快捷键只用"⌘ + 一个键"（Windows / Linux：Ctrl + 一个键），不用两个及以上修饰键的组合，
+ * 也不用单独的功能键。格式与插入命令（格式菜单、插入菜单中的每一项）都有快捷键；其余命令找不到自然、好记、
+ * 不与 macOS 惯例冲突的单键时宁可不设，命令仍在菜单栏、右键菜单或工具栏中。
+ * 系统菜单项（退出、隐藏、最小化、全屏……）的快捷键由系统提供。
  *
  * 快捷键以加速键描述保存（`CmdOrCtrl+B`，与系统菜单相同），显示时按平台换算：macOS 写成 ⌘B，其他平台写成 Ctrl+B。
  */
@@ -19,12 +20,22 @@ export const SHORTCUTS = {
   undo: 'CmdOrCtrl+Z',
   bold: 'CmdOrCtrl+B',
   italic: 'CmdOrCtrl+I',
+  /** 删除线（deleted）。 */
+  strike: 'CmdOrCtrl+D',
   inlineCode: 'CmdOrCtrl+E',
+  /** 段落结构用数字键：有序 / 无序列表沿用 Google 文档的 7 / 8，其后是引用、代码块。 */
+  orderedList: 'CmdOrCtrl+7',
+  bulletList: 'CmdOrCtrl+8',
+  quote: 'CmdOrCtrl+9',
+  codeBlock: 'CmdOrCtrl+0',
   /** 列表项增加 / 减少缩进（与 Pages、Word 的 ⌘] / ⌘[ 一致）。 */
   indent: 'CmdOrCtrl+]',
   outdent: 'CmdOrCtrl+[',
-  /** 组件规格规定（ui-spec §19）。 */
-  renameChapter: 'F2',
+  /** 文档样式（版式，Layout）。 */
+  documentStyle: 'CmdOrCtrl+L',
+  insertTable: 'CmdOrCtrl+T',
+  /** 插入图片（graphic）。 */
+  insertImage: 'CmdOrCtrl+G',
   /** 请求删除章节（访达"移到废纸篓"的按键）；总是先确认。只在章节树获得焦点时有效。 */
   deleteChapter: IS_MAC ? 'CmdOrCtrl+Backspace' : 'CmdOrCtrl+Delete',
 } as const

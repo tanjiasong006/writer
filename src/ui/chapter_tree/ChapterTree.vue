@@ -20,7 +20,7 @@ import { MOVE_LABELS } from '../app_shell/app_menu.ts'
  * 章节树组件。
  *
  * 负责：按 tree 渲染层级、选择、折叠/展开、拖拽落点反馈、Tree Header、
- * 节点菜单与右键菜单、F2 内联重命名、键盘导航与键盘移动、空状态。
+ * 节点菜单与右键菜单、内联重命名、键盘导航与键盘移动、空状态。
  *
  * 拖拽反馈除了 before / inside / after 的插入线与高亮，还显示松手后章节的新编号：
  * 编号由 Application 的 moveChapterTo 在当前树的副本上执行同一次移动得到，UI 不推算结构。
@@ -52,7 +52,7 @@ const emit = defineEmits<{
   'create-sibling': [chapterId: ChapterId]
   /** 在指定章节下新建子章节。 */
   'create-child': [chapterId: ChapterId]
-  /** 请求进入重命名编辑（F2 / 菜单）。 */
+  /** 请求进入重命名编辑（双击标题 / 菜单）。 */
   'start-rename': [chapterId: ChapterId]
   /** 内联重命名提交新标题。 */
   rename: [chapterId: ChapterId, title: string]
@@ -362,14 +362,6 @@ function toggle(chapterId: ChapterId): void {
   collapsedIds.value = next
 }
 
-/**
- * 点击标题：选中由行 click 冒泡处理，这里只对有子章节的节点补上展开/收起。
- * 双击是重命名：双击的第二次点击把第一次的展开/收起还原，树不因为双击而变化。
- */
-function toggleFromTitle(row: ChapterRow, event: MouseEvent): void {
-  if (row.hasChildren && event.detail <= 2) toggle(row.id)
-}
-
 function renameFromDoubleClick(row: ChapterRow): void {
   requestStartRename(row.id)
 }
@@ -432,7 +424,7 @@ function menuItems(chapterId: ChapterId): MenuEntry[] {
       disabled: !canMoveBy(chapterId, item.direction),
     })),
     { separator: true },
-    { id: 'rename', label: '重命名', shortcut: SHORTCUTS.renameChapter },
+    { id: 'rename', label: '重命名' },
     { id: 'delete', label: '删除', shortcut: SHORTCUTS.deleteChapter },
   ]
 }
@@ -537,7 +529,7 @@ function requestMove(chapterId: ChapterId, direction: KeyboardMoveDirection): vo
  * 树的键盘交互（ui-spec §29，WAI-ARIA tree 模式）：
  * ↑ / ↓ 选择上一 / 下一可见章节，Home / End 到首 / 末；
  * → 展开，已展开时进入第一个子章节；← 折叠，已折叠或无子章节时回到父章节；
- * Enter 进入正文；F2 重命名；⌘⌫ 请求删除（总是先确认）；Shift+F10 / 菜单键 打开节点菜单
+ * Enter 进入正文；⌘⌫ 请求删除（总是先确认）；Shift+F10 / 菜单键 打开节点菜单
  * （上移 / 下移 / 升级 / 降级在菜单中，没有快捷键）。快捷键来自 common/shortcuts.ts。
  * 单独的 Delete / Backspace 不删除章节，避免误删（ui-spec §29）。
  */
@@ -551,11 +543,6 @@ function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
   if (matchesShortcut(event, SHORTCUTS.deleteChapter)) {
     event.preventDefault()
     requestDelete(row.id)
-    return
-  }
-  if (matchesShortcut(event, SHORTCUTS.renameChapter)) {
-    event.preventDefault()
-    requestStartRename(row.id)
     return
   }
   if (event.altKey || event.shiftKey || event.metaKey || event.ctrlKey) return
@@ -808,7 +795,6 @@ defineExpose({
               class="chapter-tree__label"
               :data-chapter-id="row.id"
               :tabindex="row.id === tabbableId ? 0 : -1"
-              @click="toggleFromTitle(row, $event)"
               @dblclick="renameFromDoubleClick(row)"
               @focus="focusedId = row.id"
               @keydown="onLabelKeydown($event, row)"

@@ -228,7 +228,7 @@ export const DragBoundaries: Story = {
  * - ↑ / ↓ / Home / End：选择上一 / 下一 / 第一 / 最后一个可见章节。
  * - → / ←：展开 / 进入子章节；折叠 / 回到父章节。
  * - Alt+Shift+↑ / ↓：同级上移 / 下移；Alt+Shift+← / →：提升 / 降级；焦点跟随被移动的章节。
- * - F2 重命名；Delete 不删除章节。Tab 只停在当前行（整行蓝色描边为键盘焦点）。
+ * - Delete 不删除章节（重命名没有快捷键：双击标题或用章节菜单）。Tab 只停在当前行（整行蓝色描边为键盘焦点）。
  */
 export const KeyboardNavigation: Story = {
   args: { tree: nested, selectedId: 'sec-1-1' },

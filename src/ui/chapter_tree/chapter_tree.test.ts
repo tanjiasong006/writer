@@ -46,15 +46,15 @@ test('点击章节行触发 select，并携带该章节 id', async () => {
   expect(wrapper.emitted('select')).toEqual([['c'], ['e']])
 })
 
-test('点击章节标题展开/收起该章节', async () => {
+test('点击有子章节的标题只选中，不展开/收起', async () => {
   const wrapper = mountTree(outline)
   const labelA = wrapper.findAll('.chapter-tree__label')[0]
 
   await labelA.trigger('click')
-  expect(texts(wrapper)).toEqual(['1A', '2E'])
-
   await labelA.trigger('click')
+
   expect(texts(wrapper)).toEqual(['1A', '1.1B', '1.1.1C', '1.2D', '2E'])
+  expect(wrapper.emitted('select')).toEqual([['a'], ['a']])
 })
 
 test('点击叶子章节标题不改变显示，仍然触发 select', async () => {

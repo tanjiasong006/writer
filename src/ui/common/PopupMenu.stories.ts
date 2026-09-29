@@ -17,8 +17,8 @@ const items = [
   { id: 'up', label: '上移', shortcut: 'Alt+Shift+ArrowUp', disabled: true },
   { id: 'down', label: '下移', shortcut: 'Alt+Shift+ArrowDown' },
   { separator: true },
-  { id: 'rename', label: '重命名', shortcut: 'F2' },
-  { id: 'delete', label: '删除' },
+  { id: 'rename', label: '重命名' },
+  { id: 'delete', label: '删除', shortcut: 'CmdOrCtrl+Backspace' },
 ] as const
 
 /** 在按钮下方打开（右对齐）；指针经过的项高亮，含不可用项、分隔线与快捷键。 */

@@ -86,7 +86,7 @@ function shortcuts(menus: readonly AppMenu[]): Array<[string, string]> {
 }
 
 describe('快捷键', () => {
-  test('Writer 自己的快捷键只用一个修饰键（⌘ + 一个键），或规格规定的 F2', () => {
+  test('Writer 自己的快捷键只用"⌘ + 一个键"', () => {
     const all = [
       ...Object.values(SHORTCUTS),
       ...shortcuts(workspaceMenus(context())).map(([, shortcut]) => shortcut),
@@ -94,10 +94,23 @@ describe('快捷键', () => {
       ...shortcuts(welcomeMenus()).map(([, shortcut]) => shortcut),
     ]
     for (const shortcut of all) {
-      const modifiers = shortcut.split('+').slice(0, -1)
-      expect(modifiers.length <= 1, shortcut).toBe(true)
-      expect(modifiers.every((modifier) => modifier === 'CmdOrCtrl'), shortcut).toBe(true)
+      expect(shortcut.split('+').slice(0, -1), shortcut).toEqual(['CmdOrCtrl'])
     }
+  })
+
+  test('格式菜单与插入菜单中的每一项都有快捷键，且互不重复', () => {
+    const menus = workspaceMenus(context())
+    const entries = menus
+      .filter((menu) => menu.label === '格式' || menu.label === '插入')
+      .flatMap((menu) => menu.items)
+      .filter((entry): entry is Extract<MenuEntry, { id: string }> => !('separator' in entry) && !('role' in entry))
+    for (const entry of entries) expect(entry.shortcut, entry.id).toBeDefined()
+    const all = shortcuts(menus).map(([, shortcut]) => shortcut)
+    expect(new Set(all).size).toBe(all.length)
+  })
+
+  test('重命名章节没有快捷键', () => {
+    expect(item(workspaceMenus(context({ focus: 'tree' })), 'chapter:rename').shortcut).toBeUndefined()
   })
 
   test('菜单显示的快捷键都来自同一张快捷键表', () => {
@@ -125,8 +138,12 @@ describe('快捷键', () => {
     expect(menuItemForKey(inTree, key({ key: 'b', code: 'KeyB', ...mod }))).toBeNull()
     expect(menuItemForKey(inTree, key({ key: 's', code: 'KeyS', ...mod }))).toBe('file:save')
     expect(menuItemForKey(inTree, key({ ...deleteKey, ...mod }))).toBe('chapter:delete')
+    expect(menuItemForKey(inTree, key({ key: 't', code: 'KeyT', ...mod }))).toBeNull()
     const inEditor = workspaceMenus(context())
     expect(menuItemForKey(inEditor, key({ ...deleteKey, ...mod }))).toBeNull()
+    expect(menuItemForKey(inEditor, key({ key: 't', code: 'KeyT', ...mod }))).toBe('editor:table')
+    expect(menuItemForKey(inEditor, key({ key: '8', code: 'Digit8', ...mod }))).toBe('editor:bullet-list')
+    expect(menuItemForKey(inEditor, key({ key: 'l', code: 'KeyL', ...mod }))).toBe('format:style')
     const inInput = workspaceMenus(context({ focus: 'text-input' }))
     expect(menuItemForKey(inInput, key({ key: 'z', code: 'KeyZ', ...mod }))).toBeNull()
   })

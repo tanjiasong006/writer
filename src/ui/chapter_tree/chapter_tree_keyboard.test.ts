@@ -254,7 +254,7 @@ test('⌥⇧ 加方向键不再移动章节（上移 / 下移 / 升级 / 降级�
   expect(wrapper.emitted('update:tree')).toBeUndefined()
 })
 
-test('双击章节标题进入重命名；有子章节时展开状态不因双击改变', async () => {
+test('双击章节标题进入重命名；有子章节时展开状态不因点击改变', async () => {
   const wrapper = mountManager('a')
   const title = label(wrapper, 'a')
   await title.trigger('click', { detail: 1 })

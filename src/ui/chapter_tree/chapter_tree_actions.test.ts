@@ -159,11 +159,11 @@ test('双击标题不进入编辑，也不发出 start-rename', async () => {
   expect(wrapper.emitted('start-rename')).toBeUndefined()
 })
 
-test('F2 发出 start-rename', async () => {
+test('重命名没有快捷键：F2 不发出 start-rename', async () => {
   const wrapper = mountTree()
   const label = wrapper.findAll('.chapter-tree__row')[1].find('.chapter-tree__label')
   await label.trigger('keydown', { key: 'F2' })
-  expect(wrapper.emitted('start-rename')).toEqual([['b']])
+  expect(wrapper.emitted('start-rename')).toBeUndefined()
 })
 
 test('右键打开节点菜单，不改变选中章节，只标出菜单作用的行', async () => {

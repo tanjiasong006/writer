@@ -116,7 +116,7 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
         editorItem('indent'),
         editorItem('outdent'),
         { separator: true },
-        { id: 'format:style', label: '文档样式…' },
+        { id: 'format:style', label: '文档样式…', shortcut: SHORTCUTS.documentStyle },
       ],
     },
     {
@@ -129,7 +129,7 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
         { id: 'chapter:new', label: '新建章节' },
         { id: 'chapter:new-child', label: '新建子章节', disabled: !context.hasSelectedChapter },
         { separator: true },
-        { id: 'chapter:rename', label: '重命名章节', shortcut: SHORTCUTS.renameChapter, disabled: !context.hasSelectedChapter },
+        { id: 'chapter:rename', label: '重命名章节', disabled: !context.hasSelectedChapter },
         { separator: true },
         ...MOVE_LABELS.map(({ direction, label }) => ({
           id: `chapter:move-${direction}`,

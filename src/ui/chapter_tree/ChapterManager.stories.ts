@@ -63,10 +63,10 @@ async function clickMenu(root: HTMLElement, label: string): Promise<void> {
   await nextTick()
 }
 
-async function pressF2(root: HTMLElement, index: number): Promise<void> {
+async function doubleClickTitle(root: HTMLElement, index: number): Promise<void> {
   row(root, index)
     ?.querySelector<HTMLElement>('.chapter-tree__label')
-    ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }))
+    ?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
   await nextTick()
 }
 
@@ -106,11 +106,11 @@ export const CreateChild: Story = {
   },
 }
 
-/** F2 进入内联重命名。 */
+/** 双击标题进入内联重命名。 */
 export const RenameInline: Story = {
   args: { tree: nested, selectedId: 'sec-1-1' },
   play: async ({ canvasElement }) => {
-    await pressF2(canvasElement, 1)
+    await doubleClickTitle(canvasElement, 1)
   },
 }
 

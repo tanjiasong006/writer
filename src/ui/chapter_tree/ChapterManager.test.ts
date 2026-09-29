@@ -113,7 +113,7 @@ test('新建章节后输入标题按 Enter 直接进入正文；重命名已有�
   expect(rowTexts(wrapper)).toContain('3新的一章')
   expect(wrapper.emitted('open')).toHaveLength(1)
 
-  await rows(wrapper)[0].find('.chapter-tree__label').trigger('keydown', { key: 'F2' })
+  await rows(wrapper)[0].find('.chapter-tree__label').trigger('dblclick')
   await renameInput(wrapper).setValue('A 改')
   await renameInput(wrapper).trigger('keydown.enter')
   expect(rowTexts(wrapper)[0]).toBe('1A 改')
@@ -206,9 +206,9 @@ test('Esc 取消编辑，保留默认标题', async () => {
   expect(renameInput(wrapper).exists()).toBe(false)
 })
 
-test('F2 进入内联重命名并预填当前标题', async () => {
+test('双击标题进入内联重命名并预填当前标题', async () => {
   const wrapper = mountManager()
-  await rows(wrapper)[0].find('.chapter-tree__label').trigger('keydown', { key: 'F2' })
+  await rows(wrapper)[0].find('.chapter-tree__label').trigger('dblclick')
 
   expect(renameInput(wrapper).element.value).toBe('A')
   await renameInput(wrapper).setValue('A 改')
@@ -225,7 +225,7 @@ test('菜单重命名进入内联编辑', async () => {
 
 test('选择其他章节会取消正在进行的重命名', async () => {
   const wrapper = mountManager()
-  await rows(wrapper)[0].find('.chapter-tree__label').trigger('keydown', { key: 'F2' })
+  await rows(wrapper)[0].find('.chapter-tree__label').trigger('dblclick')
   expect(renameInput(wrapper).exists()).toBe(true)
 
   await rows(wrapper)[4].trigger('click') // b
