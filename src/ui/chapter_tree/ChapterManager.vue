@@ -63,6 +63,7 @@ const deletingId = ref<ChapterId | null>(null)
 const errorMessage = ref<string | null>(null)
 const confirmCancelButton = ref<HTMLButtonElement | null>(null)
 const confirmDialog = ref<HTMLElement | null>(null)
+const root = ref<HTMLElement | null>(null)
 const treeView = ref<InstanceType<typeof ChapterTree> | null>(null)
 
 const deleting = computed(() =>
@@ -147,13 +148,17 @@ function cancelRename(): void {
 }
 
 /**
- * 删除章节总是先确认（节点菜单、右键菜单、菜单栏、⌘⌫ 相同）：章节结构操作目前不能撤销，
- * 即使是空章节，直接删除也会丢掉标题与它在结构中的位置。确认的说明按章节内容给出。
- * 将来章节结构操作可以撤销后，再评估空章节是否可以直接删除（见 ui-spec §23）。
+ * 删除章节（节点菜单、右键菜单、菜单栏、⌘⌫ 相同，ui-spec §23）：没有正文也没有子章节时直接删除，
+ * 否则先确认，说明按章节内容给出。
  */
 function requestDelete(chapterId: ChapterId): void {
   clearError()
   editingId.value = null
+  if (countDescendants(tree.value, chapterId) === 0 && !chapterHasContent(chapterId)) {
+    deletingId.value = null
+    applyDelete(chapterId)
+    return
+  }
   deletingId.value = chapterId
   void focusConfirmCancel()
 }
@@ -167,6 +172,10 @@ async function focusConfirmCancel(): Promise<void> {
 function confirmDelete(): void {
   const id = deletingId.value
   if (id === null) return
+  applyDelete(id)
+}
+
+function applyDelete(id: ChapterId): void {
   const next = selectionAfterRemove(tree.value, id)
   const result = removeChapter(tree.value, id)
   if (!result.ok) {
@@ -183,6 +192,9 @@ function confirmDelete(): void {
   deletingId.value = null
   errorMessage.value = null
   // 焦点留在章节树中：落在删除后选中的章节上，可以继续用键盘操作。
+  // 从正文经菜单栏直接删除空章节时焦点不在这里，留在原处，不打断写作。
+  const active = document.activeElement
+  if (active !== null && active !== document.body && !root.value?.contains(active)) return
   const focusTarget = selectedId.value === id ? next : selectedId.value
   if (focusTarget !== null) void treeView.value?.focusRow(focusTarget)
 }
@@ -313,7 +325,7 @@ function messageForMove(reason: MoveReason): string {
 </script>
 
 <template>
-  <section class="chapter-manager">
+  <section ref="root" class="chapter-manager">
     <ChapterTree
       ref="treeView"
       v-model:collapsed-ids="collapsedIds"
@@ -355,8 +367,7 @@ function messageForMove(reason: MoveReason): string {
           <template v-else-if="deletingDescendantCount > 0">
             该章节包含 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
           </template>
-          <template v-else-if="deletingHasContent">该章节包含正文，删除后无法恢复。</template>
-          <template v-else>该章节没有正文，删除后无法恢复。</template>
+          <template v-else>该章节包含正文，删除后无法恢复。</template>
         </p>
         <div class="chapter-manager__confirm-actions">
           <button type="button" ref="confirmCancelButton" class="chapter-manager__button" tabindex="0" @click="cancelDelete">

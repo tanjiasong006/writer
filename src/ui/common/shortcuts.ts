@@ -55,7 +55,7 @@ export const SHORTCUTS = {
   moveChapterDown: 'CmdOrCtrl+ArrowDown',
   outdentChapter: 'CmdOrCtrl+ArrowLeft',
   indentChapter: 'CmdOrCtrl+ArrowRight',
-  /** 请求删除章节（访达"移到废纸篓"的按键）；总是先确认。只在章节树获得焦点时有效。 */
+  /** 请求删除章节（访达"移到废纸篓"的按键）；空章节直接删除，其余先确认。只在章节树获得焦点时有效。 */
   deleteChapter: IS_MAC ? 'CmdOrCtrl+Backspace' : 'CmdOrCtrl+Delete',
 } as const
 

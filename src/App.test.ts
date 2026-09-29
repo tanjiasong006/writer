@@ -218,17 +218,15 @@ test('保存失败：状态显示失败原因并可重试', async () => {
   expect(saveState(wrapper)).toBe('saved')
 })
 
-test('删除章节总是先确认：空白章节说明没有正文，有正文的章节说明包含正文', async () => {
+test('删除章节：空白章节直接删除，有正文的章节先确认并说明包含正文', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
 
   await wrapper.findAll('.chapter-tree__row')[1].find('.chapter-tree__more').trigger('click')
   await button(wrapper, '删除').trigger('click')
-  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('没有正文')
-  expect(rowTexts(wrapper)).toHaveLength(3)
-  await button(wrapper, '删除').trigger('click')
   await flushPromises()
+  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
   expect(rowTexts(wrapper)).toEqual(['1绪论', '2方法'])
 
   await wrapper.findAll('.chapter-tree__row')[1].find('.chapter-tree__more').trigger('click')

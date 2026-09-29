@@ -140,12 +140,9 @@ export const DeleteWithContent: Story = {
   },
 }
 
-/**
- * 删除空白叶子章节：没有子章节也没有正文，也先确认（章节结构操作目前不能撤销，ui-spec §23），
- * 说明写"该章节没有正文"。
- */
-export const DeleteBlankConfirm: Story = {
-  args: { tree: nested, selectedId: null, hasContent: () => false },
+/** 删除空白叶子章节：没有子章节也没有正文，直接删除，不显示确认（ui-spec §23）；焦点落在相邻章节。 */
+export const DeleteBlankDirect: Story = {
+  args: { tree: nested, selectedId: 'ch-2', hasContent: () => false },
   play: async ({ canvasElement }) => {
     await openMenu(canvasElement, 3)
     await clickMenu(canvasElement, '删除')

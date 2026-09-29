@@ -544,7 +544,7 @@ const rowCommands: ReadonlyArray<readonly [string, (chapterId: ChapterId) => voi
  * → 展开，已展开时进入第一个子章节；← 折叠，已折叠或无子章节时回到父章节；
  * h / j / k / l 等同 ← / ↓ / ↑ / →（vim 的移动键）；
  * Enter 进入正文；⌘N 在其后新建同级章节；⌘↩ 重命名；⌘↑ / ⌘↓ 上移 / 下移；⌘← / ⌘→ 升级 / 降级；
- * ⌘⌫ 请求删除（总是先确认）；Shift+F10 / 菜单键 打开节点菜单。快捷键来自 common/shortcuts.ts。
+ * ⌘⌫ 请求删除（空章节直接删除，其余先确认，ui-spec §23）；Shift+F10 / 菜单键 打开节点菜单。快捷键来自 common/shortcuts.ts。
  * 单独的 Delete / Backspace 不删除章节，避免误删（ui-spec §29）。
  */
 function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {

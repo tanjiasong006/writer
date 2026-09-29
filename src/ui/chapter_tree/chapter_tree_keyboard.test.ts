@@ -232,20 +232,27 @@ test('菜单中的移动项：边界处不可用，可用时与快捷键效果�
   expect(focusedId()).toBe('b')
 })
 
-test('⌘⌫（Windows：Ctrl+Delete）请求删除：空章节也先确认；单独的 Delete / Backspace 不删除', async () => {
+const MOD = IS_MAC ? { metaKey: true } : { ctrlKey: true }
+
+test('⌘⌫（Windows：Ctrl+Delete）删除：空章节直接删除，焦点落在相邻章节；单独的 Delete / Backspace 不删除', async () => {
   const wrapper = mountManager('b')
   await press(wrapper, 'b', 'Delete')
   await press(wrapper, 'b', 'Backspace')
-  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
   expect(visibleIds(wrapper)).toContain('b')
 
-  await press(wrapper, 'b', IS_MAC ? 'Backspace' : 'Delete', IS_MAC ? { metaKey: true } : { ctrlKey: true })
-  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('没有正文')
-  expect(visibleIds(wrapper)).toContain('b')
-  expect(document.activeElement?.textContent?.trim()).toBe('取消')
-  await wrapper.findAll('.chapter-manager__button').find((b) => b.text() === '删除')!.trigger('click')
+  await press(wrapper, 'b', IS_MAC ? 'Backspace' : 'Delete', MOD)
   await flushPromises()
+  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
   expect(visibleIds(wrapper)).not.toContain('b')
+  expect(focusedId()).toBe(selected(wrapper))
+})
+
+test('⌘⌫ 删除有子章节的章节：先确认，焦点在取消按钮', async () => {
+  const wrapper = mountManager('a')
+  await press(wrapper, 'a', IS_MAC ? 'Backspace' : 'Delete', MOD)
+  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('子章节')
+  expect(visibleIds(wrapper)).toContain('a')
+  expect(document.activeElement?.textContent?.trim()).toBe('取消')
 })
 
 test('⌥⇧ 加方向键不移动章节（修饰键必须恰好是 ⌘）', async () => {
@@ -253,8 +260,6 @@ test('⌥⇧ 加方向键不移动章节（修饰键必须恰好是 ⌘）', asy
   await press(wrapper, 'b', 'ArrowUp', { altKey: true, shiftKey: true })
   expect(wrapper.emitted('update:tree')).toBeUndefined()
 })
-
-const MOD = IS_MAC ? { metaKey: true } : { ctrlKey: true }
 
 test('⌘↑ / ⌘↓ 上移 / 下移，⌘→ / ⌘← 降级 / 升级：焦点留在被移动的章节', async () => {
   const wrapper = mountManager('b')

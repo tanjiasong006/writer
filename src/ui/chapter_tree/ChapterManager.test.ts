@@ -363,12 +363,38 @@ test('确认删除后焦点落在删除后选中的章节上', async () => {
 
 // --- 删除确认规则（ui-spec §23）---
 
-test('没有子章节也没有正文：同样先确认（章节结构操作目前不能撤销），说明没有正文', async () => {
-  const wrapper = mountManager(nested, null, () => false)
+test('没有子章节也没有正文：直接删除，不显示确认', async () => {
+  const wrapper = mountManager(nested, 'b', () => false)
   await openMenu(wrapper, 4) // b
   await menuItem(wrapper, '删除')
+  await flushPromises()
 
-  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('没有正文')
+  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
+  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X'])
+  const selected = wrapper.find('.chapter-tree__row--selected .chapter-tree__label')
+  expect(document.activeElement).toBe(selected.element)
+})
+
+test('焦点在章节树之外时直接删除空章节：焦点留在原处', async () => {
+  const wrapper = mountManager(nested, 'b', () => false)
+  const outside = document.createElement('textarea')
+  document.body.append(outside)
+  outside.focus()
+
+  ;(wrapper.vm as unknown as { deleteChapter: () => void }).deleteChapter()
+  await flushPromises()
+
+  expect(rowTexts(wrapper)).toHaveLength(4)
+  expect(document.activeElement).toBe(outside)
+  outside.remove()
+})
+
+test('空章节但有子章节：仍需确认', async () => {
+  const wrapper = mountManager(nested, null, () => false)
+  await openMenu(wrapper, 2) // a2
+  await menuItem(wrapper, '删除')
+
+  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('1 个子章节')
   expect(rowTexts(wrapper)).toHaveLength(5)
 })
 
