@@ -333,6 +333,23 @@ test('删除确认是模态的：Tab 只在两个按钮之间循环；取消后�
   expect(document.activeElement).toBe(wrapper.find('.chapter-tree__label[data-chapter-id="a"]').element)
 })
 
+test('删除确认打开时焦点被移出对话框（系统菜单关闭后还原焦点）：Tab 回到对话框，Esc 仍取消', async () => {
+  const wrapper = mountManager()
+  await openMenu(wrapper, 0)
+  await menuItem(wrapper, '删除')
+  await nextTick()
+
+  const label = wrapper.find<HTMLElement>('.chapter-tree__label[data-chapter-id="a"]')
+  label.element.focus()
+  await label.trigger('keydown', { key: 'Tab' })
+  expect(document.activeElement).toBe(button(wrapper, '取消').element)
+
+  label.element.focus()
+  await label.trigger('keydown', { key: 'Escape' })
+  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
+  expect(rowTexts(wrapper)).toContain('1A')
+})
+
 test('确认删除后焦点落在删除后选中的章节上', async () => {
   const wrapper = mountManager(nested, 'b')
   await openMenu(wrapper, 4) // b

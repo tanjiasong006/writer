@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import ChapterTree from './ChapterTree.vue'
 import Toast from '../common/Toast.vue'
 import {
@@ -194,7 +194,11 @@ function cancelDelete(): void {
   if (id !== null) void treeView.value?.focusRow(id)
 }
 
-/** 删除确认是模态对话框：Esc 取消，Tab 只在两个按钮之间循环。 */
+/**
+ * 删除确认是模态对话框：Esc 取消，Tab 只在两个按钮之间循环。
+ * 在 window 的捕获阶段处理，不依赖焦点仍在对话框中：系统菜单（节点菜单、菜单栏）关闭时 WebView 可能把焦点
+ * 还给原来的元素，这时按键也不能落到章节树、正文或全局快捷键上；Tab 把焦点带回对话框。
+ */
 function onConfirmKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') {
     event.preventDefault()
@@ -203,13 +207,24 @@ function onConfirmKeydown(event: KeyboardEvent): void {
     return
   }
   if (event.key !== 'Tab') return
+  event.preventDefault()
+  event.stopPropagation()
   const buttons = [...(confirmDialog.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
   if (buttons.length === 0) return
   const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  if (index === -1) {
+    buttons[0].focus()
+    return
+  }
   const next = event.shiftKey ? index - 1 : index + 1
-  event.preventDefault()
   buttons[(next + buttons.length) % buttons.length].focus()
 }
+
+watch(deletingId, (id, previous) => {
+  if (id !== null && previous === null) window.addEventListener('keydown', onConfirmKeydown, true)
+  else if (id === null) window.removeEventListener('keydown', onConfirmKeydown, true)
+})
+onBeforeUnmount(() => window.removeEventListener('keydown', onConfirmKeydown, true))
 
 function select(chapterId: ChapterId): void {
   // 重复点击当前章节不算切换上下文，保留未完成的编辑与删除确认。
@@ -329,7 +344,6 @@ function messageForMove(reason: MoveReason): string {
         aria-modal="true"
         aria-labelledby="chapter-manager-confirm-title"
         aria-describedby="chapter-manager-confirm-text"
-        @keydown="onConfirmKeydown"
       >
         <h2 id="chapter-manager-confirm-title" class="chapter-manager__confirm-title">
           删除「{{ deletingTitle || '选中的章节' }}」？
@@ -460,6 +474,16 @@ function messageForMove(reason: MoveReason): string {
 
 .chapter-manager__button:hover {
   background: var(--color-fill-pressed);
+}
+
+/*
+ * 对话框中焦点所在的按钮总是标出：Enter / Space 作用于它，必须一眼看出是"取消"还是"删除"。
+ * 不用 :focus-visible——WebKit 对脚本设置的按钮焦点不匹配它，打开对话框时看不出焦点在哪。
+ * 描边留出间距，落在对话框底色上，红色按钮上也清楚。
+ */
+.chapter-manager__button:focus {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
 
 .chapter-manager__button--danger {
