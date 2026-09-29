@@ -350,6 +350,22 @@ async function openStylePanel(): Promise<void> {
   stylePanel.value?.focus({ preventScroll: true })
 }
 
+/**
+ * 点击面板以外的地方关闭面板（"样式"按钮自己切换）。不用覆盖整个窗口的透明遮罩：
+ * 面板打开时正文仍可以滚动，一边看效果一边调整；点击也照常作用于点到的地方（如在正文中放置光标）。
+ */
+function closeStylePanelOnOutsidePointer(event: PointerEvent): void {
+  const target = event.target as globalThis.Node | null
+  if (target && (stylePanel.value?.contains(target) || styleButton.value?.contains(target))) return
+  closeStylePanel()
+}
+
+watch(stylePanelOpen, (open) => {
+  if (open) globalThis.document.addEventListener('pointerdown', closeStylePanelOnOutsidePointer, true)
+  else globalThis.document.removeEventListener('pointerdown', closeStylePanelOnOutsidePointer, true)
+})
+onBeforeUnmount(() => globalThis.document.removeEventListener('pointerdown', closeStylePanelOnOutsidePointer, true))
+
 function toggleStylePanel(): void {
   if (stylePanelOpen.value) closeStylePanel()
   else void openStylePanel()
@@ -788,7 +804,6 @@ async function createFirstChapter(): Promise<void> {
             >
               <Icon name="style" />
             </button>
-            <div v-if="stylePanelOpen" class="workspace__backdrop" @click="closeStylePanel()"></div>
             <div
               v-if="stylePanelOpen"
               ref="stylePanel"

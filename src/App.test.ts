@@ -1051,3 +1051,32 @@ test('从菜单栏打开文档样式（网页中暂时没有焦点）后按 Esc�
   expect(wrapper.find('.workspace__popover').exists()).toBe(false)
   expect(view.hasFocus()).toBe(true)
 })
+
+test('文档样式面板打开时正文仍可滚动（没有覆盖窗口的遮罩）；点击面板以外的地方关闭，点击面板内不关闭', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  const pointerdown = (element: Element) =>
+    element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }))
+
+  await button(wrapper, '文档样式').trigger('click')
+  expect(wrapper.find('.workspace__popover').exists()).toBe(true)
+  expect(wrapper.find('.workspace__backdrop').exists()).toBe(false)
+
+  pointerdown(wrapper.find('[aria-label="正文字体"] button').element)
+  await flushPromises()
+  expect(wrapper.find('.workspace__popover').exists()).toBe(true)
+
+  // 按"样式"按钮由按钮自己切换：按下时不关闭，点击后关闭（不会先关后开）。
+  pointerdown(button(wrapper, '文档样式').element)
+  await flushPromises()
+  expect(wrapper.find('.workspace__popover').exists()).toBe(true)
+  await button(wrapper, '文档样式').trigger('click')
+  expect(wrapper.find('.workspace__popover').exists()).toBe(false)
+
+  await button(wrapper, '文档样式').trigger('click')
+  pointerdown(wrapper.find('.chapter-editor__scroller').element)
+  await flushPromises()
+  expect(wrapper.find('.workspace__popover').exists()).toBe(false)
+})
