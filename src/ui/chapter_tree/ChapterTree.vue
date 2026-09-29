@@ -415,16 +415,17 @@ function closeMenu(): void {
 
 function menuItems(chapterId: ChapterId): MenuEntry[] {
   return [
-    { id: 'create-sibling', label: '新建同级章节' },
+    { id: 'create-sibling', label: '新建同级章节', shortcut: SHORTCUTS.newChapter },
     { id: 'create-child', label: '新建子章节' },
     { separator: true },
     ...MOVE_LABELS.map((item) => ({
       id: `move-${item.direction}`,
       label: item.label,
+      shortcut: item.shortcut,
       disabled: !canMoveBy(chapterId, item.direction),
     })),
     { separator: true },
-    { id: 'rename', label: '重命名' },
+    { id: 'rename', label: '重命名', shortcut: SHORTCUTS.renameChapter },
     { id: 'delete', label: '删除', shortcut: SHORTCUTS.deleteChapter },
   ]
 }
@@ -525,12 +526,27 @@ function requestMove(chapterId: ChapterId, direction: KeyboardMoveDirection): vo
   void focusRow(chapterId)
 }
 
+/** vim 的移动键：在章节树中等同方向键。 */
+const VIM_KEYS: Readonly<Record<string, string>> = { h: 'ArrowLeft', j: 'ArrowDown', k: 'ArrowUp', l: 'ArrowRight' }
+
+/** 章节行上的快捷键 → 作用于该行的操作（与节点菜单、菜单栏相同）。 */
+const rowCommands: ReadonlyArray<readonly [string, (chapterId: ChapterId) => void]> = [
+  [SHORTCUTS.newChapter, requestCreateSibling],
+  [SHORTCUTS.renameChapter, requestStartRename],
+  [SHORTCUTS.moveChapterUp, (id) => requestMove(id, 'up')],
+  [SHORTCUTS.moveChapterDown, (id) => requestMove(id, 'down')],
+  [SHORTCUTS.outdentChapter, (id) => requestMove(id, 'outdent')],
+  [SHORTCUTS.indentChapter, (id) => requestMove(id, 'indent')],
+  [SHORTCUTS.deleteChapter, requestDelete],
+]
+
 /**
  * 树的键盘交互（ui-spec §29，WAI-ARIA tree 模式）：
  * ↑ / ↓ 选择上一 / 下一可见章节，Home / End 到首 / 末；
  * → 展开，已展开时进入第一个子章节；← 折叠，已折叠或无子章节时回到父章节；
- * Enter 进入正文；⌘⌫ 请求删除（总是先确认）；Shift+F10 / 菜单键 打开节点菜单
- * （上移 / 下移 / 升级 / 降级在菜单中，没有快捷键）。快捷键来自 common/shortcuts.ts。
+ * h / j / k / l 等同 ← / ↓ / ↑ / →（vim 的移动键）；
+ * Enter 进入正文；⌘N 在其后新建同级章节；⌘↩ 重命名；⌘↑ / ⌘↓ 上移 / 下移；⌘← / ⌘→ 升级 / 降级；
+ * ⌘⌫ 请求删除（总是先确认）；Shift+F10 / 菜单键 打开节点菜单。快捷键来自 common/shortcuts.ts。
  * 单独的 Delete / Backspace 不删除章节，避免误删（ui-spec §29）。
  */
 function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
@@ -540,9 +556,10 @@ function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
     openMenuFromKeyboard(row, event.currentTarget as HTMLElement)
     return
   }
-  if (matchesShortcut(event, SHORTCUTS.deleteChapter)) {
+  const command = rowCommands.find(([shortcut]) => matchesShortcut(event, shortcut))
+  if (command) {
     event.preventDefault()
-    requestDelete(row.id)
+    command[1](row.id)
     return
   }
   if (event.altKey || event.shiftKey || event.metaKey || event.ctrlKey) return
@@ -551,7 +568,7 @@ function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
   const expanded = row.hasChildren && !collapsedIds.value.has(row.id)
   let target: ChapterId | null = null
 
-  switch (event.key) {
+  switch (VIM_KEYS[event.key] ?? event.key) {
     case 'ArrowUp':
       target = rows.value[index - 1]?.id ?? null
       break
@@ -689,9 +706,28 @@ function numberStyle(row: ChapterRow): { minWidth: string } {
   return { minWidth: `calc(${numberDigits.value.get(siblingKey(row.number)) ?? 0}ch + ${row.depth} * 0.3em)` }
 }
 
+const emptyAction = ref<HTMLButtonElement | null>(null)
+
+/**
+ * 从别处（正文、⌘J）进入章节树：焦点放到可 Tab 聚焦的行（通常是当前章节，祖先已展开），
+ * 并滚动到可见处；没有章节时放到"新建第一个章节"。
+ */
+async function focusCurrent(): Promise<void> {
+  const id = tabbableId.value
+  if (id === null) {
+    emptyAction.value?.focus()
+    return
+  }
+  await focusRow(id)
+  listElement.value
+    ?.querySelector<HTMLElement>(`.chapter-tree__label[data-chapter-id="${CSS.escape(id)}"]`)
+    ?.scrollIntoView?.({ block: 'nearest' })
+}
+
 defineExpose({
   /** 把键盘焦点放到某个章节行（如删除确认关闭后）。 */
   focusRow,
+  focusCurrent,
   /** 上移 / 下移 / 升级 / 降级（菜单栏）：与快捷键相同，移动后焦点留在该章节。 */
   moveChapter: requestMove,
 })
@@ -822,7 +858,13 @@ defineExpose({
 
       <div v-if="tree.length === 0" class="chapter-tree__empty">
         <p class="chapter-tree__empty-text">暂无章节</p>
-        <button type="button" class="chapter-tree__empty-action" tabindex="0" @click="requestCreateRoot">
+        <button
+          ref="emptyAction"
+          type="button"
+          class="chapter-tree__empty-action"
+          tabindex="0"
+          @click="requestCreateRoot"
+        >
           <Icon name="plus" />
           新建第一个章节
         </button>
@@ -957,6 +999,18 @@ defineExpose({
 
 .chapter-tree__row--selected .chapter-tree__number {
   color: var(--color-text-secondary);
+}
+
+/*
+ * 章节树没有获得焦点（在正文中写作）时，选中行改为灰色（macOS 侧栏的"非活动"选中）：
+ * 仍然一眼看出当前章节，同时说明键盘不在这里。焦点回到树中时恢复强调色。
+ */
+.chapter-tree__list:not(:focus-within) .chapter-tree__row--selected {
+  background: var(--color-fill-pressed);
+}
+
+.chapter-tree__list:not(:focus-within) .chapter-tree__row--selected::before {
+  background: var(--color-text-tertiary);
 }
 
 /* 键盘焦点：整行内描边，与选中态（底色 + 强调条）区分（§30）。 */

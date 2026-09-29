@@ -9,8 +9,10 @@ import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
  * 菜单栏在 macOS 上由系统显示，没有系统菜单栏时工作区按同一份菜单响应快捷键（menuItemForKey）。
  *
  * 可用状态按"当前焦点"决定，与 macOS 的响应链一致：格式命令只在正文获得焦点时可用，
- * 移动与删除章节只在章节树获得焦点时可用。于是同一个按键在不同位置不会有两种含义
+ * 移动与删除章节只在章节树获得焦点时可用。于是同一个按键在同一时刻只有一种含义
  * （例如 ⌘⌫ 在正文中删除到行首，在章节树中请求删除章节）。
+ * ⌘N 在章节树中是新建章节、其他位置是新建文档：系统菜单栏总是先于网页响应快捷键，
+ * 所以 ⌘N 只标在当前有效的那一项上（随焦点移动）。
  */
 
 /** 键盘焦点所在的区域。text-input 是普通输入框（重命名章节、文档名）。 */
@@ -28,14 +30,16 @@ export interface AppMenuContext {
   readonly exporting: boolean
 }
 
-/**
- * 上移 / 下移 / 升级 / 降级没有自然的"⌘ + 单键"，不设快捷键：用章节菜单或章节的右键菜单（键盘：Shift+F10）。
- */
-export const MOVE_LABELS: ReadonlyArray<{ readonly direction: KeyboardMoveDirection; readonly label: string }> = [
-  { direction: 'up', label: '上移' },
-  { direction: 'down', label: '下移' },
-  { direction: 'outdent', label: '升级' },
-  { direction: 'indent', label: '降级' },
+/** 上移 / 下移 / 升级 / 降级：只在章节树获得焦点时可用（快捷键在正文中另有含义）。 */
+export const MOVE_LABELS: ReadonlyArray<{
+  readonly direction: KeyboardMoveDirection
+  readonly label: string
+  readonly shortcut: string
+}> = [
+  { direction: 'up', label: '上移', shortcut: SHORTCUTS.moveChapterUp },
+  { direction: 'down', label: '下移', shortcut: SHORTCUTS.moveChapterDown },
+  { direction: 'outdent', label: '升级', shortcut: SHORTCUTS.outdentChapter },
+  { direction: 'indent', label: '降级', shortcut: SHORTCUTS.indentChapter },
 ]
 
 /** 欢迎页（没有打开文档）时的菜单栏。 */
@@ -75,7 +79,7 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
     {
       label: '文件',
       items: [
-        { id: 'file:new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
+        { id: 'file:new', label: '新建文档…', shortcut: inTree ? undefined : SHORTCUTS.newDocument },
         { id: 'file:open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
         { separator: true },
         { role: 'close-window' },
@@ -126,14 +130,21 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
     {
       label: '章节',
       items: [
-        { id: 'chapter:new', label: '新建章节' },
+        // 新建与重命名在任何位置都可以从菜单执行，快捷键只在章节树中（正文中 ⌘↩ 是编辑器自己的按键）。
+        { id: 'chapter:new', label: '新建章节', shortcut: inTree ? SHORTCUTS.newChapter : undefined },
         { id: 'chapter:new-child', label: '新建子章节', disabled: !context.hasSelectedChapter },
         { separator: true },
-        { id: 'chapter:rename', label: '重命名章节', disabled: !context.hasSelectedChapter },
+        {
+          id: 'chapter:rename',
+          label: '重命名章节',
+          shortcut: inTree ? SHORTCUTS.renameChapter : undefined,
+          disabled: !context.hasSelectedChapter,
+        },
         { separator: true },
-        ...MOVE_LABELS.map(({ direction, label }) => ({
+        ...MOVE_LABELS.map(({ direction, label, shortcut }) => ({
           id: `chapter:move-${direction}`,
           label,
+          shortcut,
           disabled: !(inTree && context.moves[direction]),
         })),
         { separator: true },
@@ -154,6 +165,14 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
           label: context.sidebarVisible ? '隐藏侧栏' : '显示侧栏',
           shortcut: SHORTCUTS.toggleSidebar,
         },
+        // 在章节树与正文之间切换；名称说明这次按下会去哪里。输入框（重命名）中不可用，先确认或放弃输入。
+        {
+          id: 'view:switch-focus',
+          label: inTree ? '转到正文' : '转到章节树',
+          shortcut: SHORTCUTS.switchFocus,
+          disabled: focus === 'text-input',
+        },
+        { separator: true },
         { id: 'view:preview', label: '全文预览', checked: mode === 'preview' },
       ],
     },

@@ -1103,3 +1103,74 @@ test('文档样式面板打开时正文仍可滚动（没有覆盖窗口的遮�
   await flushPromises()
   expect(wrapper.find('.workspace__popover').exists()).toBe(false)
 })
+
+/** 在正文中按键：经过编辑器（ProseMirror）再冒泡到工作区。 */
+function pressInEditor(wrapper: VueWrapper, init: KeyboardEventInit): KeyboardEvent {
+  const view = editorView(wrapper)
+  view.focus()
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+  view.dom.dispatchEvent(event)
+  return event
+}
+
+function focusedChapter(): string | undefined {
+  return (document.activeElement as HTMLElement | null)?.dataset.chapterId
+}
+
+test('⌘J 在正文与章节树之间切换：进入树时焦点在当前章节；侧栏隐藏时先显示', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.enableAppMenu()
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  const label = (id: string) => wrapper.find(`.chapter-tree__label[data-chapter-id="${id}"]`)
+  await label('a').trigger('keydown', { key: 'End' })
+  await flushPromises()
+
+  pressInEditor(wrapper, { key: 'j', code: 'KeyJ', ...MOD })
+  await flushPromises()
+  expect(focusedChapter()).toBe('b')
+  expect(appMenuItem(services, 'view:switch-focus').label).toBe('转到正文')
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', ...MOD }))
+  await flushPromises()
+  expect(editorView(wrapper).hasFocus()).toBe(true)
+  expect(appMenuItem(services, 'view:switch-focus').label).toBe('转到章节树')
+
+  services.shell.chooseMenuItem('view:sidebar')
+  await flushPromises()
+  expect(wrapper.find('.workspace__sidebar').isVisible()).toBe(false)
+  services.shell.chooseMenuItem('view:switch-focus')
+  await flushPromises()
+  expect(wrapper.find('.workspace__sidebar').isVisible()).toBe(true)
+  expect(focusedChapter()).toBe('b')
+})
+
+test('章节树中 ⌘N 新建章节、⌘↩ 重命名；正文中 ⌘N 仍是新建文档，⌘↩ 不作用于章节', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  const label = (id: string) => wrapper.find(`.chapter-tree__label[data-chapter-id="${id}"]`)
+
+  pressInEditor(wrapper, { key: 'Enter', code: 'Enter', ...MOD })
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__rename-input').exists()).toBe(false)
+  const newDocument = pressInEditor(wrapper, { key: 'n', code: 'KeyN', ...MOD })
+  await flushPromises()
+  expect(newDocument.defaultPrevented).toBe(true)
+  expect(rowTexts(wrapper)).toEqual(['1绪论', '1.1背景', '2方法'])
+
+  await label('a').trigger('keydown', { key: 'n', code: 'KeyN', ...MOD })
+  await flushPromises()
+  const input = wrapper.find<HTMLInputElement>('.chapter-tree__rename-input')
+  await input.setValue('结论')
+  await input.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(rowTexts(wrapper)).toEqual(['1绪论', '1.1背景', '2结论', '3方法'])
+  expect(editorView(wrapper).hasFocus()).toBe(true)
+
+  await label('b').trigger('keydown', { key: 'Enter', code: 'Enter', ...MOD })
+  await flushPromises()
+  expect(wrapper.find<HTMLInputElement>('.chapter-tree__rename-input').element.value).toBe('方法')
+})

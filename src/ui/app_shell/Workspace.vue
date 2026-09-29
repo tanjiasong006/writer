@@ -287,6 +287,19 @@ async function openChapter(): Promise<void> {
   editor.value?.focus()
 }
 
+/** 进入章节树（⌘J）：侧栏隐藏时先显示，焦点落在当前章节上。 */
+async function focusTree(): Promise<void> {
+  if (!sidebarVisible.value) await setSidebarVisible(true)
+  await nextTick()
+  chapters.value?.focusCurrent()
+}
+
+/** ⌘J：在章节树与正文之间切换；焦点在其他位置（工具栏、预览）时进入章节树。 */
+function switchFocus(): void {
+  if (focusRegion.value === 'tree') void openChapter()
+  else void focusTree()
+}
+
 function chapterHasContent(chapterId: ChapterId): boolean {
   return hasContent(document.value, chapterId)
 }
@@ -614,6 +627,9 @@ async function runMenuItem(id: string): Promise<void> {
       return
     case 'view:preview':
       togglePreview()
+      return
+    case 'view:switch-focus':
+      switchFocus()
       return
   }
   if (group !== 'chapter') return

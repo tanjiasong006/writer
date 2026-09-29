@@ -98,19 +98,53 @@ describe('快捷键', () => {
     }
   })
 
-  test('格式菜单与插入菜单中的每一项都有快捷键，且互不重复', () => {
-    const menus = workspaceMenus(context())
-    const entries = menus
+  test('格式菜单与插入菜单中的每一项都有快捷键', () => {
+    const entries = workspaceMenus(context())
       .filter((menu) => menu.label === '格式' || menu.label === '插入')
       .flatMap((menu) => menu.items)
       .filter((entry): entry is Extract<MenuEntry, { id: string }> => !('separator' in entry) && !('role' in entry))
     for (const entry of entries) expect(entry.shortcut, entry.id).toBeDefined()
-    const all = shortcuts(menus).map(([, shortcut]) => shortcut)
-    expect(new Set(all).size).toBe(all.length)
   })
 
-  test('重命名章节没有快捷键', () => {
-    expect(item(workspaceMenus(context({ focus: 'tree' })), 'chapter:rename').shortcut).toBeUndefined()
+  test('同一时刻可用的快捷键互不重复（⌘N 在章节树中是新建章节，其他位置是新建文档）', () => {
+    for (const focus of ['editor', 'tree', 'other'] as const) {
+      const all = shortcuts(workspaceMenus(context({ focus })).map((menu) => ({
+        ...menu,
+        items: menu.items.filter((entry) => 'separator' in entry || 'role' in entry || !entry.disabled),
+      }))).map(([, shortcut]) => shortcut)
+      expect(new Set(all).size, focus).toBe(all.length)
+    }
+  })
+
+  test('章节操作的快捷键只在章节树中有效；正文中这些键保持编辑器与文件菜单的含义', () => {
+    const mod = IS_MAC ? { metaKey: true } : { ctrlKey: true }
+    const keys = {
+      new: key({ key: 'n', code: 'KeyN', ...mod }),
+      rename: key({ key: 'Enter', code: 'Enter', ...mod }),
+      up: key({ key: 'ArrowUp', code: 'ArrowUp', ...mod }),
+      indent: key({ key: 'ArrowRight', code: 'ArrowRight', ...mod }),
+    }
+    const inTree = workspaceMenus(context({ focus: 'tree' }))
+    expect(menuItemForKey(inTree, keys.new)).toBe('chapter:new')
+    expect(menuItemForKey(inTree, keys.rename)).toBe('chapter:rename')
+    expect(menuItemForKey(inTree, keys.up)).toBe('chapter:move-up')
+    expect(menuItemForKey(inTree, keys.indent)).toBe('chapter:move-indent')
+    expect(item(inTree, 'file:new').shortcut).toBeUndefined()
+
+    const inEditor = workspaceMenus(context())
+    expect(menuItemForKey(inEditor, keys.new)).toBe('file:new')
+    expect(menuItemForKey(inEditor, keys.rename)).toBeNull()
+    expect(menuItemForKey(inEditor, keys.up)).toBeNull()
+    expect(menuItemForKey(inEditor, keys.indent)).toBeNull()
+    // 菜单项本身仍可点击。
+    expect(item(inEditor, 'chapter:new').disabled).toBeUndefined()
+    expect(item(inEditor, 'chapter:rename').disabled).toBe(false)
+  })
+
+  test('⌘J 在章节树与正文之间切换：名称说明去向；输入框中不可用', () => {
+    expect(item(workspaceMenus(context()), 'view:switch-focus').label).toBe('转到章节树')
+    expect(item(workspaceMenus(context({ focus: 'tree' })), 'view:switch-focus').label).toBe('转到正文')
+    expect(item(workspaceMenus(context({ focus: 'text-input' })), 'view:switch-focus').disabled).toBe(true)
   })
 
   test('菜单显示的快捷键都来自同一张快捷键表', () => {

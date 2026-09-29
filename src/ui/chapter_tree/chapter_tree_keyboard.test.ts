@@ -248,10 +248,58 @@ test('⌘⌫（Windows：Ctrl+Delete）请求删除：空章节也先确认；�
   expect(visibleIds(wrapper)).not.toContain('b')
 })
 
-test('⌥⇧ 加方向键不再移动章节（上移 / 下移 / 升级 / 降级只在菜单中）', async () => {
+test('⌥⇧ 加方向键不移动章节（修饰键必须恰好是 ⌘）', async () => {
   const wrapper = mountManager('b')
   await press(wrapper, 'b', 'ArrowUp', { altKey: true, shiftKey: true })
   expect(wrapper.emitted('update:tree')).toBeUndefined()
+})
+
+const MOD = IS_MAC ? { metaKey: true } : { ctrlKey: true }
+
+test('⌘↑ / ⌘↓ 上移 / 下移，⌘→ / ⌘← 降级 / 升级：焦点留在被移动的章节', async () => {
+  const wrapper = mountManager('b')
+  await press(wrapper, 'b', 'ArrowUp', MOD)
+  expect(currentTree(wrapper).map((node) => node.id)).toEqual(['b', 'a'])
+  expect(focusedId()).toBe('b')
+
+  await press(wrapper, 'b', 'ArrowDown', MOD)
+  expect(currentTree(wrapper).map((node) => node.id)).toEqual(['a', 'b'])
+
+  await press(wrapper, 'b', 'ArrowRight', MOD)
+  expect(currentTree(wrapper)[0].children.map((node) => node.id)).toEqual(['a1', 'a2', 'b'])
+  expect(focusedId()).toBe('b')
+
+  await press(wrapper, 'b', 'ArrowLeft', MOD)
+  expect(currentTree(wrapper).map((node) => node.id)).toEqual(['a', 'b'])
+  expect(selected(wrapper)).toBe('b')
+})
+
+test('⌘N 在焦点章节之后新建同级章节并进入标题编辑；Enter 确认后发出 open', async () => {
+  const wrapper = mountManager('a1')
+  await press(wrapper, 'a1', 'n', MOD)
+  const siblings = currentTree(wrapper)[0].children
+  expect(siblings).toHaveLength(3)
+  const created = siblings[1]
+  expect(selected(wrapper)).toBe(created.id)
+  const input = wrapper.find<HTMLInputElement>('.chapter-tree__rename-input')
+  expect(document.activeElement).toBe(input.element)
+  await input.setValue('方法')
+  await input.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(currentTree(wrapper)[0].children[1].title).toBe('方法')
+  expect(wrapper.emitted('open')).toEqual([[created.id]])
+})
+
+test('⌘↩ 重命名焦点章节（单独的 Enter 仍是进入正文）；Esc 放弃后焦点回到该行', async () => {
+  const wrapper = mountManager('b')
+  await press(wrapper, 'b', 'Enter', MOD)
+  expect(wrapper.emitted('open')).toBeUndefined()
+  const input = wrapper.find<HTMLInputElement>('.chapter-tree__rename-input')
+  expect(input.element.value).toBe('B')
+  await input.trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__rename-input').exists()).toBe(false)
+  expect(focusedId()).toBe('b')
 })
 
 test('双击章节标题进入重命名；有子章节时展开状态不因点击改变', async () => {
@@ -264,4 +312,24 @@ test('双击章节标题进入重命名；有子章节时展开状态不因点�
   // 正在重命名的 A 显示为输入框；它的子章节仍然展开。
   expect(visibleIds(wrapper)).toEqual(['a1', 'a2', 'a2x', 'b'])
   expect(wrapper.find<HTMLInputElement>('.chapter-tree__rename-input').element.value).toBe('A')
+})
+
+test('h / j / k / l 等同 ← / ↓ / ↑ / →；带修饰键时不移动', async () => {
+  const wrapper = mountManager('a')
+  await press(wrapper, 'a', 'j')
+  expect(selected(wrapper)).toBe('a1')
+  await press(wrapper, 'a1', 'k')
+  expect(selected(wrapper)).toBe('a')
+  await press(wrapper, 'a', 'h')
+  expect(visibleIds(wrapper)).toEqual(['a', 'b'])
+  await press(wrapper, 'a', 'l')
+  expect(visibleIds(wrapper)).toContain('a1')
+  await press(wrapper, 'a', 'l')
+  expect(selected(wrapper)).toBe('a1')
+  expect(focusedId()).toBe('a1')
+  await press(wrapper, 'a1', 'h')
+  expect(selected(wrapper)).toBe('a')
+
+  await press(wrapper, 'a', 'j', { shiftKey: true })
+  expect(selected(wrapper)).toBe('a')
 })

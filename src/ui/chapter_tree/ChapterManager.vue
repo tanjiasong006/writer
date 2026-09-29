@@ -247,8 +247,8 @@ defineExpose({
     selectedId.value !== null && treeView.value?.moveChapter(selectedId.value, direction),
   canMove: (direction: KeyboardMoveDirection) =>
     selectedId.value !== null && keyboardMoveIntent(tree.value, selectedId.value, direction) !== null,
-  /** 把键盘焦点放到选中章节（没有选中时不动）。 */
-  focusSelected: () => selectedId.value !== null && treeView.value?.focusRow(selectedId.value),
+  /** 从别处（正文、⌘J）进入章节树；删除确认打开时焦点留在对话框中。 */
+  focusCurrent: () => deletingId.value === null && treeView.value?.focusCurrent(),
 })
 
 /** Domain 只给机器可读 reason，面向用户的中文文案由 UI 层负责。 */
