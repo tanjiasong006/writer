@@ -37,7 +37,7 @@ import { figureEditing, newParagraphAtBlock, selectFigureBackward, selectFigureF
  *
  * 键盘写作的原则：任何结构（列表、引用、代码块、表格、图片）都能只用键盘进入和离开；
  * 写作中的 Tab / Shift+Tab 由编辑器处理，不会把焦点移出正文（否则之后输入的文字无处可去）；
- * 要用键盘离开正文时先按 Esc 再按 Tab / Shift+Tab（见 tabAfterEscape）。
+ * 先按 Esc 再按 Tab / Shift+Tab 时编辑器不处理这次 Tab（见 tabAfterEscape）；回到章节树用 ⌘J。
  */
 
 const insertHardBreak: Command = (state, dispatch) => {
@@ -121,7 +121,7 @@ const afterEscape = new WeakMap<EditorView, boolean>()
 
 /**
  * 键盘用户离开正文的方式（与 CodeMirror 等编辑器相同）：先按 Esc，再按 Tab / Shift+Tab，
- * 编辑器不处理这次 Tab，焦点按浏览器默认的方式移到下一个 / 上一个控件（如章节树）。
+ * 编辑器不处理这次 Tab，焦点按浏览器默认的 Tab 顺序移动。正文在页面中排在最后，这样到不了章节树；回到章节树用 ⌘J。
  */
 function tabAfterEscape(): Plugin {
   return new Plugin({
