@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { EditorView } from 'prosemirror-view'
-import type { EditorState, Transaction } from 'prosemirror-state'
+import { NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state'
 import 'prosemirror-view/style/prosemirror.css'
 import 'prosemirror-gapcursor/style/gapcursor.css'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
-import EditorToolbar from './EditorToolbar.vue'
 import { ChapterDocuments } from './chapter_documents.ts'
-import { insertImage, toolbarCommands, toolbarState, type ToolbarCommand, type ToolbarState } from './commands.ts'
+import { commandState, editorCommands, insertImage, type CommandState, type EditorCommand } from './commands.ts'
+import { editorContextMenu } from './editor_menu.ts'
+import { nodes } from './schema.ts'
+import PopupMenu from '../common/PopupMenu.vue'
+import { useMenu } from '../common/use_menu.ts'
 import { figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
 import ImageLayoutControls from './ImageLayoutControls.vue'
 import {
@@ -20,8 +23,10 @@ import {
 import {
   THEMES,
   type DocumentTheme,
+  type ImageAlign,
   type ImageLayouts,
   type ImageOverride,
+  type ImageSize,
 } from '../../domain/document_style/document_style.ts'
 import { editorHeadingVars, themeCssVars } from '../document_style/theme_css.ts'
 
@@ -34,6 +39,8 @@ import { editorHeadingVars, themeCssVars } from '../document_style/theme_css.ts'
  * - 章节标题与编号只显示在编辑器上方，不进入正文。
  * - 文档主题以 CSS 变量作用在外层元素上：主题变化不改变文档、不产生 change、不进入撤销历史、不重建视图。
  * - 图片布局按图片文件键属于文档样式（image_layout.ts）：修改时发出 image-layout，可撤销；不产生 change。
+ * - 编辑器自己没有工具栏：命令的可用 / 勾选状态以 tools 发出，由工作区的工具栏与菜单栏显示，
+ *   它们通过 runCommand 执行命令。选中的图片旁直接显示布局按钮；右键菜单列出与点击处相关的操作。
  */
 const props = defineProps<{
   chapterId: ChapterId
@@ -47,11 +54,6 @@ const props = defineProps<{
   theme?: DocumentTheme
   /** 图片文件键 → 布局；不提供时所有图片跟随主题。 */
   imageLayouts?: ImageLayouts
-  /**
-   * 工具栏由上层放在自己的界面中（工作区顶栏）：编辑器不显示工具栏，改为发出 tools 并通过
-   * runCommand / changeFigureLayout 接受命令。默认在编辑器上方显示。
-   */
-  externalToolbar?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -60,14 +62,14 @@ const emit = defineEmits<{
   'request-image': [chapterId: ChapterId]
   /** 用户（或撤销 / 重做）修改了一张图片的布局；null 表示跟随主题。 */
   'image-layout': [key: string, layout: ImageOverride | null]
-  /** 工具栏状态与选中的图片（externalToolbar 时由上层显示）。 */
-  tools: [state: ToolbarState, figure: SelectedFigure | null]
+  /** 编辑命令的可用 / 勾选状态与选中的图片（由上层的工具栏与菜单栏显示）。 */
+  tools: [state: CommandState, figure: SelectedFigure | null]
 }>()
 
 /** 滚动容器（每个章节记住自己的滚动位置）。 */
 const scroller = ref<HTMLElement | null>(null)
 const mountPoint = ref<HTMLElement | null>(null)
-const toolbar = shallowRef<ToolbarState | null>(null)
+const tools = shallowRef<CommandState | null>(null)
 /** 选中的独立成段的图片：显示布局按钮。 */
 const figure = shallowRef<SelectedFigure | null>(null)
 
@@ -101,27 +103,76 @@ function dispatchTransaction(tr: Transaction): void {
 }
 
 function showState(state: EditorState): void {
-  const tools = toolbarState(state)
+  const next = commandState(state)
   const selected = selectedFigure(state)
-  // 只在变化时更新：输入文字时工具栏状态通常不变，上层不必每次按键都重新渲染。
+  // 只在变化时更新：输入文字时命令状态通常不变，上层不必每次按键都重新渲染。
   let changed = false
-  if (!sameTools(toolbar.value, tools)) {
-    toolbar.value = tools
+  if (!sameTools(tools.value, next)) {
+    tools.value = next
     changed = true
   }
   if (JSON.stringify(figure.value) !== JSON.stringify(selected)) {
     figure.value = selected
     changed = true
   }
-  if (changed && props.externalToolbar) emit('tools', tools, selected)
+  if (selected) void placeFigureControls()
+  if (changed) emit('tools', next, selected)
 }
 
-function sameTools(a: ToolbarState | null, b: ToolbarState): boolean {
+function sameTools(a: CommandState | null, b: CommandState): boolean {
   if (a === null) return false
-  return (Object.keys(b) as ToolbarCommand[]).every(
+  return (Object.keys(b) as EditorCommand[]).every(
     (key) => a[key].enabled === b[key].enabled && a[key].active === b[key].active,
   )
 }
+
+/**
+ * 选中图片时的布局按钮：浮在图片上方居中，随正文一起滚动（定位在正文容器内）。
+ * 上方已经滚出可见区域时放在图片内部的上沿。图片尺寸变化（改变布局、窗口宽度）时跟随。
+ */
+const figureControls = ref<InstanceType<typeof ImageLayoutControls> | null>(null)
+const controlsPosition = shallowRef<{ left: number; top: number } | null>(null)
+const CONTROLS_GAP = 8
+let observedFigure: Element | null = null
+const figureObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => void placeFigureControls())
+
+function selectedFigureElement(): HTMLElement | null {
+  if (!view || !(view.state.selection instanceof NodeSelection)) return null
+  const dom = view.nodeDOM(view.state.selection.from)
+  if (!(dom instanceof HTMLElement)) return null
+  return dom.querySelector<HTMLElement>('img, .editor-image__missing') ?? dom
+}
+
+async function placeFigureControls(): Promise<void> {
+  await nextTick()
+  const target = selectedFigureElement()
+  const body = mountPoint.value?.parentElement
+  if (!target || !body || !figure.value) {
+    controlsPosition.value = null
+    return
+  }
+  if (observedFigure !== target) {
+    if (observedFigure) figureObserver?.unobserve(observedFigure)
+    observedFigure = target
+    figureObserver?.observe(target)
+  }
+  const box = target.getBoundingClientRect()
+  const origin = body.getBoundingClientRect()
+  const visibleTop = scroller.value?.getBoundingClientRect().top ?? origin.top
+  const height = (figureControls.value?.$el as HTMLElement | undefined)?.offsetHeight ?? 0
+  const fitsAbove = box.top - height - CONTROLS_GAP >= visibleTop
+  controlsPosition.value = {
+    left: box.left - origin.left + box.width / 2,
+    top: (fitsAbove ? box.top - height - CONTROLS_GAP : box.top + CONTROLS_GAP) - origin.top,
+  }
+}
+
+watch(figure, (selected) => {
+  if (selected) return
+  controlsPosition.value = null
+  if (observedFigure) figureObserver?.unobserve(observedFigure)
+  observedFigure = null
+})
 
 
 /** 章节的编辑器状态，并同步当前的图片布局（缓存的状态可能是在其他章节修改布局之前的）。 */
@@ -149,6 +200,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  figureObserver?.disconnect()
   view?.destroy()
   view = null
 })
@@ -187,14 +239,46 @@ function changeFigureLayout(patch: ImageOverride): void {
   setFigureLayout(patch)(view.state, view.dispatch)
 }
 
-function runCommand(command: ToolbarCommand): void {
+function runCommand(command: EditorCommand): void {
   if (!view) return
   if (command === 'image') {
     emit('request-image', currentId)
     return
   }
-  toolbarCommands[command](view.state, view.dispatch)
+  editorCommands[command](view.state, view.dispatch)
   focus()
+}
+
+/**
+ * 右键菜单。先把选区放到点击处：点在图片上选中这张图片；点在当前选区之外时把光标移到点击处
+ * （WebKit 会在右键时选中一个词，这里统一为光标，菜单按点击处的结构给出操作）。
+ */
+const menu = useMenu()
+
+async function openContextMenu(event: MouseEvent): Promise<void> {
+  if (!view) return
+  event.preventDefault()
+  const hit = view.posAtCoords({ left: event.clientX, top: event.clientY })
+  if (hit) {
+    const { doc, selection } = view.state
+    const inside = hit.inside >= 0 ? doc.nodeAt(hit.inside) : null
+    const onFigure = (event.target as Element).closest?.('.editor-figure') && inside?.type === nodes.figure
+    if (onFigure) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, hit.inside)))
+    else if (hit.pos < selection.from || hit.pos > selection.to || selection instanceof NodeSelection) {
+      view.dispatch(view.state.tr.setSelection(TextSelection.near(doc.resolve(hit.pos))))
+    }
+  }
+  focus()
+  const entries = editorContextMenu(commandState(view.state), selectedFigure(view.state))
+  const chosen = await menu.open(entries, { x: event.clientX, y: event.clientY })
+  if (chosen !== null) runMenuItem(chosen)
+}
+
+function runMenuItem(id: string): void {
+  const [kind, value] = id.split(':')
+  if (kind === 'command') runCommand(value as EditorCommand)
+  else if (kind === 'image-size') changeFigureLayout({ size: value as ImageSize })
+  else if (kind === 'image-align') changeFigureLayout({ align: value as ImageAlign })
 }
 
 /**
@@ -232,11 +316,6 @@ defineExpose({
 
 <template>
   <div class="chapter-editor" :style="themeStyle">
-    <EditorToolbar v-if="!externalToolbar" class="chapter-editor__toolbar" :state="toolbar" @command="runCommand">
-      <template v-if="figure" #context>
-        <ImageLayoutControls :layout="figure.layout" @change="changeFigureLayout" />
-      </template>
-    </EditorToolbar>
     <div ref="scroller" class="chapter-editor__scroller">
       <h1 class="chapter-editor__heading">
         <span class="chapter-editor__number">{{ number }}</span>
@@ -244,8 +323,27 @@ defineExpose({
           {{ title || '未命名章节' }}
         </span>
       </h1>
-      <div ref="mountPoint" class="chapter-editor__body"></div>
+      <div class="chapter-editor__body">
+        <div ref="mountPoint" class="chapter-editor__mount" @contextmenu="openContextMenu"></div>
+        <ImageLayoutControls
+          v-if="figure"
+          ref="figureControls"
+          class="chapter-editor__figure-controls"
+          :class="{ 'chapter-editor__figure-controls--placed': controlsPosition }"
+          :style="controlsPosition ? { left: `${controlsPosition.left}px`, top: `${controlsPosition.top}px` } : undefined"
+          :layout="figure.layout"
+          @change="changeFigureLayout"
+        />
+      </div>
     </div>
+    <PopupMenu
+      v-if="menu.current.value"
+      label="正文操作"
+      :items="menu.current.value.entries"
+      :anchor="menu.current.value.anchor"
+      @select="menu.select"
+      @close="menu.close"
+    />
   </div>
 </template>
 
@@ -255,11 +353,6 @@ defineExpose({
   flex-direction: column;
   height: 100%;
   background: var(--color-bg);
-}
-
-.chapter-editor__toolbar {
-  flex: none;
-  padding: var(--space-2) var(--space-5);
 }
 
 .chapter-editor__scroller {
@@ -327,6 +420,26 @@ defineExpose({
 
 .chapter-editor__body {
   position: relative;
+}
+
+/* 自绘光标与选区以 ProseMirror 视图的父元素为坐标原点。 */
+.chapter-editor__mount {
+  position: relative;
+}
+
+/*
+ * 选中图片的布局按钮：浮在图片上方居中的一条紧凑按钮组。它是浮在正文之上的层，因此有阴影；
+ * 第一次测量位置前不可见，避免在错误的位置闪一下。
+ */
+.chapter-editor__figure-controls {
+  position: absolute;
+  z-index: 2;
+  visibility: hidden;
+  transform: translateX(-50%);
+}
+
+.chapter-editor__figure-controls--placed {
+  visibility: visible;
 }
 
 .chapter-editor__body :deep(.editor-caret) {

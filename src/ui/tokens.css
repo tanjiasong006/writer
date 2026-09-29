@@ -85,6 +85,9 @@
   --control-h-m: 28px;
   --control-h-l: 32px;
   --header-h: 44px;
+  /* macOS 合一的标题栏与工具栏高度，以及侧栏隐藏时为窗口按钮留出的宽度（tauri.conf.json 的 trafficLightPosition）。 */
+  --toolbar-h-unified: 52px;
+  --traffic-lights-w: 84px;
   --icon-s: 14px;
   --icon-m: 16px;
 

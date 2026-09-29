@@ -81,6 +81,17 @@ Domain 不包含面向用户的自然语言，用户可见文本由 UI 层负责
 
 新增或修改可视 UI 组件时，应同步新增或更新对应的 Storybook Story，用于独立查看和人工调试关键状态。
 
+### 开发版与用户数据
+
+开发构建（`npm run tauri dev`）是独立的应用 **Writer Dev**（identifier `com.writer.app.dev`），与正式版 Writer
+不共享应用级状态（上次打开的项目、界面偏好等，见 `src-tauri/src/app_env.rs`）。项目文件夹里的独占锁按项目路径生效，
+两个环境打开同一个真实项目时仍会互相阻止。
+
+**自动化测试、Agent 的界面验证与任何破坏性操作，只能使用测试数据**：临时项目（放在临时目录或 scratchpad）、
+fixture、专门的测试项目、Writer Dev 自己的数据。不得打开、修改或删除用户真实的文档；不得读写正式版 Writer 的
+应用数据目录。需要让开发版启动时直接打开测试项目，使用 `WRITER_OPEN_PROJECT=<测试项目路径> npm run tauri dev`
+（只在开发构建中生效）。
+
 ### UI / UX 工作
 
 任何涉及界面、视觉、布局、交互、拖拽、键盘行为、焦点管理、动画或组件状态的修改，**在设计和实现前必须阅读并遵守 `docs/ui-design-principles.md`**，以及对应组件的规格文档（如 `src/ui/chapter_tree/ui-spec.md`）。

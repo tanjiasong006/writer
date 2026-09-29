@@ -1,30 +1,57 @@
 import type { Node, NodeType, ResolvedPos } from 'prosemirror-model'
 import { TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state'
-import { lift, setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
-import { liftListItem, wrapInList } from 'prosemirror-schema-list'
+import { chainCommands, lift, setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
+import { liftListItem, sinkListItem, wrapInList } from 'prosemirror-schema-list'
+import { redo as historyRedo, undo as historyUndo } from 'prosemirror-history'
+import { undoInputRule } from 'prosemirror-inputrules'
+import {
+  addColumnAfter,
+  addColumnBefore,
+  addRowAfter,
+  addRowBefore,
+  deleteColumn,
+  deleteRow,
+  deleteTable,
+  isInTable,
+  selectedRect,
+} from 'prosemirror-tables'
 import { marks, nodes } from './schema.ts'
 
 /**
  * 正文编辑命令。都是标准的 ProseMirror Command：只根据 EditorState 计算事务，不依赖 DOM。
- * 工具栏按钮的可用 / 激活状态同样由这里根据 EditorState 推导，不另外维护一份格式状态。
+ * 菜单栏、右键菜单与工具栏中各项的可用 / 勾选状态同样由这里根据 EditorState 推导（commandState），
+ * 不另外维护一份格式状态。
  */
 
-export type ToolbarCommand =
+export type EditorCommand =
+  | 'undo'
+  | 'redo'
   | 'bold'
   | 'italic'
+  | 'strike'
+  | 'code'
   | 'bullet-list'
   | 'ordered-list'
   | 'quote'
   | 'code-block'
+  | 'indent'
+  | 'outdent'
   | 'table'
   | 'image'
+  | 'row-before'
+  | 'row-after'
+  | 'column-before'
+  | 'column-after'
+  | 'delete-row'
+  | 'delete-column'
+  | 'delete-table'
 
-export interface ToolbarItemState {
+export interface CommandItemState {
   readonly enabled: boolean
   readonly active: boolean
 }
 
-export type ToolbarState = Readonly<Record<ToolbarCommand, ToolbarItemState>>
+export type CommandState = Readonly<Record<EditorCommand, CommandItemState>>
 
 /** 选区所在的最近一层列表（及其深度）。 */
 function nearestList($pos: ResolvedPos): { node: Node; depth: number } | null {
@@ -50,7 +77,14 @@ function markActive(state: EditorState, type: (typeof marks)[string]): boolean {
 
 export const toggleBold: Command = toggleMark(marks.strong)
 export const toggleItalic: Command = toggleMark(marks.em)
+export const toggleStrike: Command = toggleMark(marks.strike)
 export const toggleCode: Command = toggleMark(marks.code)
+
+/** 撤销：刚由输入规则转换（如 "- " 变成列表）时回到转换前的文字，与快捷键相同。 */
+export const undo: Command = chainCommands(undoInputRule, historyUndo)
+export const redo: Command = historyRedo
+export const indentListItem: Command = sinkListItem(nodes.list_item)
+export const outdentListItem: Command = liftListItem(nodes.list_item)
 
 /**
  * 列表：不在列表中 → 包成列表；已在同类列表中 → 移出列表；在另一类列表中 → 改变列表类型。
@@ -185,29 +219,79 @@ export function insertImage(reference: string, alt: string): Command {
   }
 }
 
-export const toolbarCommands: Readonly<Record<Exclude<ToolbarCommand, 'image'>, Command>> = {
+/** 选区在表格的表头行中（GFM 表格的第一行，必须保留且只能是表头）。 */
+function inHeaderRow(state: EditorState): boolean {
+  if (!isInTable(state)) return false
+  return selectedRect(state).top === 0
+}
+
+/**
+ * 表格的行操作：表头行只能是第一行，不能在它上方插入行，也不能删除它（删除整个表格用"删除表格"）；
+ * 只剩一行正文时仍可以删除它，表格保留表头。
+ */
+const rowBefore: Command = (state, dispatch) => !inHeaderRow(state) && addRowBefore(state, dispatch)
+const removeRow: Command = (state, dispatch) => {
+  if (!isInTable(state)) return false
+  const rect = selectedRect(state)
+  if (rect.top === 0) return false
+  return deleteRow(state, dispatch)
+}
+/** 只剩一列时不能再删除列（请删除表格）。 */
+const removeColumn: Command = (state, dispatch) => {
+  if (!isInTable(state) || selectedRect(state).map.width <= 1) return false
+  return deleteColumn(state, dispatch)
+}
+
+export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image'>, Command>> = {
+  undo,
+  redo,
   bold: toggleBold,
   italic: toggleItalic,
+  strike: toggleStrike,
+  code: toggleCode,
   'bullet-list': toggleBulletList,
   'ordered-list': toggleOrderedList,
   quote: toggleQuote,
   'code-block': toggleCodeBlock,
+  indent: indentListItem,
+  outdent: outdentListItem,
   table: insertTable,
+  'row-before': rowBefore,
+  'row-after': addRowAfter,
+  'column-before': addColumnBefore,
+  'column-after': addColumnAfter,
+  'delete-row': removeRow,
+  'delete-column': removeColumn,
+  'delete-table': deleteTable,
 }
 
-/** 工具栏每个按钮的可用 / 激活状态，全部由当前 EditorState 推导。 */
-export function toolbarState(state: EditorState): ToolbarState {
+/** 每个编辑命令的可用 / 激活状态，全部由当前 EditorState 推导。 */
+export function commandState(state: EditorState): CommandState {
   const { $from } = state.selection
   const list = nearestList($from)
   const can = (command: Command) => command(state)
+  const plain = (command: Command): CommandItemState => ({ enabled: can(command), active: false })
   return {
+    undo: plain(undo),
+    redo: plain(redo),
     bold: { enabled: can(toggleBold), active: markActive(state, marks.strong) },
     italic: { enabled: can(toggleItalic), active: markActive(state, marks.em) },
+    strike: { enabled: can(toggleStrike), active: markActive(state, marks.strike) },
+    code: { enabled: can(toggleCode), active: markActive(state, marks.code) },
     'bullet-list': { enabled: can(toggleBulletList), active: list?.node.type === nodes.bullet_list },
     'ordered-list': { enabled: can(toggleOrderedList), active: list?.node.type === nodes.ordered_list },
     quote: { enabled: can(toggleQuote), active: hasAncestor($from, nodes.blockquote) },
     'code-block': { enabled: can(toggleCodeBlock), active: $from.parent.type === nodes.code_block },
-    table: { enabled: can(insertTable), active: false },
-    image: { enabled: can(insertImage('', '')), active: false },
+    indent: plain(indentListItem),
+    outdent: plain(outdentListItem),
+    table: plain(insertTable),
+    image: plain(insertImage('', '')),
+    'row-before': plain(rowBefore),
+    'row-after': plain(addRowAfter),
+    'column-before': plain(addColumnBefore),
+    'column-after': plain(addColumnAfter),
+    'delete-row': plain(removeRow),
+    'delete-column': plain(removeColumn),
+    'delete-table': plain(deleteTable),
   }
 }

@@ -345,13 +345,13 @@ test('确认删除后焦点落在删除后选中的章节上', async () => {
 
 // --- 删除确认规则（ui-spec §23）---
 
-test('没有子章节也没有正文：直接删除，不弹确认', async () => {
+test('没有子章节也没有正文：同样先确认（章节结构操作目前不能撤销），说明没有正文', async () => {
   const wrapper = mountManager(nested, null, () => false)
   await openMenu(wrapper, 4) // b
   await menuItem(wrapper, '删除')
 
-  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
-  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X'])
+  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('没有正文')
+  expect(rowTexts(wrapper)).toHaveLength(5)
 })
 
 test('有正文的叶子章节：需要确认，并提示包含正文', async () => {

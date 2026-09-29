@@ -49,6 +49,20 @@ export const OpenProject: Story = {
   ],
 }
 
+/**
+ * macOS 窗口：标题栏与工具栏合为一体。左上角留出窗口按钮的位置（Storybook 中没有真实的窗口按钮），
+ * 侧栏开关在侧栏顶部右侧；隐藏侧栏后移到工具栏开头。
+ */
+export const OpenProjectMac: Story = {
+  decorators: [
+    withServices((services) => {
+      services.shell.windowStyle = 'unified'
+      services.storage.seed('/文稿/示例论文', sampleDocument())
+      services.shell.lastProjectPath = '/文稿/示例论文'
+    }),
+  ],
+}
+
 /** 保存一直失败：修改后按 Cmd/Ctrl+S，状态栏显示失败原因与重试。 */
 export const SaveFailing: Story = {
   decorators: [

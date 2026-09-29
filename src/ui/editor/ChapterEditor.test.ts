@@ -152,63 +152,84 @@ test('CRLF 正文编辑后仍是 CRLF', () => {
   expect(wrapper.emitted('change')).toEqual([['a', '一\r\n\r\n二三\r\n']])
 })
 
-test('工具栏按钮状态来自编辑器：光标在粗体中时粗体按钮按下', async () => {
+type Tools = [import('./commands.ts').CommandState, unknown]
+
+function lastTools(wrapper: VueWrapper): Tools[0] {
+  const emitted = wrapper.emitted('tools') as Tools[] | undefined
+  if (!emitted || emitted.length === 0) throw new Error('no tools emitted')
+  return emitted.at(-1)![0]
+}
+
+function run(wrapper: VueWrapper, command: import('./commands.ts').EditorCommand): void {
+  ;(wrapper.vm as unknown as { runCommand(command: string): void }).runCommand(command)
+}
+
+test('命令状态来自编辑器：光标在粗体中时粗体为激活，只在变化时发出', async () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '普通**粗体**' })
   const view = viewOf(wrapper)
-  const bold = () => wrapper.find('button[aria-label="粗体"]')
   view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2)))
-  await wrapper.vm.$nextTick()
-  expect(bold().attributes('aria-pressed')).toBe('false')
+  expect(lastTools(wrapper).bold.active).toBe(false)
+  const count = wrapper.emitted('tools')!.length
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3)))
+  expect(wrapper.emitted('tools')!.length).toBe(count)
   view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 5)))
-  await wrapper.vm.$nextTick()
-  expect(bold().attributes('aria-pressed')).toBe('true')
+  expect(lastTools(wrapper).bold.active).toBe(true)
 })
 
-test('工具栏命令作用于选区并发出 change', async () => {
+test('runCommand 作用于选区并发出 change，焦点与选区留在正文中', async () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '引言' })
   const view = viewOf(wrapper)
   view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 3)))
-  await wrapper.find('button[aria-label="粗体"]').trigger('click')
+  run(wrapper, 'bold')
   expect(wrapper.emitted('change')).toEqual([['a', '**引言**']])
-  await wrapper.find('button[aria-label="引用"]').trigger('click')
-  expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', '> **引言**'])
-})
-
-test('点击工具栏不会让正文失去焦点与选区：按钮在 mousedown 时不抢焦点，命令之后可以直接继续输入', async () => {
-  const wrapper = mountEditor({ chapterId: 'a', content: '引言' })
-  const view = viewOf(wrapper)
-  view.focus()
-  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 3)))
-  const bold = wrapper.find('button[aria-label="粗体"]')
-  const mousedown = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
-  bold.element.dispatchEvent(mousedown)
-  expect(mousedown.defaultPrevented).toBe(true)
-  await bold.trigger('click')
   expect(view.hasFocus()).toBe(true)
   expect(view.state.selection.from).toBe(1)
   expect(view.state.selection.to).toBe(3)
+  run(wrapper, 'quote')
+  expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', '> **引言**'])
 })
 
-test('代码块中粗体按钮不可用', async () => {
+test('代码块中粗体不可用，代码块为激活', async () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '```\ncode\n```\n' })
   const view = viewOf(wrapper)
   view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2)))
-  await wrapper.vm.$nextTick()
-  expect(wrapper.find('button[aria-label="粗体"]').attributes('disabled')).toBeDefined()
-  expect(wrapper.find('button[aria-label="代码块"]').attributes('aria-pressed')).toBe('true')
+  expect(lastTools(wrapper).bold.enabled).toBe(false)
+  expect(lastTools(wrapper)['code-block'].active).toBe(true)
 })
 
 test('插入图片：发起请求的章节仍是当前章节时插入，否则返回 false', async () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '引言' })
   const view = viewOf(wrapper)
   view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
-  await wrapper.find('button[aria-label="图片"]').trigger('click')
+  run(wrapper, 'image')
   expect(wrapper.emitted('request-image')).toEqual([['a']])
   const editor = wrapper.vm as unknown as { insertImage(id: string, ref: string, alt: string): boolean }
   expect(editor.insertImage('a', '../assets/图.png', '图')).toBe(true)
   expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', '引言\n\n![图](../assets/图.png)'])
   await wrapper.setProps({ chapterId: 'b', content: 'B' })
   expect(editor.insertImage('a', '../assets/图2.png', '图2')).toBe(false)
+})
+
+/** 没有系统菜单时右键菜单由界面绘制；按名称选择其中一项。 */
+async function chooseFromContextMenu(wrapper: VueWrapper, label: string): Promise<void> {
+  const item = wrapper
+    .findAll('[role="menu"] button')
+    .find((button) => button.find('.popup-menu__label').text() === label)
+  if (!item) throw new Error(`menu item ${label} not found`)
+  await item.trigger('click')
+}
+
+test('右键菜单：表格中列出行列操作，选择后作用于点击处', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n' })
+  const view = viewOf(wrapper)
+  view.posAtCoords = () => ({ pos: 12, inside: -1 })
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 12)))
+  await wrapper.find('.chapter-editor__mount').trigger('contextmenu')
+  const labels = wrapper.findAll('[role="menu"] .popup-menu__label').map((label) => label.text())
+  expect(labels.slice(0, 4)).toEqual(['在上方插入行', '在下方插入行', '在左侧插入列', '在右侧插入列'])
+  expect(labels).not.toContain('插入表格')
+  await chooseFromContextMenu(wrapper, '在下方插入行')
+  expect(wrapper.emitted('change')!.at(-1)![1]).toBe('| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n')
 })
 
 test('图片按项目资源显示；无法解析的引用显示占位，引用不变', () => {

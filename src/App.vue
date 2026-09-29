@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   createProject,
   openProject,
@@ -13,6 +13,7 @@ import Workspace from './ui/app_shell/Workspace.vue'
 import { messageForStorageFailure } from './ui/app_shell/storage_messages.ts'
 import { useServices } from './ui/services.ts'
 import Toast from './ui/common/Toast.vue'
+import { menuItemForKey, welcomeMenus } from './ui/app_shell/app_menu.ts'
 import './ui/base.css'
 
 /**
@@ -62,14 +63,43 @@ function blockReload(event: KeyboardEvent): void {
   if (reload) event.preventDefault()
 }
 
-/** 文档级快捷键：Cmd/Ctrl+N 新建文档、Cmd/Ctrl+O 打开文档（欢迎页与工作区都可用）。 */
-function onShortcut(event: KeyboardEvent): void {
-  if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || busy.value) return
-  const key = event.key.toLowerCase()
-  if (key !== 'n' && key !== 'o') return
+/**
+ * 网页默认的右键菜单（重新载入、检查元素……）不属于桌面应用：界面中有意义的位置（章节、正文）有自己的右键菜单，
+ * 其他位置右键不弹出任何菜单。输入框保留系统的剪切 / 拷贝 / 粘贴菜单；选中了文字（如全文预览中）时保留系统的拷贝菜单。
+ */
+function blockPageContextMenu(event: MouseEvent): void {
+  if (event.defaultPrevented) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest?.('input, textarea')) return
+  if (!(window.getSelection()?.isCollapsed ?? true)) return
   event.preventDefault()
-  if (view.value.kind === 'starting') return
-  void (key === 'n' ? newProject() : openExisting())
+}
+
+/**
+ * 没有打开文档时的菜单栏与快捷键（新建、打开）。打开文档后由工作区设置完整的菜单栏并响应快捷键。
+ */
+const WELCOME_MENUS = welcomeMenus()
+
+function runWelcomeMenuItem(id: string): void {
+  if (busy.value || view.value.kind === 'open') return
+  if (id === 'file:new') void newProject()
+  else if (id === 'file:open') void openExisting()
+}
+
+watch(
+  () => view.value.kind,
+  (kind) => {
+    if (kind !== 'open') shell.setAppMenu?.(WELCOME_MENUS, runWelcomeMenuItem)
+  },
+  { immediate: true },
+)
+
+function onShortcut(event: KeyboardEvent): void {
+  if (event.defaultPrevented || view.value.kind === 'open') return
+  const id = menuItemForKey(WELCOME_MENUS, event)
+  if (id === null) return
+  event.preventDefault()
+  runWelcomeMenuItem(id)
 }
 
 onMounted(() => {
@@ -77,6 +107,7 @@ onMounted(() => {
   window.addEventListener('drop', blockFileDrop)
   window.addEventListener('keydown', blockReload)
   window.addEventListener('keydown', onShortcut)
+  window.addEventListener('contextmenu', blockPageContextMenu)
 })
 
 onBeforeUnmount(() => {
@@ -84,11 +115,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('drop', blockFileDrop)
   window.removeEventListener('keydown', blockReload)
   window.removeEventListener('keydown', onShortcut)
+  window.removeEventListener('contextmenu', blockPageContextMenu)
 })
 
 onMounted(async () => {
+  // 窗口标题是应用名（开发版为 "Writer Dev"，便于与正式版区分）；打开文档后由工作区改为文档名。
+  shell.setWindowTitle(shell.appName)
   stopCloseGuard = shell.onCloseRequested(leaveCurrent)
-  const last = shell.getLastProjectPath()
+  const last = shell.startupProjectPath() ?? shell.getLastProjectPath()
   if (last === null) {
     view.value = { kind: 'welcome' }
     return

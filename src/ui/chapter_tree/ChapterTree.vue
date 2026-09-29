@@ -12,6 +12,9 @@ import {
 } from '../../application/move_chapter.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
 import Icon from '../common/Icon.vue'
+import { useMenu } from '../common/use_menu.ts'
+import { SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
+import { MOVE_LABELS } from '../app_shell/app_menu.ts'
 
 /**
  * 章节树组件。
@@ -359,46 +362,63 @@ function toggle(chapterId: ChapterId): void {
   collapsedIds.value = next
 }
 
-/** 点击标题：选中由行 click 冒泡处理，这里只对有子章节的节点补上展开/收起。 */
-function toggleFromTitle(row: ChapterRow): void {
-  if (row.hasChildren) toggle(row.id)
+/**
+ * 点击标题：选中由行 click 冒泡处理，这里只对有子章节的节点补上展开/收起。
+ * 双击是重命名：双击的第二次点击把第一次的展开/收起还原，树不因为双击而变化。
+ */
+function toggleFromTitle(row: ChapterRow, event: MouseEvent): void {
+  if (row.hasChildren && event.detail <= 2) toggle(row.id)
+}
+
+function renameFromDoubleClick(row: ChapterRow): void {
+  requestStartRename(row.id)
 }
 
 /**
- * 节点菜单（··· 按钮、右键、Shift+F10 / 菜单键）。同一时间只有一个菜单。
+ * 节点菜单（··· 按钮、右键、Shift+F10 / 菜单键）。桌面环境中是系统菜单（use_menu.ts）。同一时间只有一个菜单。
  * 右键打开时不改变选中章节，只用描边标出菜单作用的行（桌面文件列表的习惯）。
  */
-interface OpenMenu {
+interface MenuTarget {
   readonly id: ChapterId
-  readonly anchor: MenuAnchor
-  readonly keyboard: boolean
   readonly context: boolean
 }
-const menu = shallowRef<OpenMenu | null>(null)
-const openMenuId = computed(() => menu.value?.id ?? null)
+const menuTarget = shallowRef<MenuTarget | null>(null)
+const openMenuId = computed(() => menuTarget.value?.id ?? null)
+const menu = useMenu()
+
+async function showMenu(chapterId: ChapterId, anchor: MenuAnchor, keyboard: boolean, context: boolean): Promise<void> {
+  menuTarget.value = { id: chapterId, context }
+  const action = await menu.open(menuItems(chapterId), anchor, keyboard)
+  // 菜单关闭后才清除标记；若期间又打开了另一个菜单，由新的菜单负责。
+  if (menuTarget.value?.id === chapterId && menuTarget.value.context === context) menuTarget.value = null
+  if (action !== null) onMenuSelect(chapterId, action)
+}
 
 function toggleMenu(chapterId: ChapterId, event: MouseEvent): void {
-  if (menu.value?.id === chapterId && !menu.value.context) {
+  if (menuTarget.value?.id === chapterId && !menuTarget.value.context) {
     closeMenu()
     return
   }
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   // 由键盘（Enter / Space）触发的 click 没有点击次数：菜单打开后第一项获得焦点。
-  menu.value = { id: chapterId, anchor: { rect, align: 'end' }, keyboard: event.detail === 0, context: false }
+  void showMenu(chapterId, { rect, align: 'end' }, event.detail === 0, false)
 }
 
+/** 重命名中的行保留输入框的系统菜单（剪切 / 拷贝 / 粘贴）。 */
 function openContextMenu(event: MouseEvent, row: ChapterRow): void {
   if (row.id === props.editingId) return
-  menu.value = { id: row.id, anchor: { x: event.clientX, y: event.clientY }, keyboard: false, context: true }
+  event.preventDefault()
+  void showMenu(row.id, { x: event.clientX, y: event.clientY }, false, true)
 }
 
 function openMenuFromKeyboard(row: ChapterRow, target: HTMLElement): void {
   const rect = target.getBoundingClientRect()
-  menu.value = { id: row.id, anchor: { rect, align: 'start' }, keyboard: true, context: true }
+  void showMenu(row.id, { rect, align: 'start' }, true, true)
 }
 
 function closeMenu(): void {
-  menu.value = null
+  menuTarget.value = null
+  menu.close()
 }
 
 function menuItems(chapterId: ChapterId): MenuEntry[] {
@@ -406,21 +426,18 @@ function menuItems(chapterId: ChapterId): MenuEntry[] {
     { id: 'create-sibling', label: '新建同级章节' },
     { id: 'create-child', label: '新建子章节' },
     { separator: true },
-    ...MOVE_ITEMS.map((item) => ({
+    ...MOVE_LABELS.map((item) => ({
       id: `move-${item.direction}`,
       label: item.label,
-      shortcut: `${moveShortcut}${item.key}`,
       disabled: !canMoveBy(chapterId, item.direction),
     })),
     { separator: true },
-    { id: 'rename', label: '重命名', shortcut: 'F2' },
-    { id: 'delete', label: '删除' },
+    { id: 'rename', label: '重命名', shortcut: SHORTCUTS.renameChapter },
+    { id: 'delete', label: '删除', shortcut: SHORTCUTS.deleteChapter },
   ]
 }
 
-function onMenuSelect(action: string): void {
-  const chapterId = menu.value?.id
-  if (chapterId === undefined) return
+function onMenuSelect(chapterId: ChapterId, action: string): void {
   if (action === 'create-sibling') requestCreateSibling(chapterId)
   else if (action === 'create-child') requestCreateChild(chapterId)
   else if (action === 'rename') requestStartRename(chapterId)
@@ -500,16 +517,6 @@ function parentOf(chapterId: ChapterId): ChapterId | null {
   return path === null || path.length === 0 ? null : path[path.length - 1]
 }
 
-/** 菜单中的移动项；快捷键与键盘操作一致（Alt / ⌥ + Shift + 方向键）。 */
-const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
-const moveShortcut = isMac ? '⌥⇧' : 'Alt+Shift+'
-const MOVE_ITEMS: ReadonlyArray<{ direction: KeyboardMoveDirection; label: string; key: string }> = [
-  { direction: 'up', label: '上移', key: '↑' },
-  { direction: 'down', label: '下移', key: '↓' },
-  { direction: 'outdent', label: '升级', key: '←' },
-  { direction: 'indent', label: '降级', key: '→' },
-]
-
 function canMoveBy(chapterId: ChapterId, direction: KeyboardMoveDirection): boolean {
   return keyboardMoveIntent(props.tree, chapterId, direction) !== null
 }
@@ -526,20 +533,13 @@ function requestMove(chapterId: ChapterId, direction: KeyboardMoveDirection): vo
   void focusRow(chapterId)
 }
 
-const MOVE_KEYS: Readonly<Record<string, KeyboardMoveDirection>> = {
-  ArrowUp: 'up',
-  ArrowDown: 'down',
-  ArrowLeft: 'outdent',
-  ArrowRight: 'indent',
-}
-
 /**
  * 树的键盘交互（ui-spec §29，WAI-ARIA tree 模式）：
  * ↑ / ↓ 选择上一 / 下一可见章节，Home / End 到首 / 末；
  * → 展开，已展开时进入第一个子章节；← 折叠，已折叠或无子章节时回到父章节；
- * Enter 进入正文；F2 重命名；Alt+Shift+方向键 移动章节（上移 / 下移 / 提升 / 降级）；
- * Shift+F10 / 菜单键 打开节点菜单。
- * Delete 不删除章节，避免误删。
+ * Enter 进入正文；F2 重命名；⌘⌫ 请求删除（总是先确认）；Shift+F10 / 菜单键 打开节点菜单
+ * （上移 / 下移 / 升级 / 降级在菜单中，没有快捷键）。快捷键来自 common/shortcuts.ts。
+ * 单独的 Delete / Backspace 不删除章节，避免误删（ui-spec §29）。
  */
 function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
   // Shift+F10 / 菜单键：打开该章节的菜单（与右键相同）。
@@ -548,11 +548,14 @@ function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
     openMenuFromKeyboard(row, event.currentTarget as HTMLElement)
     return
   }
-  if (event.altKey && event.shiftKey && !event.metaKey && !event.ctrlKey) {
-    const direction = MOVE_KEYS[event.key]
-    if (direction === undefined) return
+  if (matchesShortcut(event, SHORTCUTS.deleteChapter)) {
     event.preventDefault()
-    requestMove(row.id, direction)
+    requestDelete(row.id)
+    return
+  }
+  if (matchesShortcut(event, SHORTCUTS.renameChapter)) {
+    event.preventDefault()
+    requestStartRename(row.id)
     return
   }
   if (event.altKey || event.shiftKey || event.metaKey || event.ctrlKey) return
@@ -586,10 +589,6 @@ function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
       event.preventDefault()
       if (row.id !== props.selectedId) emit('select', row.id)
       emit('open', row.id)
-      return
-    case 'F2':
-      event.preventDefault()
-      requestStartRename(row.id)
       return
     default:
       return
@@ -682,9 +681,32 @@ const rows = computed<ChapterRow[]>(() => {
   return result
 })
 
+/**
+ * 同一父章节下的编号占同样的宽度（按其中最长的编号），"1.9"与"1.10"之后的标题左端对齐，密集的层级更容易扫读。
+ * 编号用等宽数字：宽度按数字个数（ch）加分隔点估算（同级编号的点数相同）。
+ */
+function siblingKey(number: string): string {
+  return number.slice(0, Math.max(0, number.lastIndexOf('.')))
+}
+
+const numberDigits = computed(() => {
+  const digits = new Map<string, number>()
+  for (const row of rows.value) {
+    const key = siblingKey(row.number)
+    digits.set(key, Math.max(digits.get(key) ?? 0, row.number.replace(/\./g, '').length))
+  }
+  return digits
+})
+
+function numberStyle(row: ChapterRow): { minWidth: string } {
+  return { minWidth: `calc(${numberDigits.value.get(siblingKey(row.number)) ?? 0}ch + ${row.depth} * 0.3em)` }
+}
+
 defineExpose({
   /** 把键盘焦点放到某个章节行（如删除确认关闭后）。 */
   focusRow,
+  /** 上移 / 下移 / 升级 / 降级（菜单栏）：与快捷键相同，移动后焦点留在该章节。 */
+  moveChapter: requestMove,
 })
 </script>
 
@@ -722,7 +744,7 @@ defineExpose({
               { 'chapter-tree__row--selected': row.id === selectedId },
               { 'chapter-tree__row--dragging': row.id === draggingId },
               { 'chapter-tree__row--dragging-child': row.id !== draggingId && draggingIds.has(row.id) },
-              { 'chapter-tree__row--menu-target': menu !== null && menu.context && menu.id === row.id },
+              { 'chapter-tree__row--menu-target': menuTarget !== null && menuTarget.context && menuTarget.id === row.id },
               { 'chapter-tree__row--settled': row.id === settledId },
               dropClass(row.id),
             ]"
@@ -730,7 +752,7 @@ defineExpose({
             :style="{ paddingLeft: rowPadding(row.depth) }"
             :aria-current="row.id === selectedId ? 'true' : undefined"
             @click="emit('select', row.id)"
-            @contextmenu.prevent="openContextMenu($event, row)"
+            @contextmenu="openContextMenu($event, row)"
             @dragstart="startDrag($event, row)"
             @dragover="dragOverRow($event, row)"
             @dragleave="leaveRow($event, row.id)"
@@ -765,7 +787,7 @@ defineExpose({
             <span v-else class="chapter-tree__leaf-spacer" aria-hidden="true"></span>
 
             <div v-if="row.id === editingId" class="chapter-tree__edit" @click.stop>
-              <span class="chapter-tree__number">{{ row.number }}</span>
+              <span class="chapter-tree__number" :style="numberStyle(row)">{{ row.number }}</span>
               <input
                 :ref="setRenameInput"
                 class="chapter-tree__rename-input"
@@ -786,11 +808,12 @@ defineExpose({
               class="chapter-tree__label"
               :data-chapter-id="row.id"
               :tabindex="row.id === tabbableId ? 0 : -1"
-              @click="toggleFromTitle(row)"
+              @click="toggleFromTitle(row, $event)"
+              @dblclick="renameFromDoubleClick(row)"
               @focus="focusedId = row.id"
               @keydown="onLabelKeydown($event, row)"
             >
-              <span class="chapter-tree__number">{{ row.number }}</span>
+              <span class="chapter-tree__number" :style="numberStyle(row)">{{ row.number }}</span>
               <span class="chapter-tree__title" :title="row.title">{{ row.title }}</span>
             </button>
 
@@ -798,7 +821,7 @@ defineExpose({
               v-if="row.id !== editingId"
               type="button"
               class="chapter-tree__more"
-              :class="{ 'chapter-tree__more--open': openMenuId === row.id && !menu?.context }"
+              :class="{ 'chapter-tree__more--open': openMenuId === row.id && !menuTarget?.context }"
               aria-label="更多操作"
               aria-haspopup="menu"
               :aria-expanded="openMenuId === row.id"
@@ -828,14 +851,14 @@ defineExpose({
     </div>
 
     <PopupMenu
-      v-if="menu"
+      v-if="menu.current.value"
       label="章节操作"
       menu-class="chapter-tree__menu"
       backdrop-class="chapter-tree__backdrop"
-      :items="menuItems(menu.id)"
-      :anchor="menu.anchor"
-      :keyboard="menu.keyboard"
-      @select="onMenuSelect"
+      :items="menu.current.value.entries"
+      :anchor="menu.current.value.anchor"
+      :keyboard="menu.current.value.keyboard"
+      @select="menu.select"
       @close="closeMenu"
     />
   </div>

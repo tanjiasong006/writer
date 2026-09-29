@@ -5,13 +5,11 @@ import {
   baseKeymap,
   chainCommands,
   exitCode,
-  joinDown,
-  joinUp,
   newlineInCode,
   selectParentNode,
   setBlockType,
 } from 'prosemirror-commands'
-import { history, redo, undo } from 'prosemirror-history'
+import { history } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
 import {
   InputRule,
@@ -25,7 +23,8 @@ import { addRowAfter, goToNextCell, isInTable, nextCell, selectionCell, tableEdi
 import { dropCursor } from 'prosemirror-dropcursor'
 import { GapCursor, gapCursor } from 'prosemirror-gapcursor'
 import { isEmptyDocument, nodes, schema } from './schema.ts'
-import { toggleBold, toggleCode, toggleItalic } from './commands.ts'
+import { toggleBold, toggleCode, toggleItalic, undo as undoCommand } from './commands.ts'
+import { SHORTCUTS, proseMirrorKey } from '../common/shortcuts.ts'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { imageLayoutPlugin } from './image_layout.ts'
 import { drawCaret } from './caret.ts'
@@ -203,30 +202,30 @@ const headingToParagraph: Command = (state, dispatch) => {
   return setBlockType(nodes.paragraph)(state, dispatch)
 }
 
+/**
+ * 正文的按键。⌘ 快捷键（撤销、粗体、斜体、行内代码、列表缩进）来自 common/shortcuts.ts，与菜单栏显示的一致；
+ * 其余是写作中的编辑行为（Enter、Tab、Backspace、方向键、Esc、Shift+Enter 换行），不是应用快捷键。
+ * 重做没有快捷键（只在编辑菜单中），见 common/shortcuts.ts 的规则。
+ */
 const editingKeymap = keymap({
   // 刚由输入规则转换（如 "- " 变成列表）时，撤销回到转换前的文字，与 Backspace 相同。
-  'Mod-z': chainCommands(undoInputRule, undo),
-  'Shift-Mod-z': redo,
-  'Mod-y': redo,
+  [proseMirrorKey(SHORTCUTS.undo)]: undoCommand,
+  [proseMirrorKey(SHORTCUTS.bold)]: toggleBold,
+  [proseMirrorKey(SHORTCUTS.italic)]: toggleItalic,
+  [proseMirrorKey(SHORTCUTS.inlineCode)]: toggleCode,
+  [proseMirrorKey(SHORTCUTS.outdent)]: liftListItem(nodes.list_item),
+  [proseMirrorKey(SHORTCUTS.indent)]: sinkListItem(nodes.list_item),
   Backspace: chainCommands(undoInputRule, headingToParagraph, selectFigureBackward),
   Delete: selectFigureForward,
-  'Mod-b': toggleBold,
-  'Mod-i': toggleItalic,
-  'Mod-e': toggleCode,
-  'Alt-ArrowUp': joinUp,
-  'Alt-ArrowDown': joinDown,
   Escape: selectParentNode,
   Enter: chainCommands(exitCodeAfterBlankLines, newlineInCode, enterInCell, newParagraphAtBlock, splitListItem(nodes.list_item)),
   'Shift-Enter': chainCommands(exitCode, insertHardBreak),
-  'Mod-Enter': chainCommands(exitCode, insertHardBreak),
   ArrowDown: chainCommands(arrowOutOfCode('down'), arrowOutOfTable('down')),
   ArrowUp: chainCommands(arrowOutOfCode('up'), arrowOutOfTable('up')),
   Tab: unlessAfterEscape(
     chainCommands(goToNextCell(1), addRowFromLastCell, sinkListItem(nodes.list_item), indentInCode, keepFocus),
   ),
   'Shift-Tab': unlessAfterEscape(chainCommands(goToNextCell(-1), liftListItem(nodes.list_item), outdentInCode, keepFocus)),
-  'Mod-[': liftListItem(nodes.list_item),
-  'Mod-]': sinkListItem(nodes.list_item),
 })
 
 /** 熟悉 Markdown 的用户可以直接按 Markdown 写法输入块结构。 */

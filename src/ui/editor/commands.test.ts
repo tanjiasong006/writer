@@ -12,7 +12,7 @@ import {
   toggleItalic,
   toggleOrderedList,
   toggleQuote,
-  toolbarState,
+  commandState,
 } from './commands.ts'
 import { nodes } from './schema.ts'
 
@@ -171,21 +171,21 @@ describe('撤销 / 重做', () => {
 describe('工具栏状态', () => {
   test('激活状态来自光标处的结构与格式', () => {
     const state = stateOf('> - **粗体**文字\n', { cursorAfter: '粗' })
-    const toolbar = toolbarState(state)
+    const toolbar = commandState(state)
     expect(toolbar.bold.active).toBe(true)
     expect(toolbar.italic.active).toBe(false)
     expect(toolbar['bullet-list'].active).toBe(true)
     expect(toolbar['ordered-list'].active).toBe(false)
     expect(toolbar.quote.active).toBe(true)
-    expect(toolbarState(stateOf('> - **粗体**文字\n', { cursorAfter: '文' })).bold.active).toBe(false)
+    expect(commandState(stateOf('> - **粗体**文字\n', { cursorAfter: '文' })).bold.active).toBe(false)
   })
 
   test('代码块中格式不可用；表格中不能插入表格与列表', () => {
-    const code = toolbarState(stateOf('```\ncode\n```', { cursorAfter: 'co' }))
+    const code = commandState(stateOf('```\ncode\n```', { cursorAfter: 'co' }))
     expect(code.bold.enabled).toBe(false)
     expect(code['code-block']).toEqual({ enabled: true, active: true })
     expect(code.table.enabled).toBe(false)
-    const cell = toolbarState(stateOf('| a | b |\n| --- | --- |\n| c | d |\n', { cursorAfter: 'c' }))
+    const cell = commandState(stateOf('| a | b |\n| --- | --- |\n| c | d |\n', { cursorAfter: 'c' }))
     expect(cell.bold.enabled).toBe(true)
     expect(cell.table.enabled).toBe(false)
     expect(cell['bullet-list'].enabled).toBe(false)

@@ -18,9 +18,10 @@
 
 ## 2. 章节重排只有鼠标拖拽（已解决）
 
-> 已处理：选中章节可用 Alt+Shift+↑ / ↓ / ← / → 上移 / 下移 / 提升 / 降级。
-> Application `keyboardMoveIntent` 把方向换算成与拖拽相同的 `MoveIntent`，仍由 `moveChapterTo` 执行，
-> 没有新增移动规则。以下为原始记录。
+> 已处理：选中章节可以用键盘上移 / 下移 / 提升 / 降级——章节获得焦点时按 Shift+F10（或菜单键）打开章节菜单选择，
+> 或使用菜单栏"章节"中的同名命令。Application `keyboardMoveIntent` 把方向换算成与拖拽相同的 `MoveIntent`，
+> 仍由 `moveChapterTo` 执行，没有新增移动规则。（早先的 Alt+Shift+方向键 快捷键已取消：Writer 的快捷键只用
+> "⌘ + 一个键"，见 `src/ui/common/shortcuts.ts`。）以下为原始记录。
 
 `ChapterTree` 仅实现 HTML5 拖拽，键盘用户无法重排章节。
 

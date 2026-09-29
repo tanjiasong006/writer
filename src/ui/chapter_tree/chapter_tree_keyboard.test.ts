@@ -2,6 +2,7 @@ import { afterEach, expect, test } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import ChapterManager from './ChapterManager.vue'
 import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
+import { IS_MAC } from '../common/shortcuts.ts'
 
 const nested: ChapterTree = [
   {
@@ -46,9 +47,27 @@ async function press(
   wrapper: VueWrapper,
   id: ChapterId,
   key: string,
-  modifiers: { altKey?: boolean; shiftKey?: boolean } = {},
+  modifiers: { altKey?: boolean; shiftKey?: boolean; metaKey?: boolean; ctrlKey?: boolean } = {},
 ): Promise<void> {
   await label(wrapper, id).trigger('keydown', { key, ...modifiers })
+  await flushPromises()
+}
+
+/**
+ * 上移 / 下移 / 升级 / 降级没有快捷键：用键盘打开章节菜单（Shift+F10）选择。
+ * 没有系统菜单时菜单由界面绘制；不可用的项不响应。
+ */
+async function moveByMenu(wrapper: VueWrapper, id: ChapterId, item: string): Promise<void> {
+  await press(wrapper, id, 'F10', { shiftKey: true })
+  const button = wrapper
+    .findAll('[role="menu"] button')
+    .find((candidate) => candidate.find('.popup-menu__label').text() === item)
+  if (!button) throw new Error(`菜单中没有 ${item}`)
+  if (button.attributes('disabled') !== undefined) {
+    await wrapper.find('[role="menu"]').trigger('keydown', { key: 'Escape' })
+  } else {
+    await button.trigger('click')
+  }
   await flushPromises()
 }
 
@@ -138,28 +157,28 @@ test('Delete 不删除章节', async () => {
   expect(wrapper.emitted('update:tree')).toBeUndefined()
 })
 
-test('Alt+Shift+↑ / ↓ 在同级间移动，焦点留在被移动的章节', async () => {
+test('章节菜单（Shift+F10）上移 / 下移：在同级间移动，焦点留在被移动的章节', async () => {
   const wrapper = mountManager('b')
 
-  await press(wrapper, 'b', 'ArrowUp', { altKey: true, shiftKey: true })
+  await moveByMenu(wrapper, 'b', '上移')
   expect(currentTree(wrapper).map((n) => n.id)).toEqual(['b', 'a'])
   expect(selected(wrapper)).toBe('b')
   expect(focusedId()).toBe('b')
 
-  await press(wrapper, 'b', 'ArrowDown', { altKey: true, shiftKey: true })
+  await moveByMenu(wrapper, 'b', '下移')
   expect(currentTree(wrapper).map((n) => n.id)).toEqual(['a', 'b'])
 })
 
-test('Alt+Shift+→ 降级为上一个兄弟的子章节，Alt+Shift+← 提升回来', async () => {
+test('章节菜单降级为上一个兄弟的子章节，升级回来', async () => {
   const wrapper = mountManager('b')
 
-  await press(wrapper, 'b', 'ArrowRight', { altKey: true, shiftKey: true })
+  await moveByMenu(wrapper, 'b', '降级')
   const indented = currentTree(wrapper)
   expect(indented.map((n) => n.id)).toEqual(['a'])
   expect(indented[0].children.map((n) => n.id)).toEqual(['a1', 'a2', 'b'])
   expect(focusedId()).toBe('b')
 
-  await press(wrapper, 'b', 'ArrowLeft', { altKey: true, shiftKey: true })
+  await moveByMenu(wrapper, 'b', '升级')
   expect(currentTree(wrapper).map((n) => n.id)).toEqual(['a', 'b'])
 })
 
@@ -168,16 +187,16 @@ test('降级进已折叠的章节时自动展开，焦点仍在被移动的章�
   await press(wrapper, 'a', 'ArrowLeft')
   expect(visibleIds(wrapper)).toEqual(['a', 'b'])
 
-  await press(wrapper, 'b', 'ArrowRight', { altKey: true, shiftKey: true })
+  await moveByMenu(wrapper, 'b', '降级')
   expect(visibleIds(wrapper)).toContain('b')
   expect(focusedId()).toBe('b')
 })
 
-test('键盘移动到边界时不发出移动', async () => {
+test('移动到边界时菜单项不可用，不发出移动', async () => {
   const wrapper = mountManager('a')
-  await press(wrapper, 'a', 'ArrowUp', { altKey: true, shiftKey: true })
-  await press(wrapper, 'a', 'ArrowLeft', { altKey: true, shiftKey: true })
-  await press(wrapper, 'a', 'ArrowRight', { altKey: true, shiftKey: true })
+  await moveByMenu(wrapper, 'a', '上移')
+  await moveByMenu(wrapper, 'a', '升级')
+  await moveByMenu(wrapper, 'a', '降级')
   expect(wrapper.emitted('update:tree')).toBeUndefined()
 })
 
@@ -191,7 +210,7 @@ test('键盘降级超过层级上限时显示原因，不改树', async () => {
     { id: 'p', title: 'P', children: [] },
     { id: 'x', title: 'X', children: chain },
   ])
-  await press(wrapper, 'x', 'ArrowRight', { altKey: true, shiftKey: true })
+  await moveByMenu(wrapper, 'x', '降级')
   expect(wrapper.emitted('update:tree')).toBeUndefined()
   expect(wrapper.find('.chapter-manager__error').text()).toContain('层级太深')
 })
@@ -211,4 +230,38 @@ test('菜单中的移动项：边界处不可用，可用时与快捷键效果�
   expect(currentTree(wrapper)[0].children.map((n) => n.id)).toEqual(['a1', 'a2', 'b'])
   expect(wrapper.find('.chapter-tree__menu').exists()).toBe(false)
   expect(focusedId()).toBe('b')
+})
+
+test('⌘⌫（Windows：Ctrl+Delete）请求删除：空章节也先确认；单独的 Delete / Backspace 不删除', async () => {
+  const wrapper = mountManager('b')
+  await press(wrapper, 'b', 'Delete')
+  await press(wrapper, 'b', 'Backspace')
+  expect(wrapper.find('.chapter-manager__confirm').exists()).toBe(false)
+  expect(visibleIds(wrapper)).toContain('b')
+
+  await press(wrapper, 'b', IS_MAC ? 'Backspace' : 'Delete', IS_MAC ? { metaKey: true } : { ctrlKey: true })
+  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('没有正文')
+  expect(visibleIds(wrapper)).toContain('b')
+  expect(document.activeElement?.textContent?.trim()).toBe('取消')
+  await wrapper.findAll('.chapter-manager__button').find((b) => b.text() === '删除')!.trigger('click')
+  await flushPromises()
+  expect(visibleIds(wrapper)).not.toContain('b')
+})
+
+test('⌥⇧ 加方向键不再移动章节（上移 / 下移 / 升级 / 降级只在菜单中）', async () => {
+  const wrapper = mountManager('b')
+  await press(wrapper, 'b', 'ArrowUp', { altKey: true, shiftKey: true })
+  expect(wrapper.emitted('update:tree')).toBeUndefined()
+})
+
+test('双击章节标题进入重命名；有子章节时展开状态不因双击改变', async () => {
+  const wrapper = mountManager('a')
+  const title = label(wrapper, 'a')
+  await title.trigger('click', { detail: 1 })
+  await title.trigger('click', { detail: 2 })
+  await title.trigger('dblclick')
+  await flushPromises()
+  // 正在重命名的 A 显示为输入框；它的子章节仍然展开。
+  expect(visibleIds(wrapper)).toEqual(['a1', 'a2', 'a2x', 'b'])
+  expect(wrapper.find<HTMLInputElement>('.chapter-tree__rename-input').element.value).toBe('A')
 })

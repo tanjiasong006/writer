@@ -7,7 +7,12 @@ import {
   createChapterAfter,
   type CreateChapterResult,
 } from '../../application/create_chapter.ts'
-import { moveChapterTo, type MoveIntent } from '../../application/move_chapter.ts'
+import {
+  keyboardMoveIntent,
+  moveChapterTo,
+  type KeyboardMoveDirection,
+  type MoveIntent,
+} from '../../application/move_chapter.ts'
 import { renameChapter } from '../../application/rename_chapter.ts'
 import { removeChapter, selectionAfterRemove } from '../../application/remove_chapter.ts'
 import {
@@ -49,10 +54,7 @@ const emit = defineEmits<{
 }>()
 
 const props = defineProps<{
-  /**
-   * 章节是否有正文。没有子章节且没有正文的章节直接删除，不需要确认（ui-spec §23）。
-   * 不提供时保守地认为都有正文，删除总是先确认。
-   */
+  /** 章节是否有正文：决定删除确认中的说明。不提供时保守地认为都有正文。 */
   hasContent?: (chapterId: ChapterId) => boolean
 }>()
 
@@ -148,15 +150,15 @@ function cancelRename(): void {
   editingId.value = null
 }
 
+/**
+ * 删除章节总是先确认（节点菜单、右键菜单、菜单栏、⌘⌫ 相同）：章节结构操作目前不能撤销，
+ * 即使是空章节，直接删除也会丢掉标题与它在结构中的位置。确认的说明按章节内容给出。
+ * 将来章节结构操作可以撤销后，再评估空章节是否可以直接删除（见 ui-spec §23）。
+ */
 function requestDelete(chapterId: ChapterId): void {
   clearError()
   editingId.value = null
   deletingId.value = chapterId
-  // 没有子章节也没有正文：删除不会丢失任何内容，直接删除。
-  if (countDescendants(tree.value, chapterId) === 0 && !chapterHasContent(chapterId)) {
-    confirmDelete()
-    return
-  }
   void focusConfirmCancel()
 }
 
@@ -231,6 +233,23 @@ function move(intent: MoveIntent): void {
   tree.value = result.tree
   errorMessage.value = null
 }
+
+/**
+ * 菜单栏中的章节命令，作用于当前选中章节（与节点菜单、快捷键相同）。
+ * 新建章节没有选中章节时追加到末尾（spec §21）。
+ */
+defineExpose({
+  createChapter: createRoot,
+  createChildChapter: () => selectedId.value !== null && createChild(selectedId.value),
+  renameChapter: () => selectedId.value !== null && startRename(selectedId.value),
+  deleteChapter: () => selectedId.value !== null && requestDelete(selectedId.value),
+  moveChapter: (direction: KeyboardMoveDirection) =>
+    selectedId.value !== null && treeView.value?.moveChapter(selectedId.value, direction),
+  canMove: (direction: KeyboardMoveDirection) =>
+    selectedId.value !== null && keyboardMoveIntent(tree.value, selectedId.value, direction) !== null,
+  /** 把键盘焦点放到选中章节（没有选中时不动）。 */
+  focusSelected: () => selectedId.value !== null && treeView.value?.focusRow(selectedId.value),
+})
 
 /** Domain 只给机器可读 reason，面向用户的中文文案由 UI 层负责。 */
 function messageForInsert(reason: InsertReason): string {
@@ -327,7 +346,8 @@ function messageForMove(reason: MoveReason): string {
           <template v-else-if="deletingDescendantCount > 0">
             该章节包含 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
           </template>
-          <template v-else>该章节包含正文，删除后无法恢复。</template>
+          <template v-else-if="deletingHasContent">该章节包含正文，删除后无法恢复。</template>
+          <template v-else>该章节没有正文，删除后无法恢复。</template>
         </p>
         <div class="chapter-manager__confirm-actions">
           <button type="button" ref="confirmCancelButton" class="chapter-manager__button" tabindex="0" @click="cancelDelete">

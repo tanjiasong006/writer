@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+mod app_env;
 mod commands;
 mod export;
 mod io_kind;
@@ -8,6 +9,9 @@ mod storage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut context = tauri::generate_context!();
+    // 开发构建是独立的应用 "Writer Dev"：不与正式版共享任何应用级数据（见 app_env）。
+    app_env::apply(&mut context);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -23,6 +27,8 @@ pub fn run() {
             commands::project_open,
             commands::project_save,
             commands::project_close,
+            commands::app_state_read,
+            commands::app_state_write,
             commands::project_read_ui_state,
             commands::project_write_ui_state,
             commands::project_import_asset,
@@ -31,7 +37,7 @@ pub fn run() {
             commands::export_pdf,
             commands::reveal_in_file_manager,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app, event| {
             // Cmd+Q / 菜单"退出"会直接请求退出应用，绕过窗口的关闭流程。

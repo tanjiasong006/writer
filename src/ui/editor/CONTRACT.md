@@ -11,7 +11,8 @@
 |---|---|
 | `schema.ts` | 正文结构的权威定义。只包含 Markdown 能表达、Rust 渲染器能渲染的结构。 |
 | `markdown.ts` | Markdown ⇄ 文档。`parseChapter` / `serializeChapter`（保持 CRLF、BOM、结尾换行）、`appendImage`。 |
-| `commands.ts` | 编辑命令与工具栏状态（`toolbarState` 只从 EditorState 推导）。 |
+| `commands.ts` | 编辑命令（格式、结构、插入、表格行列、撤销）与它们的可用 / 激活状态（`commandState` 只从 EditorState 推导）。 |
+| `editor_menu.ts` | 编辑命令在菜单中的名称与快捷键，正文右键菜单的内容（按点击处：图片、表格、文字）。 |
 | `plugins.ts` | 快捷键、输入规则、撤销历史、表格编辑、占位提示、剪贴板；`createEditorState`。 |
 | `caret.ts` | 自绘文字光标：WebKit 原生光标在段落第二行起高度不对，改为按文字高度绘制（输入法组字期间用原生光标）。 |
 | `selection.ts` | 自绘选区底色：WebKit 原生底色从段落中间开始选择时第一行偏高，改为每行一整行行高、行与行首尾相接。 |
@@ -19,7 +20,7 @@
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |
 | `image_view.ts` | 图片节点视图（figure 与行内图片）：按项目资源显示，无法显示时占位。 |
 | `image_layout.ts` | 图片布局：插件状态（图片文件键 → 布局、主题默认）、figure 装饰、可撤销的 `ImageLayoutStep`。 |
-| `ChapterEditor.vue` / `EditorToolbar.vue` / `ImageLayoutControls.vue` | 挂载 EditorView、响应章节切换、发出 change / image-layout、展示工具栏与图片布局按钮。`externalToolbar` 时工具栏由上层（工作区顶栏）显示：编辑器发出 `tools`（工具栏状态 + 选中的图片），通过 `runCommand` / `changeFigureLayout` 接受命令。 |
+| `ChapterEditor.vue` / `ImageLayoutControls.vue` | 挂载 EditorView、响应章节切换、发出 change / image-layout；选中图片时在图片上方显示布局按钮；右键菜单。编辑器没有自己的工具栏：它发出 `tools`（命令状态 + 选中的图片），由工作区的工具栏与菜单栏显示，通过 `runCommand` / `changeFigureLayout` 接受命令。 |
 
 ## 数据流
 

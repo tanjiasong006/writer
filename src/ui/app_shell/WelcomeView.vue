@@ -1,5 +1,8 @@
 <script setup lang="ts">
-/** 没有打开项目时的欢迎页：新建或打开文档。 */
+/**
+ * 没有打开项目时的欢迎页：新建或打开文档。
+ * macOS 窗口没有单独的标题栏（标题栏与内容合一），欢迎页的空白背景就是拖动窗口的区域。
+ */
 defineProps<{
   /** 上一次操作的错误说明（如打开失败）。 */
   error?: string | null
@@ -12,23 +15,22 @@ const emit = defineEmits<{
   'open-project': []
 }>()
 
-const isMac = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
-const mod = isMac ? '⌘' : 'Ctrl+'
+import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
 </script>
 
 <template>
-  <div class="welcome">
-    <div class="welcome__content">
+  <div class="welcome" data-tauri-drag-region>
+    <div class="welcome__content" data-tauri-drag-region>
       <h1 class="welcome__title">Writer</h1>
       <p class="welcome__subtitle">专注长文档的组织、写作与输出。</p>
       <div class="welcome__actions">
         <button type="button" class="welcome__button welcome__button--primary" tabindex="0" :disabled="busy" @click="emit('new-project')">
           <span>新建文档</span>
-          <kbd class="welcome__shortcut">{{ mod }}N</kbd>
+          <kbd class="welcome__shortcut">{{ formatShortcut(SHORTCUTS.newDocument) }}</kbd>
         </button>
         <button type="button" class="welcome__button" tabindex="0" :disabled="busy" @click="emit('open-project')">
           <span>打开文档</span>
-          <kbd class="welcome__shortcut">{{ mod }}O</kbd>
+          <kbd class="welcome__shortcut">{{ formatShortcut(SHORTCUTS.openDocument) }}</kbd>
         </button>
       </div>
       <p class="welcome__hint">每个文档保存为一个文件夹，打开时选择该文件夹即可。</p>

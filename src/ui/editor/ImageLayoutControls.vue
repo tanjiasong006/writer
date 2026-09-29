@@ -4,8 +4,9 @@ import Icon from '../common/Icon.vue'
 import type { IconName } from '../common/icons.ts'
 
 /**
- * 选中独立成段的图片时显示的布局按钮：语义化尺寸与对齐，不提供任意像素输入。
- * 当前实际布局（图片自己的设置或主题默认）显示为按下。按钮不抢焦点，图片保持选中。
+ * 选中独立成段的图片时浮在图片上方的布局按钮：语义化尺寸与对齐，不提供任意像素输入。
+ * 当前实际布局（图片自己的设置或主题默认）显示为按下。按钮不抢焦点，图片保持选中；
+ * 同样的选项也在图片的右键菜单中。
  */
 defineProps<{ layout: ImageLayout }>()
 
@@ -63,11 +64,20 @@ const aligns: ReadonlyArray<{ readonly value: ImageAlign; readonly label: string
 </template>
 
 <style scoped>
-/* 与正文工具栏同一套按钮：尺寸是一组文字按钮，对齐是一组图标按钮。 */
+/*
+ * 浮在选中图片上方的一条紧凑按钮组：尺寸是一组文字按钮，对齐是一组图标按钮，中间一条细分隔线。
+ * 它浮在正文之上，所以使用浮层的底色与阴影；按钮本身与工具栏按钮同一套状态。
+ */
 .image-controls {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-5);
+  gap: var(--space-2);
+  padding: var(--space-1);
+  border-radius: var(--radius-m);
+  background: var(--color-bg-raised);
+  box-shadow: var(--shadow-popover);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .image-controls__group {
@@ -75,26 +85,40 @@ const aligns: ReadonlyArray<{ readonly value: ImageAlign; readonly label: string
   gap: var(--space-1);
 }
 
+.image-controls__group + .image-controls__group {
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--color-separator);
+}
+
 .image-controls__button {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: var(--control-h-m);
-  height: var(--control-h-m);
+  min-width: var(--control-h-s);
+  height: var(--control-h-s);
   padding: 0 var(--space-3);
   border: none;
-  border-radius: var(--radius-m);
+  border-radius: var(--radius-s);
   background: none;
   color: var(--color-text-secondary);
   font: inherit;
-  font-size: var(--text-m);
+  font-size: var(--text-s);
   white-space: nowrap;
   transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.image-controls__button .icon {
+  width: var(--icon-s);
+  height: var(--icon-s);
 }
 
 .image-controls__button:hover {
   background: var(--color-fill-hover);
   color: var(--color-text);
+}
+
+.image-controls__button:active {
+  background: var(--color-fill-pressed);
 }
 
 .image-controls__button--active,

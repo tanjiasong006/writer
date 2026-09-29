@@ -4,20 +4,30 @@ import { ask, open, save } from '@tauri-apps/plugin-dialog'
 import type { AppServices, DesktopShell } from '../application/desktop_shell.ts'
 import { createTauriProjectStorage } from './tauri_project_storage.ts'
 import { createTauriDocumentOutput } from './tauri_document_output.ts'
+import { createTauriMenus } from './tauri_menu.ts'
+import { loadAppState } from './tauri_app_state.ts'
 
-const LAST_PROJECT_KEY = 'writer.lastProjectPath'
-
-/** 基于 Tauri 的桌面能力。 */
-export function createTauriServices(): AppServices {
+/** 基于 Tauri 的桌面能力。启动时先读入应用环境与应用级状态（见 tauri_app_state.ts）。 */
+export async function createTauriServices(): Promise<AppServices> {
   return {
     storage: createTauriProjectStorage(),
-    shell: createTauriShell(),
+    shell: createTauriShell(await loadAppState()),
     output: createTauriDocumentOutput(),
   }
 }
 
-function createTauriShell(): DesktopShell {
+function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): DesktopShell {
+  // macOS：标题栏与工具栏合一（tauri.conf.json 的 titleBarStyle: Overlay），命令同时出现在系统菜单栏中。
+  // 其他平台使用系统标题栏；应用内的工具栏与菜单提供全部命令。
+  const mac = /Mac/.test(navigator.platform)
+  const appName = appState.snapshot.appName
+  const menus = createTauriMenus(appName)
   return {
+    appName,
+    windowStyle: mac ? 'unified' : 'standard',
+    setAppMenu: mac ? menus.setAppMenu : undefined,
+    popupMenu: menus.popupMenu,
+
     async pickNewProjectPath() {
       return save({ title: '新建文档', defaultPath: '未命名文档' })
     },
@@ -57,7 +67,7 @@ function createTauriShell(): DesktopShell {
 
     async confirm(message, labels) {
       return ask(message, {
-        title: 'Writer',
+        title: appName,
         kind: 'warning',
         okLabel: labels?.ok ?? '确定',
         cancelLabel: labels?.cancel ?? '取消',
@@ -110,21 +120,10 @@ function createTauriShell(): DesktopShell {
         })
     },
 
-    getLastProjectPath() {
-      try {
-        return localStorage.getItem(LAST_PROJECT_KEY)
-      } catch {
-        return null
-      }
-    },
-
-    setLastProjectPath(path) {
-      try {
-        if (path === null) localStorage.removeItem(LAST_PROJECT_KEY)
-        else localStorage.setItem(LAST_PROJECT_KEY, path)
-      } catch {
-        // 无法记住上次项目不影响使用。
-      }
-    },
+    getLastProjectPath: appState.getLastProjectPath,
+    setLastProjectPath: appState.setLastProjectPath,
+    getPreference: appState.getPreference,
+    setPreference: appState.setPreference,
+    startupProjectPath: () => appState.snapshot.openProject,
   }
 }

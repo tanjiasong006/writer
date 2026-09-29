@@ -107,7 +107,7 @@ test('列表中 Tab / Shift+Tab 缩进与取消缩进', () => {
   expect(markdown(view)).toBe('- 甲\n- 乙\n')
 })
 
-test('Mod+Z 撤销，Mod+Shift+Z 重做', () => {
+test('Mod+Z 撤销；重做没有快捷键（Mod+Shift+Z、Mod+Y 不再是正文的按键，重做在编辑菜单中）', () => {
   const view = viewOf('引言')
   view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
   typeText(view, '补充')
@@ -115,7 +115,8 @@ test('Mod+Z 撤销，Mod+Shift+Z 重做', () => {
   press(view, 'z', { mod: true })
   expect(markdown(view)).toBe('引言\n')
   press(view, 'z', { mod: true, shift: true })
-  expect(markdown(view)).toBe('引言补充\n')
+  press(view, 'y', { mod: true })
+  expect(markdown(view)).toBe('引言\n')
 })
 
 test('常见格式快捷键', () => {

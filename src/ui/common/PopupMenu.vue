@@ -1,19 +1,20 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import type { MenuEntry } from '../../application/desktop_shell.ts'
+import { formatShortcut } from './shortcuts.ts'
 
 /**
- * 弹出菜单：节点菜单、右键菜单、导出与文档菜单共用。
+ * 界面自己绘制的弹出菜单：没有系统菜单可用时（Storybook、测试，见 use_menu.ts）代替系统的右键菜单与按钮菜单。
  *
  * - 以 fixed 定位浮在界面之上，不被侧栏等滚动区域裁切；放不下时向上 / 向左翻转，始终留在窗口内。
  * - 键盘：↑ / ↓ 移动（循环、跳过不可用项），Home / End 到首 / 末，Enter / Space 执行，Esc / Tab 关闭。
  *   用键盘打开（keyboard 为 true）时第一项立即获得焦点。
  * - 点击菜单以外任意处关闭（透明遮罩，不引入全局监听）。
  * - 关闭时焦点回到打开前的位置；执行的操作若要把焦点移到别处（重命名输入框、对话框），由调用方在之后移动。
- * - 只发出 select / close，不执行任何操作。
+ * - 只发出 select / close，不执行任何操作。标准编辑动作（role）发出 `role:cut` 这样的 id；
+ *   网页无法主动读取剪贴板，粘贴只出现在系统菜单中。子菜单在这里展开为一组带标题的项。
  */
-export type MenuEntry =
-  | { readonly id: string; readonly label: string; readonly shortcut?: string; readonly disabled?: boolean }
-  | { readonly separator: true }
+export type { MenuEntry }
 
 export type MenuAnchor =
   | { readonly x: number; readonly y: number }
@@ -44,9 +45,42 @@ const menu = ref<HTMLElement | null>(null)
 const position = ref<{ left: number; top: number } | null>(null)
 let previousFocus: HTMLElement | null = null
 
-function isItem(entry: MenuEntry): entry is Extract<MenuEntry, { id: string }> {
-  return !('separator' in entry)
+type Row =
+  | { readonly kind: 'item'; readonly id: string; readonly label: string; readonly shortcut?: string; readonly disabled: boolean; readonly checked?: boolean; readonly nested: boolean }
+  | { readonly kind: 'separator' }
+  | { readonly kind: 'heading'; readonly label: string }
+
+const ROLE_LABELS = { cut: '剪切', copy: '拷贝', 'select-all': '全选' } as const
+const ROLE_SHORTCUTS = { cut: 'CmdOrCtrl+X', copy: 'CmdOrCtrl+C', 'select-all': 'CmdOrCtrl+A' } as const
+
+function toRows(entries: readonly MenuEntry[], nested: boolean): Row[] {
+  const rows: Row[] = []
+  for (const entry of entries) {
+    if ('separator' in entry) rows.push({ kind: 'separator' })
+    else if ('role' in entry) {
+      // 网页无法主动读取剪贴板；关闭窗口只出现在菜单栏。
+      if (entry.role === 'paste' || entry.role === 'close-window') continue
+      rows.push({ kind: 'item', id: `role:${entry.role}`, label: ROLE_LABELS[entry.role], shortcut: formatShortcut(ROLE_SHORTCUTS[entry.role]), disabled: false, nested })
+    } else if (entry.submenu) {
+      rows.push({ kind: 'heading', label: entry.label }, ...toRows(entry.submenu, true))
+    } else {
+      rows.push({
+        kind: 'item',
+        id: entry.id,
+        label: entry.label,
+        shortcut: entry.shortcut ? formatShortcut(entry.shortcut) : undefined,
+        disabled: !!entry.disabled,
+        checked: entry.checked,
+        nested,
+      })
+    }
+  }
+  // 去掉首尾与连续的分隔线（例如只剩粘贴的一组）。
+  return rows.filter((row, index, all) => row.kind !== 'separator' || (index > 0 && index < all.length - 1 && all[index + 1].kind !== 'separator'))
 }
+
+const rows = computed(() => toRows(props.items, false))
+const hasChecks = computed(() => rows.value.some((row) => row.kind === 'item' && row.checked !== undefined))
 
 function place(): void {
   const element = menu.value
@@ -151,20 +185,24 @@ function onPointerEnter(event: PointerEvent): void {
     @click.stop
     @contextmenu.prevent
   >
-    <template v-for="(entry, index) in items" :key="isItem(entry) ? entry.id : `separator-${index}`">
-      <li v-if="!isItem(entry)" class="popup-menu__separator" role="separator"></li>
+    <template v-for="(row, index) in rows" :key="row.kind === 'item' ? row.id : `${row.kind}-${index}`">
+      <li v-if="row.kind === 'separator'" class="popup-menu__separator" role="separator"></li>
+      <li v-else-if="row.kind === 'heading'" class="popup-menu__heading" role="presentation">{{ row.label }}</li>
       <li v-else role="none">
         <button
           type="button"
           class="popup-menu__item"
-          role="menuitem"
+          :class="{ 'popup-menu__item--nested': row.nested, 'popup-menu__item--checkable': hasChecks }"
+          :role="row.checked === undefined ? 'menuitem' : 'menuitemcheckbox'"
+          :aria-checked="row.checked"
           tabindex="-1"
-          :disabled="entry.disabled"
+          :disabled="row.disabled"
           @pointerenter="onPointerEnter"
-          @click="emit('select', entry.id)"
+          @click="emit('select', row.id)"
         >
-          <span class="popup-menu__label">{{ entry.label }}</span>
-          <kbd v-if="entry.shortcut" class="popup-menu__shortcut">{{ entry.shortcut }}</kbd>
+          <span v-if="row.checked" class="popup-menu__check" aria-hidden="true">✓</span>
+          <span class="popup-menu__label">{{ row.label }}</span>
+          <kbd v-if="row.shortcut" class="popup-menu__shortcut">{{ row.shortcut }}</kbd>
         </button>
       </li>
     </template>
@@ -225,6 +263,29 @@ function onPointerEnter(event: PointerEvent): void {
   outline: none;
   background: var(--color-accent);
   color: var(--color-text-on-accent);
+}
+
+.popup-menu__item--checkable {
+  position: relative;
+  padding-left: var(--space-7);
+}
+
+.popup-menu__item--nested {
+  padding-left: var(--space-7);
+}
+
+.popup-menu__check {
+  position: absolute;
+  left: var(--space-3);
+  font-size: var(--text-s);
+}
+
+.popup-menu__heading {
+  padding: var(--space-2) var(--space-4) 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-s);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
 }
 
 .popup-menu__item:disabled {

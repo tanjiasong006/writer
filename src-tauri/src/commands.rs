@@ -104,6 +104,24 @@ pub fn project_close(path: PathBuf) {
     }
 }
 
+/// 应用级状态（上次打开的项目、本机界面偏好）与应用环境；保存在 identifier 对应的配置目录中（见 app_env）。
+#[tauri::command]
+pub fn app_state_read(app: tauri::AppHandle) -> Result<crate::app_env::AppStateSnapshot, String> {
+    let dir = crate::app_env::state_dir(&app)?;
+    // 运行时的配置（开发构建已换成 "Writer Dev"）；package_info 是编译时的名称，不随之改变。
+    let name = app.config().product_name.clone().unwrap_or_else(|| "Writer".into());
+    Ok(crate::app_env::snapshot(&dir, name))
+}
+
+#[tauri::command]
+pub async fn app_state_write(app: tauri::AppHandle, state: String) -> Result<(), String> {
+    let dir = crate::app_env::state_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || crate::app_env::write_state(&dir, &state))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub async fn project_save(path: PathBuf, request: SaveRequest) -> Result<(), StorageError> {
     run_storage(move || storage::save_project(&RealFs, &path, &request)).await
