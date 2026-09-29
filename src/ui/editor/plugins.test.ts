@@ -311,6 +311,47 @@ test('标题开头按 Backspace 先变回正文段落，再按一次才与上一
   expect(markdown(first)).toBe('标题\n')
 })
 
+test('表头单元格末尾有不可编辑的空标记（WebKit 输入法确认时单元格不会变空），标记不进入正文', () => {
+  const view = viewOf('| 名称 | |\n| --- | --- |\n| 甲 | 乙 |')
+  const headers = [...view.dom.querySelectorAll('th')]
+  expect(headers.map((cell) => cell.querySelectorAll('.editor-cell-end').length)).toEqual([1, 1])
+  expect(view.dom.querySelectorAll('td .editor-cell-end')).toHaveLength(0)
+  expect(headers[0].querySelector('.editor-cell-end')!.getAttribute('contenteditable')).toBe('false')
+
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3 + '名称'.length)))
+  typeText(view, '表')
+  expect(headers[0].textContent).toBe('名称表')
+  expect(markdown(view)).toBe('| 名称表 |  |\n| --- | --- |\n| 甲 | 乙 |\n')
+})
+
+test('章节第一行是空段落、后面还有内容时，按 Backspace 删掉这一行，光标进入下一块开头', () => {
+  for (const [source, expected, cursorIn] of [
+    ['正文', '正文\n', 'paragraph'],
+    ['## 标题', '## 标题\n', 'heading'],
+    ['- 列表', '- 列表\n', 'paragraph'],
+    ['| a | b |\n| --- | --- |\n| 1 | 2 |', '| a | b |\n| --- | --- |\n| 1 | 2 |\n', 'table_header'],
+  ] as const) {
+    const view = viewOf(`第一行\n\n${source}`)
+    view.dispatch(view.state.tr.delete(1, 1 + '第一行'.length))
+    view.dispatch(view.state.tr.setSelection(Selection.atStart(view.state.doc)))
+    expect(press(view, 'Backspace'), source).toBe(true)
+    expect(markdown(view), source).toBe(expected)
+    expect(view.state.selection.$from.parent.type.name, source).toBe(cursorIn)
+    expect(view.state.selection.$from.parentOffset, source).toBe(0)
+  }
+})
+
+test('只有一个空段落、或第一行不是空段落时，段首 Backspace 不删除', () => {
+  const empty = viewOf('')
+  press(empty, 'Backspace')
+  expect(empty.state.doc.childCount).toBe(1)
+
+  const text = viewOf('第一行\n\n第二行')
+  text.dispatch(text.state.tr.setSelection(Selection.atStart(text.state.doc)))
+  press(text, 'Backspace')
+  expect(markdown(text)).toBe('第一行\n\n第二行\n')
+})
+
 test('系统的撤销 / 重做（编辑菜单、焦点不在正文时的 Cmd+Z）使用编辑器的撤销历史（prosemirror-history 处理）', () => {
   const view = viewOf('引言')
   view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))

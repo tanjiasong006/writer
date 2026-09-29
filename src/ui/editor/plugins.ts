@@ -203,6 +203,21 @@ const headingToParagraph: Command = (state, dispatch) => {
 }
 
 /**
+ * 章节第一行是空段落、后面还有内容时按 Backspace：删掉这一行，光标进入下一块的开头。
+ * 默认的 Backspace 在文档开头没有可合并的上一块，什么也不做，第一行的空行就删不掉。
+ */
+const deleteEmptyFirstBlock: Command = (state, dispatch) => {
+  const { $cursor } = state.selection as TextSelection
+  if (!$cursor || $cursor.depth !== 1 || $cursor.index(0) !== 0) return false
+  if ($cursor.parent.type !== nodes.paragraph || $cursor.parent.content.size > 0 || state.doc.childCount < 2) return false
+  if (dispatch) {
+    const tr = state.tr.delete(0, $cursor.parent.nodeSize)
+    dispatch(tr.setSelection(Selection.near(tr.doc.resolve(0), 1)).scrollIntoView())
+  }
+  return true
+}
+
+/**
  * 正文的按键。⌘ 快捷键（撤销、粗体、斜体、行内代码、列表缩进）来自 common/shortcuts.ts，与菜单栏显示的一致；
  * 其余是写作中的编辑行为（Enter、Tab、Backspace、方向键、Esc、Shift+Enter 换行），不是应用快捷键。
  * 重做没有快捷键（只在编辑菜单中），见 common/shortcuts.ts 的规则。
@@ -215,7 +230,7 @@ const editingKeymap = keymap({
   [proseMirrorKey(SHORTCUTS.inlineCode)]: toggleCode,
   [proseMirrorKey(SHORTCUTS.outdent)]: liftListItem(nodes.list_item),
   [proseMirrorKey(SHORTCUTS.indent)]: sinkListItem(nodes.list_item),
-  Backspace: chainCommands(undoInputRule, headingToParagraph, selectFigureBackward),
+  Backspace: chainCommands(undoInputRule, headingToParagraph, selectFigureBackward, deleteEmptyFirstBlock),
   Delete: selectFigureForward,
   Escape: selectParentNode,
   Enter: chainCommands(exitCodeAfterBlankLines, newlineInCode, enterInCell, newParagraphAtBlock, splitListItem(nodes.list_item)),
@@ -281,6 +296,36 @@ function continueBelow(): Plugin {
       },
     },
   })
+}
+
+/**
+ * 每个表头单元格末尾放一个不可编辑的空标记（不进入文档）。
+ *
+ * WebKit（Safari / Tauri 的 WKWebView）在表头单元格中确认输入法组字时，先删掉组字文字使单元格完全变空，
+ * 再因为表头与表格行的样式不同（粗体、底色）把确认的文字包上 <b> / <span> 插到 <tr> 中并重建整行；
+ * ProseMirror 读回时光标落在单元格开头，之后输入的文字排到前面去。单元格里有这个标记时它不会变空，文字留在原处。
+ */
+function headerCellEnd(): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state) {
+        const decorations: Decoration[] = []
+        state.doc.descendants((node, pos) => {
+          if (node.type === nodes.table_header) {
+            decorations.push(Decoration.widget(pos + node.nodeSize - 1, cellEndMarker, { side: 1, key: 'cell-end' }))
+          }
+          return !node.isTextblock
+        })
+        return DecorationSet.create(state.doc, decorations)
+      },
+    },
+  })
+}
+
+function cellEndMarker(): HTMLElement {
+  const marker = document.createElement('span')
+  marker.className = 'editor-cell-end'
+  return marker
 }
 
 /** 空章节中显示占位提示（不进入文档）。 */
@@ -361,6 +406,7 @@ export const editorPlugins: readonly Plugin[] = [
   dropCursor({ color: '#2563eb' }),
   gapCursor(),
   tableEditing(),
+  headerCellEnd(),
   placeholder('开始写作…'),
   continueBelow(),
   imageLayoutPlugin(),
