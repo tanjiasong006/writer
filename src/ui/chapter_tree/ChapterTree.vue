@@ -37,8 +37,6 @@ const props = defineProps<{
   selectedId?: ChapterId | null
   /** 正在内联重命名的章节 id；由上层在新建后或用户触发时设置。 */
   editingId?: ChapterId | null
-  /** 正在重命名的是刚新建的章节：按 Enter 确认标题后直接进入正文（发出 open），可以马上开始写。 */
-  editingNew?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -648,16 +646,16 @@ function cancelRename(): void {
 }
 
 /**
- * 用键盘结束重命名（Enter 确认 / Esc 放弃）：输入框随之消失，焦点回到该章节所在行，不会掉到页面上；
- * 新章节按 Enter 确认标题后进入正文。失焦提交时焦点已经在别处，不再移动。
+ * 用键盘结束重命名（Enter 确认 / Esc 放弃）：输入框随之消失，焦点回到该章节所在行，不会掉到页面上。
+ * 新建的章节与已有章节相同：确认标题后留在章节树，可以继续调整结构，再用 Enter 或 ⌘J 进入正文。
+ * 失焦提交时焦点已经在别处，不再移动。
  */
 function finishRenameByKey(submit: boolean): void {
   const id = props.editingId
   if (id === null || id === undefined || renameDone) return
   if (submit) commitRename()
   else cancelRename()
-  if (submit && props.editingNew) emit('open', id)
-  else void focusRow(id)
+  void focusRow(id)
 }
 
 /** 把树摊平成带层级的显示行；折叠节点不展开其后代。 */

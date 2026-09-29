@@ -274,7 +274,7 @@ test('⌘↑ / ⌘↓ 上移 / 下移，⌘→ / ⌘← 降级 / 升级：焦点
   expect(selected(wrapper)).toBe('b')
 })
 
-test('⌘N 在焦点章节之后新建同级章节并进入标题编辑；Enter 确认后发出 open', async () => {
+test('⌘N 在焦点章节之后新建同级章节并进入标题编辑；Enter 确认后焦点留在新章节', async () => {
   const wrapper = mountManager('a1')
   await press(wrapper, 'a1', 'n', MOD)
   const siblings = currentTree(wrapper)[0].children
@@ -287,7 +287,8 @@ test('⌘N 在焦点章节之后新建同级章节并进入标题编辑；Enter 
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
   expect(currentTree(wrapper)[0].children[1].title).toBe('方法')
-  expect(wrapper.emitted('open')).toEqual([[created.id]])
+  expect(wrapper.emitted('open')).toBeUndefined()
+  expect(focusedId()).toBe(created.id)
 })
 
 test('⌘↩ 重命名焦点章节（单独的 Enter 仍是进入正文）；Esc 放弃后焦点回到该行', async () => {

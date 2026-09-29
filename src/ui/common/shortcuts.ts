@@ -4,13 +4,14 @@
  * 菜单栏（app_menu.ts）、右键菜单、正文编辑器的按键表（editor/plugins.ts）、章节树的按键处理都从这里取值，
  * 菜单中显示的快捷键与实际响应的按键因此总是一致。
  *
- * 规则：Writer 自己定义的快捷键只用"⌘ + 一个键"（Windows / Linux：Ctrl + 一个键），不用两个及以上修饰键的组合，
- * 也不用单独的功能键。格式与插入命令（格式菜单、插入菜单中的每一项）都有快捷键；章节树的操作（新建、重命名、
+ * 规则：Writer 自己定义的快捷键只用"⌘ + 一个键"（Windows / Linux：Ctrl + 一个键），不用单独的功能键。
+ * 唯一的例外是文档级命令（新建文档、打开文档）用"⇧⌘ + 一个键"：它们离开当前文档，频率低，
+ * 把 ⌘N 留给写作中高频的新建章节。格式与插入命令（格式菜单、插入菜单中的每一项）都有快捷键；章节树的操作（新建、重命名、
  * 移动、删除）与"在章节树和正文之间切换"也都有快捷键，整个写作过程可以只用键盘完成。
  * 其余命令找不到自然、好记、不与 macOS 惯例冲突的单键时宁可不设，命令仍在菜单栏、右键菜单或工具栏中。
  *
  * 同一个按键按焦点所在区域响应（与 macOS 的响应链一致，见 app_shell/app_menu.ts）：
- * 章节树中 ⌘N 新建章节（其他位置新建文档）；⌘↩、⌘ + 方向键、⌘⌫ 只在章节树中作用于章节，
+ * ⌘N、⌘↩、⌘ + 方向键、⌘⌫ 只在章节树中作用于章节，
  * 在正文中保持编辑器自己的含义。
  * 系统菜单项（退出、隐藏、最小化、全屏……）的快捷键由系统提供。
  *
@@ -19,8 +20,8 @@
 export const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform)
 
 export const SHORTCUTS = {
-  newDocument: 'CmdOrCtrl+N',
-  openDocument: 'CmdOrCtrl+O',
+  newDocument: 'CmdOrCtrl+Shift+N',
+  openDocument: 'CmdOrCtrl+Shift+O',
   save: 'CmdOrCtrl+S',
   undo: 'CmdOrCtrl+Z',
   bold: 'CmdOrCtrl+B',
@@ -45,7 +46,7 @@ export const SHORTCUTS = {
   toggleSidebar: 'CmdOrCtrl+Y',
   /** 在章节树与正文之间切换焦点（jump）。侧栏隐藏时先显示。 */
   switchFocus: 'CmdOrCtrl+J',
-  /** 在焦点章节之后新建同级章节，随即进入标题编辑。只在章节树获得焦点时有效（其他位置 ⌘N 是新建文档）。 */
+  /** 在焦点章节之后新建同级章节，随即进入标题编辑。只在章节树获得焦点时有效。 */
   newChapter: 'CmdOrCtrl+N',
   /** 重命名章节。只在章节树获得焦点时有效（单独的 Enter 进入正文）。 */
   renameChapter: 'CmdOrCtrl+Enter',

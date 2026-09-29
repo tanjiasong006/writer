@@ -11,8 +11,6 @@ import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
  * 可用状态按"当前焦点"决定，与 macOS 的响应链一致：格式命令只在正文获得焦点时可用，
  * 移动与删除章节只在章节树获得焦点时可用。于是同一个按键在同一时刻只有一种含义
  * （例如 ⌘⌫ 在正文中删除到行首，在章节树中请求删除章节）。
- * ⌘N 在章节树中是新建章节、其他位置是新建文档：系统菜单栏总是先于网页响应快捷键，
- * 所以 ⌘N 只标在当前有效的那一项上（随焦点移动）。
  */
 
 /** 键盘焦点所在的区域。text-input 是普通输入框（重命名章节、文档名）。 */
@@ -79,7 +77,7 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
     {
       label: '文件',
       items: [
-        { id: 'file:new', label: '新建文档…', shortcut: inTree ? undefined : SHORTCUTS.newDocument },
+        { id: 'file:new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
         { id: 'file:open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
         { separator: true },
         { role: 'close-window' },

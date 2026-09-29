@@ -86,15 +86,17 @@ function shortcuts(menus: readonly AppMenu[]): Array<[string, string]> {
 }
 
 describe('快捷键', () => {
-  test('Writer 自己的快捷键只用"⌘ + 一个键"', () => {
+  test('Writer 自己的快捷键只用"⌘ + 一个键"；新建 / 打开文档例外，用"⇧⌘ + 一个键"', () => {
     const all = [
       ...Object.values(SHORTCUTS),
       ...shortcuts(workspaceMenus(context())).map(([, shortcut]) => shortcut),
       ...shortcuts(workspaceMenus(context({ focus: 'tree' }))).map(([, shortcut]) => shortcut),
       ...shortcuts(welcomeMenus()).map(([, shortcut]) => shortcut),
     ]
+    const documentLevel = new Set<string>([SHORTCUTS.newDocument, SHORTCUTS.openDocument])
     for (const shortcut of all) {
-      expect(shortcut.split('+').slice(0, -1), shortcut).toEqual(['CmdOrCtrl'])
+      const modifiers = documentLevel.has(shortcut) ? ['CmdOrCtrl', 'Shift'] : ['CmdOrCtrl']
+      expect(shortcut.split('+').slice(0, -1), shortcut).toEqual(modifiers)
     }
   })
 
@@ -106,7 +108,7 @@ describe('快捷键', () => {
     for (const entry of entries) expect(entry.shortcut, entry.id).toBeDefined()
   })
 
-  test('同一时刻可用的快捷键互不重复（⌘N 在章节树中是新建章节，其他位置是新建文档）', () => {
+  test('同一时刻可用的快捷键互不重复', () => {
     for (const focus of ['editor', 'tree', 'other'] as const) {
       const all = shortcuts(workspaceMenus(context({ focus })).map((menu) => ({
         ...menu,
@@ -116,7 +118,7 @@ describe('快捷键', () => {
     }
   })
 
-  test('章节操作的快捷键只在章节树中有效；正文中这些键保持编辑器与文件菜单的含义', () => {
+  test('章节操作的快捷键只在章节树中有效；正文中这些键保持编辑器的含义', () => {
     const mod = IS_MAC ? { metaKey: true } : { ctrlKey: true }
     const keys = {
       new: key({ key: 'n', code: 'KeyN', ...mod }),
@@ -129,10 +131,10 @@ describe('快捷键', () => {
     expect(menuItemForKey(inTree, keys.rename)).toBe('chapter:rename')
     expect(menuItemForKey(inTree, keys.up)).toBe('chapter:move-up')
     expect(menuItemForKey(inTree, keys.indent)).toBe('chapter:move-indent')
-    expect(item(inTree, 'file:new').shortcut).toBeUndefined()
 
     const inEditor = workspaceMenus(context())
-    expect(menuItemForKey(inEditor, keys.new)).toBe('file:new')
+    expect(menuItemForKey(inEditor, keys.new)).toBeNull()
+    expect(menuItemForKey(inEditor, key({ key: 'N', code: 'KeyN', shiftKey: true, ...mod }))).toBe('file:new')
     expect(menuItemForKey(inEditor, keys.rename)).toBeNull()
     expect(menuItemForKey(inEditor, keys.up)).toBeNull()
     expect(menuItemForKey(inEditor, keys.indent)).toBeNull()

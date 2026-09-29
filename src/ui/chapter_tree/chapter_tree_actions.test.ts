@@ -123,15 +123,6 @@ test('内联编辑失焦发出 rename', async () => {
   expect(wrapper.emitted('rename')).toEqual([['b', 'B2']])
 })
 
-test('新建章节：命名时按 Enter 确认标题并进入正文（发出 open）', async () => {
-  const wrapper = mount(ChapterTree, { props: { tree: outline, selectedId: 'c', editingId: 'c', editingNew: true } })
-  const input = wrapper.find('.chapter-tree__rename-input')
-  await input.setValue('新章')
-  await input.trigger('keydown.enter')
-  expect(wrapper.emitted('rename')).toEqual([['c', '新章']])
-  expect(wrapper.emitted('open')).toEqual([['c']])
-})
-
 test('重命名已有章节：Enter / Esc 结束后焦点回到该章节所在行，不掉到页面上', async () => {
   for (const key of ['enter', 'esc']) {
     // 像真实上层一样：收到 rename / cancel-rename 时结束编辑，输入框消失、标题按钮重新出现。

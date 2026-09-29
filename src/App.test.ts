@@ -916,7 +916,7 @@ test('全文预览中按 Esc 回到编辑，焦点回到正文', async () => {
   expect(document.activeElement?.classList.contains('chapter-editor__content')).toBe(true)
 })
 
-test('Cmd/Ctrl+O 打开文档（先保存当前项目）', async () => {
+test('Cmd/Ctrl+Shift+O 打开文档（先保存当前项目）', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const other = createDocument('另一篇', [], new Map())
@@ -925,7 +925,7 @@ test('Cmd/Ctrl+O 打开文档（先保存当前项目）', async () => {
   const wrapper = await mountApp(services)
 
   services.shell.projectPath = '/文稿/另一篇'
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ...MOD, cancelable: true }))
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'O', shiftKey: true, ...MOD, cancelable: true }))
   await flushPromises()
   expect(documentTitle(wrapper)).toBe('另一篇')
 })
@@ -1146,7 +1146,7 @@ test('⌘J 在正文与章节树之间切换：进入树时焦点在当前章节
   expect(focusedChapter()).toBe('b')
 })
 
-test('章节树中 ⌘N 新建章节、⌘↩ 重命名；正文中 ⌘N 仍是新建文档，⌘↩ 不作用于章节', async () => {
+test('章节树中 ⌘N 新建章节、⌘↩ 重命名；正文中 ⌘N、⌘↩ 不作用于章节', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
@@ -1156,9 +1156,8 @@ test('章节树中 ⌘N 新建章节、⌘↩ 重命名；正文中 ⌘N 仍是�
   pressInEditor(wrapper, { key: 'Enter', code: 'Enter', ...MOD })
   await flushPromises()
   expect(wrapper.find('.chapter-tree__rename-input').exists()).toBe(false)
-  const newDocument = pressInEditor(wrapper, { key: 'n', code: 'KeyN', ...MOD })
+  pressInEditor(wrapper, { key: 'n', code: 'KeyN', ...MOD })
   await flushPromises()
-  expect(newDocument.defaultPrevented).toBe(true)
   expect(rowTexts(wrapper)).toEqual(['1绪论', '1.1背景', '2方法'])
 
   await label('a').trigger('keydown', { key: 'n', code: 'KeyN', ...MOD })
@@ -1168,7 +1167,8 @@ test('章节树中 ⌘N 新建章节、⌘↩ 重命名；正文中 ⌘N 仍是�
   await input.trigger('keydown', { key: 'Enter' })
   await flushPromises()
   expect(rowTexts(wrapper)).toEqual(['1绪论', '1.1背景', '2结论', '3方法'])
-  expect(editorView(wrapper).hasFocus()).toBe(true)
+  expect(focusedChapter()).toBe(wrapper.find('.chapter-tree__row--selected .chapter-tree__label').attributes('data-chapter-id'))
+  expect(editorView(wrapper).hasFocus()).toBe(false)
 
   await label('b').trigger('keydown', { key: 'Enter', code: 'Enter', ...MOD })
   await flushPromises()

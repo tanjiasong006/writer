@@ -59,8 +59,6 @@ const props = defineProps<{
 }>()
 
 const editingId = ref<ChapterId | null>(null)
-/** 正在命名的是刚新建的章节（确认标题后直接进入正文）。 */
-const editingNew = ref(false)
 const deletingId = ref<ChapterId | null>(null)
 const errorMessage = ref<string | null>(null)
 const confirmCancelButton = ref<HTMLButtonElement | null>(null)
@@ -124,7 +122,6 @@ function applyCreate(result: CreateChapterResult): void {
   tree.value = result.tree
   selectedId.value = result.chapterId
   editingId.value = result.chapterId
-  editingNew.value = true
   errorMessage.value = null
 }
 
@@ -132,7 +129,6 @@ function startRename(chapterId: ChapterId): void {
   clearError()
   deletingId.value = null
   editingId.value = chapterId
-  editingNew.value = false
 }
 
 function commitRename(chapterId: ChapterId, title: string): void {
@@ -309,7 +305,6 @@ function messageForMove(reason: MoveReason): string {
       :tree="tree"
       :selected-id="selectedId"
       :editing-id="editingId"
-      :editing-new="editingNew"
       @select="select"
       @move="move"
       @create-root="createRoot"
