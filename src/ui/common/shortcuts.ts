@@ -42,6 +42,11 @@ export const SHORTCUTS = {
   insertTable: 'CmdOrCtrl+T',
   /** 插入图片（graphic）。 */
   insertImage: 'CmdOrCtrl+G',
+  /**
+   * 打开焦点处的操作菜单（与右键菜单、Shift+F10 相同）：正文中在光标处打开（如表格的插入 / 删除行列），
+   * 章节树中打开焦点章节的菜单。不用 ⌘K：macOS 上 ⌘K 是"添加链接"，留给将来的插入链接。
+   */
+  contextMenu: 'CmdOrCtrl+/',
   /** 显示 / 隐藏侧栏（章节树）。注意 Windows / Linux 上 Ctrl+Y 常作重做，Writer 不用它重做。 */
   toggleSidebar: 'CmdOrCtrl+Y',
   /** 在章节树与正文之间切换焦点（jump）。侧栏隐藏时先显示。 */
@@ -64,6 +69,7 @@ export type ShortcutName = keyof typeof SHORTCUTS
 const KEY_CODES: Readonly<Record<string, string>> = {
   '[': 'BracketLeft',
   ']': 'BracketRight',
+  '/': 'Slash',
 }
 
 /** 按键是否就是加速键描述的组合（修饰键必须完全一致）。字母与数字按物理键比较：⌥ 与 ⇧ 会改变 event.key。 */

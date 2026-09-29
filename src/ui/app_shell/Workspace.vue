@@ -619,6 +619,10 @@ async function runMenuItem(id: string): Promise<void> {
       if (focusRegion.value === 'editor') runCommand(name as EditorCommand)
       else globalThis.document.execCommand(name)
       return
+    case 'edit:context-menu':
+      if (focusRegion.value === 'tree') chapters.value?.openChapterMenu()
+      else void editor.value?.openMenuAtCaret()
+      return
     case 'format:style':
       void openStylePanel()
       return

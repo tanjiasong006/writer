@@ -406,6 +406,14 @@ function openMenuFromKeyboard(row: ChapterRow, target: HTMLElement): void {
   void showMenu(row.id, { rect, align: 'start' }, true, true)
 }
 
+/** 打开焦点章节的菜单（菜单栏的"显示操作菜单"，⌘/），与在该章节上按 Shift+F10 相同。 */
+function openFocusedMenu(): void {
+  const id = tabbableId.value
+  if (id === null) return
+  const label = listElement.value?.querySelector<HTMLElement>(`.chapter-tree__label[data-chapter-id="${CSS.escape(id)}"]`)
+  if (label) void showMenu(id, { rect: label.getBoundingClientRect(), align: 'start' }, true, true)
+}
+
 function closeMenu(): void {
   menuTarget.value = null
   menu.close()
@@ -728,6 +736,7 @@ defineExpose({
   focusCurrent,
   /** 上移 / 下移 / 升级 / 降级（菜单栏）：与快捷键相同，移动后焦点留在该章节。 */
   moveChapter: requestMove,
+  openFocusedMenu,
 })
 </script>
 

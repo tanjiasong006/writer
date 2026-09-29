@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { NodeSelection, Selection, TextSelection } from 'prosemirror-state'
 import { undo, redo, undoDepth } from 'prosemirror-history'
 import type { EditorView } from 'prosemirror-view'
+import { CellSelection } from 'prosemirror-tables'
 import ChapterEditor from './ChapterEditor.vue'
 import {
   THEMES,
@@ -230,6 +231,54 @@ test('右键菜单：表格中列出行列操作，选择后作用于点击处',
   expect(labels).not.toContain('插入表格')
   await chooseFromContextMenu(wrapper, '在下方插入行')
   expect(wrapper.emitted('change')!.at(-1)![1]).toBe('| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n')
+})
+
+test('右键点在选中的任一单元格上时保留多个单元格的选区，删除行作用于全部选中的行', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |\n' })
+  const view = viewOf(wrapper)
+  const cellOf = (text: string) => {
+    let found = -1
+    view.state.doc.descendants((node, pos) => {
+      if (found < 0 && node.type.spec.tableRole === 'cell' && node.textContent === text) found = pos
+      return found < 0
+    })
+    return view.state.doc.resolve(found)
+  }
+  const selection = new CellSelection(cellOf('1'), cellOf('3'))
+  for (const clicked of ['1', '3']) {
+    view.dispatch(view.state.tr.setSelection(selection.map(view.state.doc, view.state.tr.mapping)))
+    view.posAtCoords = () => ({ pos: cellOf(clicked).pos + 2, inside: -1 })
+    await wrapper.find('.chapter-editor__mount').trigger('contextmenu')
+    expect(view.state.selection, clicked).toBeInstanceOf(CellSelection)
+  }
+  await chooseFromContextMenu(wrapper, '删除行')
+  expect(wrapper.emitted('change')!.at(-1)![1]).toBe('| 甲 | 乙 |\n| --- | --- |\n| 5 | 6 |\n')
+})
+
+test('Shift+F10 在光标处打开右键菜单，第一项获得焦点；插入的行可以直接输入', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n' })
+  const view = viewOf(wrapper)
+  view.coordsAtPos = () => ({ left: 10, right: 10, top: 0, bottom: 20 })
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 12)))
+  await wrapper.find('.chapter-editor__mount').trigger('keydown', { key: 'F10', shiftKey: true })
+  const first = wrapper.find('[role="menu"] button')
+  expect(first.find('.popup-menu__label').text()).toBe('在上方插入行')
+  expect(document.activeElement).toBe(first.element)
+  await chooseFromContextMenu(wrapper, '在下方插入行')
+  view.dispatch(view.state.tr.insertText('新'))
+  expect(wrapper.emitted('change')!.at(-1)![1]).toBe('| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n| 新 |  |\n')
+})
+
+test('openMenuAtCaret（⌘/，由菜单栏调用）在光标处打开同一个菜单', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n' })
+  const view = viewOf(wrapper)
+  view.coordsAtPos = () => ({ left: 10, right: 10, top: 0, bottom: 20 })
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 12)))
+  void (wrapper.vm as unknown as { openMenuAtCaret(): Promise<void> }).openMenuAtCaret()
+  await flushPromises()
+  const first = wrapper.find('[role="menu"] button')
+  expect(first.find('.popup-menu__label').text()).toBe('在上方插入行')
+  expect(document.activeElement).toBe(first.element)
 })
 
 test('图片按项目资源显示；无法解析的引用显示占位，引用不变', () => {

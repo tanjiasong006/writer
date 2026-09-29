@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { EditorView } from 'prosemirror-view'
-import { NodeSelection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state'
+import { NodeSelection, TextSelection, type EditorState, type Selection, type Transaction } from 'prosemirror-state'
 import 'prosemirror-view/style/prosemirror.css'
 import 'prosemirror-gapcursor/style/gapcursor.css'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
@@ -9,7 +9,7 @@ import { ChapterDocuments } from './chapter_documents.ts'
 import { commandState, editorCommands, insertImage, type CommandState, type EditorCommand } from './commands.ts'
 import { editorContextMenu } from './editor_menu.ts'
 import { nodes } from './schema.ts'
-import PopupMenu from '../common/PopupMenu.vue'
+import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import { useMenu } from '../common/use_menu.ts'
 import { figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
 import ImageLayoutControls from './ImageLayoutControls.vue'
@@ -255,6 +255,14 @@ function runCommand(command: EditorCommand): void {
  */
 const menu = useMenu()
 
+/**
+ * 位置是否在选区之内。选中多个表格单元格时按每个单元格判断：这种选区的 from / to 只是其中一个单元格，
+ * 在其他选中的单元格上右键也必须保留选区（菜单中的删除行 / 列作用于全部选中的行列）。
+ */
+function inSelection(selection: Selection, pos: number): boolean {
+  return selection.ranges.some((range) => pos >= range.$from.pos && pos <= range.$to.pos)
+}
+
 async function openContextMenu(event: MouseEvent): Promise<void> {
   if (!view) return
   event.preventDefault()
@@ -264,13 +272,32 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
     const inside = hit.inside >= 0 ? doc.nodeAt(hit.inside) : null
     const onFigure = (event.target as Element).closest?.('.editor-figure') && inside?.type === nodes.figure
     if (onFigure) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, hit.inside)))
-    else if (hit.pos < selection.from || hit.pos > selection.to || selection instanceof NodeSelection) {
+    else if (!inSelection(selection, hit.pos) || selection instanceof NodeSelection) {
       view.dispatch(view.state.tr.setSelection(TextSelection.near(doc.resolve(hit.pos))))
     }
   }
+  await showContextMenu({ x: event.clientX, y: event.clientY }, false)
+}
+
+/** Shift+F10 / 菜单键：在光标处打开右键菜单（与章节树相同）。⌘/ 经菜单栏调用 openMenuAtCaret。 */
+function onKeydown(event: KeyboardEvent): void {
+  if (!(event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) return
+  event.preventDefault()
+  void openMenuAtCaret()
+}
+
+/** 在光标下方打开右键菜单，表格的行列等操作只用键盘也能执行；第一项获得焦点。 */
+async function openMenuAtCaret(): Promise<void> {
+  if (!view) return
+  const caret = view.coordsAtPos(view.state.selection.head)
+  await showContextMenu({ x: caret.left, y: caret.bottom }, true)
+}
+
+async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<void> {
+  if (!view) return
   focus()
   const entries = editorContextMenu(commandState(view.state), selectedFigure(view.state))
-  const chosen = await menu.open(entries, { x: event.clientX, y: event.clientY })
+  const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
 }
 
@@ -308,6 +335,7 @@ defineExpose({
   insertImage: insertImageAt,
   runCommand,
   changeFigureLayout,
+  openMenuAtCaret,
   /** 当前的 EditorView（测试与调试用）。 */
   getView: (): EditorView | null => view,
   focus,
@@ -324,7 +352,7 @@ defineExpose({
         </span>
       </h1>
       <div class="chapter-editor__body">
-        <div ref="mountPoint" class="chapter-editor__mount" @contextmenu="openContextMenu"></div>
+        <div ref="mountPoint" class="chapter-editor__mount" @contextmenu="openContextMenu" @keydown="onKeydown"></div>
         <ImageLayoutControls
           v-if="figure"
           ref="figureControls"
@@ -341,6 +369,7 @@ defineExpose({
       label="正文操作"
       :items="menu.current.value.entries"
       :anchor="menu.current.value.anchor"
+      :keyboard="menu.current.value.keyboard"
       @select="menu.select"
       @close="menu.close"
     />

@@ -64,6 +64,27 @@ describe('可用状态随焦点变化（响应链）', () => {
     expect(item(empty, 'chapter:new').disabled).toBeUndefined()
   })
 
+  test('表格菜单：光标在表格中时可用，其他位置不可用', () => {
+    const inCell = commandState(createEditorState(parseMarkdown('| a |\n| --- |\n| b |\n')))
+    // 新建状态的光标在第一个单元格（表头）中：可以在下方插入行，不能删除表头行。
+    const menus = workspaceMenus(context({ tools: inCell }))
+    expect(item(menus, 'editor:row-after').disabled).toBe(false)
+    expect(item(menus, 'editor:delete-table').disabled).toBe(false)
+    expect(item(menus, 'editor:delete-row').disabled).toBe(true)
+    expect(item(workspaceMenus(context()), 'editor:row-after').disabled).toBe(true)
+    expect(item(workspaceMenus(context({ tools: inCell, focus: 'tree' })), 'editor:row-after').disabled).toBe(true)
+  })
+
+  test('⌘/ 在正文与章节树中打开操作菜单；其他位置、预览中不响应', () => {
+    const slash = key({ key: '/', code: 'Slash', ...(IS_MAC ? { metaKey: true } : { ctrlKey: true }) })
+    expect(item(workspaceMenus(context()), 'edit:context-menu').shortcut).toBe(SHORTCUTS.contextMenu)
+    expect(menuItemForKey(workspaceMenus(context()), slash)).toBe('edit:context-menu')
+    expect(menuItemForKey(workspaceMenus(context({ focus: 'tree' })), slash)).toBe('edit:context-menu')
+    expect(menuItemForKey(workspaceMenus(context({ focus: 'tree', hasSelectedChapter: false })), slash)).toBeNull()
+    expect(menuItemForKey(workspaceMenus(context({ focus: 'other' })), slash)).toBeNull()
+    expect(menuItemForKey(workspaceMenus(context({ mode: 'preview' })), slash)).toBeNull()
+  })
+
   test('导出进行中不能再次导出；侧栏项的名称随状态变化', () => {
     const menus = workspaceMenus(context({ exporting: true, sidebarVisible: false }))
     expect(item(menus, 'file:export-pdf').disabled).toBe(true)

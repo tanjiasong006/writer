@@ -5,7 +5,7 @@ import { COMMAND_LABELS, commandEntry } from '../editor/editor_menu.ts'
 import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 
 /**
- * 应用菜单栏（文件、编辑、格式、插入、章节、显示）。快捷键的定义在 common/shortcuts.ts；
+ * 应用菜单栏（文件、编辑、格式、插入、表格、章节、显示）。快捷键的定义在 common/shortcuts.ts；
  * 菜单栏在 macOS 上由系统显示，没有系统菜单栏时工作区按同一份菜单响应快捷键（menuItemForKey）。
  *
  * 可用状态按"当前焦点"决定，与 macOS 的响应链一致：格式命令只在正文获得焦点时可用，
@@ -100,6 +100,14 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
         { role: 'copy' },
         { role: 'paste' },
         { role: 'select-all' },
+        { separator: true },
+        // 打开焦点处的操作菜单（与右键菜单相同）：正文中在光标处，章节树中是焦点章节的菜单。
+        {
+          id: 'edit:context-menu',
+          label: '显示操作菜单',
+          shortcut: SHORTCUTS.contextMenu,
+          disabled: !(editing || (inTree && context.hasSelectedChapter)),
+        },
       ],
     },
     {
@@ -124,6 +132,20 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
     {
       label: '插入',
       items: [editorItem('table'), editorItem('image')],
+    },
+    {
+      // 与正文右键菜单中表格的操作相同，光标在表格中时可用。没有自然的"⌘ + 单键"，不设快捷键。
+      label: '表格',
+      items: [
+        editorItem('row-before'),
+        editorItem('row-after'),
+        editorItem('column-before'),
+        editorItem('column-after'),
+        { separator: true },
+        editorItem('delete-row'),
+        editorItem('delete-column'),
+        editorItem('delete-table'),
+      ],
     },
     {
       label: '章节',

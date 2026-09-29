@@ -169,6 +169,19 @@ test('章节菜单（Shift+F10）上移 / 下移：在同级间移动，焦点�
   expect(currentTree(wrapper).map((n) => n.id)).toEqual(['a', 'b'])
 })
 
+test('菜单栏的"显示操作菜单"（⌘/）打开焦点章节的菜单，与 Shift+F10 相同', async () => {
+  const wrapper = mountManager('b')
+  await label(wrapper, 'b').trigger('focus')
+  ;(wrapper.vm as unknown as { openChapterMenu(): void }).openChapterMenu()
+  await flushPromises()
+  expect(wrapper.find('[role="menu"]').exists()).toBe(true)
+  expect(document.activeElement).toBe(wrapper.find('[role="menu"] button').element)
+  const up = wrapper.findAll('[role="menu"] button').find((button) => button.find('.popup-menu__label').text() === '上移')
+  await up!.trigger('click')
+  await flushPromises()
+  expect(currentTree(wrapper).map((n) => n.id)).toEqual(['b', 'a'])
+})
+
 test('章节菜单降级为上一个兄弟的子章节，升级回来', async () => {
   const wrapper = mountManager('b')
 

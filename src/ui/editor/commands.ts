@@ -14,6 +14,8 @@ import {
   deleteTable,
   isInTable,
   selectedRect,
+  TableMap,
+  type TableRect,
 } from 'prosemirror-tables'
 import { marks, nodes } from './schema.ts'
 
@@ -226,21 +228,53 @@ function inHeaderRow(state: EditorState): boolean {
 }
 
 /**
+ * 表格的行列命令执行后把光标放进 target 给出的单元格（内容末尾），可以直接输入：
+ * 插入后进入新行 / 新列，删除后留在原位置的相邻单元格，而不是停在原处或跳出表格。
+ * target 由操作前的选区矩形与操作后的表格计算（行列操作不改变表格在文档中的位置）。
+ */
+function thenSelectCell(
+  command: Command,
+  target: (before: TableRect, after: TableMap) => { readonly row: number; readonly col: number },
+): Command {
+  return (state, dispatch) => {
+    if (!isInTable(state)) return false
+    const before = selectedRect(state)
+    return command(
+      state,
+      dispatch &&
+        ((tr) => {
+          const table = tr.doc.nodeAt(before.tableStart - 1)!
+          const after = TableMap.get(table)
+          const { row, col } = target(before, after)
+          const cell = before.tableStart + after.positionAt(row, col, table)
+          const end = cell + tr.doc.nodeAt(cell)!.nodeSize - 1
+          dispatch(tr.setSelection(TextSelection.create(tr.doc, end)).scrollIntoView())
+        }),
+    )
+  }
+}
+
+/**
  * 表格的行操作：表头行只能是第一行，不能在它上方插入行，也不能删除它（删除整个表格用"删除表格"）；
  * 只剩一行正文时仍可以删除它，表格保留表头。
  */
-const rowBefore: Command = (state, dispatch) => !inHeaderRow(state) && addRowBefore(state, dispatch)
-const removeRow: Command = (state, dispatch) => {
-  if (!isInTable(state)) return false
-  const rect = selectedRect(state)
-  if (rect.top === 0) return false
-  return deleteRow(state, dispatch)
-}
-/** 只剩一列时不能再删除列（请删除表格）。 */
-const removeColumn: Command = (state, dispatch) => {
-  if (!isInTable(state) || selectedRect(state).map.width <= 1) return false
-  return deleteColumn(state, dispatch)
-}
+const rowBefore = thenSelectCell(
+  (state, dispatch) => !inHeaderRow(state) && addRowBefore(state, dispatch),
+  (before) => ({ row: before.top, col: before.left }),
+)
+const rowAfter = thenSelectCell(addRowAfter, (before) => ({ row: before.bottom, col: before.left }))
+const columnBefore = thenSelectCell(addColumnBefore, (before) => ({ row: before.top, col: before.left }))
+const columnAfter = thenSelectCell(addColumnAfter, (before) => ({ row: before.top, col: before.right }))
+/** 删除后进入下方的行；删除的是最后几行时进入上方的行。 */
+const removeRow = thenSelectCell(
+  (state, dispatch) => selectedRect(state).top > 0 && deleteRow(state, dispatch),
+  (before, after) => ({ row: Math.min(before.top, after.height - 1), col: before.left }),
+)
+/** 只剩一列时不能再删除列（请删除表格）。删除后进入右侧的列；删除的是最后几列时进入左侧的列。 */
+const removeColumn = thenSelectCell(
+  (state, dispatch) => selectedRect(state).map.width > 1 && deleteColumn(state, dispatch),
+  (before, after) => ({ row: before.top, col: Math.min(before.left, after.width - 1) }),
+)
 
 export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image'>, Command>> = {
   undo,
@@ -257,9 +291,9 @@ export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image'>, Co
   outdent: outdentListItem,
   table: insertTable,
   'row-before': rowBefore,
-  'row-after': addRowAfter,
-  'column-before': addColumnBefore,
-  'column-after': addColumnAfter,
+  'row-after': rowAfter,
+  'column-before': columnBefore,
+  'column-after': columnAfter,
   'delete-row': removeRow,
   'delete-column': removeColumn,
   'delete-table': deleteTable,
@@ -287,9 +321,9 @@ export function commandState(state: EditorState): CommandState {
     table: plain(insertTable),
     image: plain(insertImage('', '')),
     'row-before': plain(rowBefore),
-    'row-after': plain(addRowAfter),
-    'column-before': plain(addColumnBefore),
-    'column-after': plain(addColumnAfter),
+    'row-after': plain(rowAfter),
+    'column-before': plain(columnBefore),
+    'column-after': plain(columnAfter),
     'delete-row': plain(removeRow),
     'delete-column': plain(removeColumn),
     'delete-table': plain(deleteTable),

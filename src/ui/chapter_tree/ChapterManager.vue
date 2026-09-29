@@ -270,6 +270,8 @@ defineExpose({
     selectedId.value !== null && treeView.value?.moveChapter(selectedId.value, direction),
   canMove: (direction: KeyboardMoveDirection) =>
     selectedId.value !== null && keyboardMoveIntent(tree.value, selectedId.value, direction) !== null,
+  /** 打开焦点章节的菜单（菜单栏的"显示操作菜单"，⌘/）；删除确认打开时不打开。 */
+  openChapterMenu: () => deletingId.value === null && treeView.value?.openFocusedMenu(),
   /** 从别处（正文、⌘J）进入章节树；删除确认打开时焦点留在对话框中。 */
   focusCurrent: () => deletingId.value === null && treeView.value?.focusCurrent(),
 })

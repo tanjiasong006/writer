@@ -13,6 +13,7 @@ import {
   toggleOrderedList,
   toggleQuote,
   commandState,
+  editorCommands,
 } from './commands.ts'
 import { nodes } from './schema.ts'
 
@@ -153,6 +154,72 @@ describe('插入表格与图片', () => {
     )
     expect(markdown(inCell)).toContain('| c![i](i.png) | d |')
     expect(insertImage('i.png', 'i')(stateOf('```\ncode\n```', { cursorAfter: 'co' }))).toBe(false)
+  })
+})
+
+describe('表格的行与列', () => {
+  const TABLE = '| A | B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |\n\n后文\n'
+
+  /** 光标所在单元格的文字（新插入的单元格为空）。 */
+  function cellText(state: EditorState): string {
+    const { $from } = state.selection
+    expect($from.parent.type.spec.tableRole).toMatch(/cell/)
+    return $from.parent.textContent
+  }
+
+  /** 光标所在单元格的行、列（从 0 开始，表头是第 0 行）。 */
+  function cellAt(state: EditorState): { row: number; col: number } {
+    const { $from } = state.selection
+    return { row: $from.index($from.depth - 2), col: $from.index($from.depth - 1) }
+  }
+
+  test('插入行后光标在新行的同一列，可以直接输入', () => {
+    const after = run(stateOf(TABLE, { cursorAfter: 'b1' }), editorCommands['row-after'])
+    expect(cellAt(after)).toEqual({ row: 2, col: 1 })
+    expect(markdown(after.apply(after.tr.insertText('新')))).toContain('| a1 | b1 |\n|  | 新 |\n| a2 | b2 |')
+
+    const before = run(stateOf(TABLE, { cursorAfter: 'b2' }), editorCommands['row-before'])
+    expect(cellAt(before)).toEqual({ row: 2, col: 1 })
+    expect(cellText(before)).toBe('')
+  })
+
+  test('插入列后光标在新列的同一行', () => {
+    const after = run(stateOf(TABLE, { cursorAfter: 'a2' }), editorCommands['column-after'])
+    expect(cellAt(after)).toEqual({ row: 2, col: 1 })
+    expect(markdown(after.apply(after.tr.insertText('新')))).toContain('| a2 | 新 | b2 |')
+
+    const before = run(stateOf(TABLE, { cursorAfter: 'A' }), editorCommands['column-before'])
+    expect(cellAt(before)).toEqual({ row: 0, col: 0 })
+    expect(before.selection.$from.parent.type).toBe(nodes.table_header)
+  })
+
+  test('删除行后光标留在表格中：进入下方的行，删除最后一行时进入上方的行', () => {
+    expect(cellText(run(stateOf(TABLE, { cursorAfter: 'b1' }), editorCommands['delete-row']))).toBe('b2')
+    const last = run(stateOf(TABLE, { cursorAfter: 'b2' }), editorCommands['delete-row'])
+    expect(cellText(last)).toBe('b1')
+    expect(last.selection.$from.parentOffset).toBe(2)
+    const only = run(stateOf('| A |\n| --- |\n| x |\n', { cursorAfter: 'x' }), editorCommands['delete-row'])
+    expect(markdown(only)).toBe('| A |\n| --- |\n')
+    expect(cellText(only)).toBe('A')
+  })
+
+  test('删除列后光标留在表格中：进入右侧的列，删除最后一列时进入左侧的列', () => {
+    expect(cellText(run(stateOf(TABLE, { cursorAfter: 'a2' }), editorCommands['delete-column']))).toBe('b2')
+    expect(cellText(run(stateOf(TABLE, { cursorAfter: 'b2' }), editorCommands['delete-column']))).toBe('a2')
+  })
+
+  test('表头行不能删除、上方不能插入行；只剩一列时不能删除列', () => {
+    const header = stateOf(TABLE, { cursorAfter: 'A' })
+    expect(editorCommands['delete-row'](header)).toBe(false)
+    expect(editorCommands['row-before'](header)).toBe(false)
+    expect(editorCommands['delete-column'](stateOf('| A |\n| --- |\n| x |\n', { cursorAfter: 'x' }))).toBe(false)
+  })
+
+  test('表格之外不可用', () => {
+    const outside = commandState(stateOf(TABLE, { cursorAfter: '后文' }))
+    for (const command of ['row-before', 'row-after', 'column-before', 'column-after', 'delete-row', 'delete-column'] as const) {
+      expect(outside[command].enabled).toBe(false)
+    }
   })
 })
 
