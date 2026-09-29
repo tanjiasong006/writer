@@ -139,6 +139,7 @@ describe('快捷键', () => {
     expect(menuItemForKey(inTree, key({ key: 's', code: 'KeyS', ...mod }))).toBe('file:save')
     expect(menuItemForKey(inTree, key({ ...deleteKey, ...mod }))).toBe('chapter:delete')
     expect(menuItemForKey(inTree, key({ key: 't', code: 'KeyT', ...mod }))).toBeNull()
+    expect(menuItemForKey(inTree, key({ key: 'y', code: 'KeyY', ...mod }))).toBe('view:sidebar')
     const inEditor = workspaceMenus(context())
     expect(menuItemForKey(inEditor, key({ ...deleteKey, ...mod }))).toBeNull()
     expect(menuItemForKey(inEditor, key({ key: 't', code: 'KeyT', ...mod }))).toBe('editor:table')

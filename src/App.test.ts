@@ -982,6 +982,29 @@ test('隐藏侧栏：焦点在侧栏中时交给正文；快捷键与菜单栏�
   expect(wrapper.find('.workspace__sidebar').isVisible()).toBe(true)
 })
 
+test('⌘Y 显示 / 隐藏侧栏', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', ...MOD }))
+  await flushPromises()
+  expect(wrapper.find('.workspace__sidebar').isVisible()).toBe(false)
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', ...MOD }))
+  await flushPromises()
+  expect(wrapper.find('.workspace__sidebar').isVisible()).toBe(true)
+
+  // 正文中同样有效：ProseMirror 默认会拦下 Mod-y（防止浏览器原生重做）。
+  const view = editorView(wrapper)
+  view.focus()
+  view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', keyCode: 89, bubbles: true, cancelable: true, ...MOD }))
+  await flushPromises()
+  expect(wrapper.find('.workspace__sidebar').isVisible()).toBe(false)
+  expect(view.hasFocus()).toBe(true)
+})
+
 test('把侧栏分隔线拖到最窄处以外松手：隐藏侧栏', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH

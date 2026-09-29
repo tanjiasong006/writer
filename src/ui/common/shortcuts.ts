@@ -36,6 +36,8 @@ export const SHORTCUTS = {
   insertTable: 'CmdOrCtrl+T',
   /** 插入图片（graphic）。 */
   insertImage: 'CmdOrCtrl+G',
+  /** 显示 / 隐藏侧栏（章节树）。注意 Windows / Linux 上 Ctrl+Y 常作重做，Writer 不用它重做。 */
+  toggleSidebar: 'CmdOrCtrl+Y',
   /** 请求删除章节（访达"移到废纸篓"的按键）；总是先确认。只在章节树获得焦点时有效。 */
   deleteChapter: IS_MAC ? 'CmdOrCtrl+Backspace' : 'CmdOrCtrl+Delete',
 } as const

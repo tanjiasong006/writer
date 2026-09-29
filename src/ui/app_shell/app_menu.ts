@@ -148,8 +148,12 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
     {
       label: '显示',
       items: [
-        // 显示 / 隐藏侧栏（macOS 惯例 ⌃⌘S）与全文预览没有自然的"⌘ + 单键"，不设快捷键；预览中按 Esc 回到编辑。
-        { id: 'view:sidebar', label: context.sidebarVisible ? '隐藏侧栏' : '显示侧栏' },
+        // 全文预览没有自然的"⌘ + 单键"，不设快捷键；预览中按 Esc 回到编辑。
+        {
+          id: 'view:sidebar',
+          label: context.sidebarVisible ? '隐藏侧栏' : '显示侧栏',
+          shortcut: SHORTCUTS.toggleSidebar,
+        },
         { id: 'view:preview', label: '全文预览', checked: mode === 'preview' },
       ],
     },

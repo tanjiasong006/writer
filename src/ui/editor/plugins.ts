@@ -24,7 +24,7 @@ import { dropCursor } from 'prosemirror-dropcursor'
 import { GapCursor, gapCursor } from 'prosemirror-gapcursor'
 import { isEmptyDocument, nodes, schema } from './schema.ts'
 import { toggleBold, toggleCode, toggleItalic, undo as undoCommand } from './commands.ts'
-import { SHORTCUTS, proseMirrorKey } from '../common/shortcuts.ts'
+import { SHORTCUTS, matchesShortcut, proseMirrorKey } from '../common/shortcuts.ts'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { imageLayoutPlugin } from './image_layout.ts'
 import { drawCaret } from './caret.ts'
@@ -131,6 +131,20 @@ function tabAfterEscape(): Plugin {
         afterEscape.set(view, lastKey.get(view) === 'Escape')
         lastKey.set(view, event.key)
         return false
+      },
+    },
+  })
+}
+
+/**
+ * 正文不处理的应用快捷键：交给工作区（及菜单栏）。ProseMirror 默认会拦下 Mod-y（防止浏览器原生重做），
+ * 调用 preventDefault 后工作区和菜单栏都收不到这次按键。在这里声明已处理但不 preventDefault，ProseMirror 就不再拦截。
+ */
+function passAppShortcuts(): Plugin {
+  return new Plugin({
+    props: {
+      handleDOMEvents: {
+        keydown: (_view, event) => matchesShortcut(event, SHORTCUTS.toggleSidebar),
       },
     },
   })
@@ -397,6 +411,7 @@ function asDocument(content: Fragment): Node | null {
 }
 
 export const editorPlugins: readonly Plugin[] = [
+  passAppShortcuts(),
   tabAfterEscape(),
   blockInputRules(),
   figureEditing(),
