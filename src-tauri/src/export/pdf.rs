@@ -36,6 +36,8 @@ const TEXT_HEIGHT_PT: f64 = 700.1;
 const IMAGE_HEIGHT_SLACK: f64 = 2.0;
 /// Typst figure 中图片与图注之间的默认间距（em，相对正文字号）。
 const FIGURE_GAP_EM: f64 = 0.65;
+/// 行框在基线下方的部分（em），与 preamble 中的 `bottom-edge` 一致。
+const TEXT_BOTTOM_EDGE_EM: f64 = 0.2;
 /// 表格单元格的内边距（磅），与 preamble 中的 `table(inset: …)` 一致。
 const TABLE_INSET_PT: f64 = 6.0;
 /// 标题的行高（字号的倍数）。
@@ -163,12 +165,18 @@ struct Container {
     max_height: String,
 }
 
+/// 与文字同行的图片立在基线上，所在行比图片多出基线下方的部分（按图片所在处的字号）。
+/// 一行不能跨页拆开，要求整行放得进一页时，从高度上限中扣除这一部分。
+fn line_limit(max_height: &str) -> String {
+    format!("{max_height} - {}em.to-absolute()", num(TEXT_BOTTOM_EDGE_EM))
+}
+
 impl Container {
     /// 正文中的段落与标题：完整正文区。
     fn text_area() -> Self {
         Container {
             width: TEXT_WIDTH_PT,
-            max_height: format!("{}pt", num(TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK)),
+            max_height: line_limit(&format!("{}pt", num(TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK))),
         }
     }
 }
@@ -222,10 +230,11 @@ impl Writer<'_> {
         self.out.push_str(&format!(
             "#set document(title: {title})\n\
              #set page(paper: \"a4\", margin: 25mm, numbering: \"1\", number-align: center)\n\
-             #set text(font: {body_font}, size: {body_size}pt, lang: \"zh\", region: \"cn\", top-edge: 0.8em, bottom-edge: -0.2em)\n\
+             #set text(font: {body_font}, size: {body_size}pt, lang: \"zh\", region: \"cn\", top-edge: 0.8em, bottom-edge: -{bottom_edge}em)\n\
              #set par(justify: true, leading: {leading}em, spacing: {spacing}em)\n\
              #set heading(numbering: none)\n",
             body_font = font_list(body.font.into()),
+            bottom_edge = num(TEXT_BOTTOM_EDGE_EM),
             body_size = num(body.size),
             // 每行的排版框固定为 1em（基线上 0.8em、下 0.2em）：相邻基线距离 = 1em + leading = 行距倍数，
             // 与字体自身的度量无关。
@@ -358,7 +367,7 @@ impl Writer<'_> {
                 };
                 let body_cell = Container {
                     width: cell_width,
-                    max_height: format!("{cell_limit}pt - writer-table-head"),
+                    max_height: line_limit(&format!("{cell_limit}pt - writer-table-head")),
                 };
                 let row = |writer: &mut Self, row: &[Vec<Inline>], cell: &Container| -> Vec<String> {
                     (0..columns)
@@ -945,13 +954,15 @@ mod tests {
         assert!((width / height - 4.0).abs() < 0.01);
     }
 
-    /// 所有页面上的图片底边与文字基线都在正文区内（不进入页脚页码区域）。
+    /// 所有页面上的图片与文字基线都在正文区内：不越过上边距，底边不进入页脚页码区域。
     fn assert_inside_text_area(paged: &PagedDocument) {
         let page_height = paged.pages()[0].frame.height().to_pt();
+        let top = MARGIN_PT - 0.5;
         let bottom = page_height - MARGIN_PT + 0.5;
         for item in placed(paged) {
             match item {
                 Placed::Image { page, y, height, .. } => {
+                    assert!(y >= top, "page {page}: image top {y} < {top}");
                     assert!(y + height <= bottom, "page {page}: image bottom {} > {bottom}", y + height)
                 }
                 Placed::Text { page, y, text, .. } if text.trim() != (page + 1).to_string() => {
@@ -978,6 +989,25 @@ mod tests {
         let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
         assert_eq!(images(&paged).len(), 1);
         assert_inside_text_area(&paged);
+    }
+
+    #[test]
+    fn tall_image_mixed_with_text_in_a_table_cell_stays_inside_the_text_area() {
+        let dir = project();
+        write_image(&dir.path().join("assets/长.png"), 200, 4000, ImageFormat::Png);
+        let text = "W".repeat(60);
+        // 图片所在行比图片多出基线下方的部分；图片前后的文字各自成行，可以随表格行跨页。
+        for cell in [
+            format!("![长](../assets/长.png) {text}"),
+            format!("{text} ![长](../assets/长.png)"),
+            format!("{text} ![长](../assets/长.png) {text}"),
+        ] {
+            let markdown = format!("| 图 | 说明 |\n| --- | --- |\n| {cell} | 很长的图 |");
+            let document = build(&request("", &[("a", vec![1], "表", &markdown)]));
+            let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+            assert_eq!(images(&paged).len(), 1, "{cell}");
+            assert_inside_text_area(&paged);
+        }
     }
 
     #[test]
