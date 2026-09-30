@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest'
 import { EditorView } from 'prosemirror-view'
-import { highlightCode } from './code_highlight.ts'
+import { codeLanguageLabel, highlightCode } from './code_highlight.ts'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { createEditorState } from './plugins.ts'
 
@@ -65,4 +65,23 @@ test('编辑代码块后重新高亮', () => {
   const view = viewOf('```js\nconst a = 1\n```\n')
   view.dispatch(view.state.tr.insertText('// note\n', 1))
   expect(view.dom.querySelector('pre .code-comment')?.textContent).toBe('// note')
+})
+
+test('角标：声明的语言显示名称，别名与大小写视为相同；不认识的原样显示；没有语言时没有角标', () => {
+  expect(codeLanguageLabel('py')).toBe('Python')
+  expect(codeLanguageLabel('TS title="a.ts"')).toBe('TypeScript')
+  expect(codeLanguageLabel('xml')).toBe('HTML / XML')
+  expect(codeLanguageLabel('mermaid')).toBe('mermaid')
+  expect(codeLanguageLabel('')).toBeNull()
+})
+
+test('编辑器中声明了语言的代码块带角标，自动识别的没有', () => {
+  const view = viewOf('```python\nx = 1\n```\n\n```\nSELECT 1;\n```\n')
+  const [declared, auto] = view.dom.querySelectorAll('pre')
+  expect(declared!.dataset.language).toBe('Python')
+  expect(auto!.hasAttribute('data-language')).toBe(false)
+})
+
+test('纯文本不着色', () => {
+  expect(highlightCode("SELECT id FROM t WHERE name = 'x';", 'text')).toEqual([])
 })

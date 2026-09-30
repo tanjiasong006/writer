@@ -138,6 +138,23 @@ export const toggleCodeBlock: Command = (state, dispatch) => {
   return true
 }
 
+/**
+ * 设置光标所在代码块的语言（围栏信息字符串的第一个词，其余部分保留）；空字符串表示自动识别，
+ * 这时去掉整个信息字符串。不在代码块中时不可用。
+ */
+export function setCodeLanguage(language: string): Command {
+  return (state, dispatch) => {
+    const { $from } = state.selection
+    if ($from.parent.type !== nodes.code_block) return false
+    if (dispatch) {
+      const rest = ($from.parent.attrs.params as string).trim().split(/\s+/).slice(1)
+      const params = language ? [language, ...rest].join(' ') : ''
+      dispatch(state.tr.setNodeAttribute($from.before(), 'params', params))
+    }
+    return true
+  }
+}
+
 function inTableCell($pos: ResolvedPos): boolean {
   for (let depth = $pos.depth; depth > 0; depth--) {
     const role = $pos.node(depth).type.spec.tableRole

@@ -7,8 +7,9 @@ import { nodes } from './schema.ts'
 /**
  * 代码块语法高亮：只是展示（decoration），不进入文档、不影响 Markdown 与 Word / PDF 输出。
  *
- * 代码块的语言来自 Markdown 围栏的信息字符串（```ts）。用工具栏或 ⌘0 插入的代码块没有语言，
- * 这时自动识别；识别不可靠（内容太短、像普通文字）时不着色，宁可不高亮也不乱高亮。
+ * 代码块的语言来自 Markdown 围栏的信息字符串（```ts），可在右键菜单“代码语言”中选择（commands.setCodeLanguage）。
+ * 没有语言时（用工具栏或 ⌘0 插入的代码块）自动识别；识别不可靠（内容太短、像普通文字）时不着色，
+ * 宁可不高亮也不乱高亮。声明了语言的代码块右上角显示语言名（data-language，样式见 document_body.css）。
  */
 
 export interface CodeToken {
@@ -31,9 +32,57 @@ const AUTO_DETECT_LANGUAGES = hljs
   .listLanguages()
   .filter((name) => !['css', 'less', 'scss', 'ini', 'vbnet', 'markdown', 'plaintext'].includes(name))
 
-/** 信息字符串的第一个词是语言名（```ts title="a.ts" → ts）；highlight.js 不认识时返回 null。 */
+/**
+ * 可以为代码块选择的语言（菜单中的顺序）：id 写入围栏信息字符串，label 是菜单与代码块角标中的名称。
+ * “纯文本”用于明确不着色。其余 highlight.js 认识的语言仍可以在 Markdown 中手写。
+ */
+export const CODE_LANGUAGES: readonly { readonly id: string; readonly label: string }[] = [
+  { id: 'python', label: 'Python' },
+  { id: 'javascript', label: 'JavaScript' },
+  { id: 'typescript', label: 'TypeScript' },
+  { id: 'java', label: 'Java' },
+  { id: 'c', label: 'C' },
+  { id: 'cpp', label: 'C++' },
+  { id: 'csharp', label: 'C#' },
+  { id: 'go', label: 'Go' },
+  { id: 'rust', label: 'Rust' },
+  { id: 'swift', label: 'Swift' },
+  { id: 'kotlin', label: 'Kotlin' },
+  { id: 'php', label: 'PHP' },
+  { id: 'ruby', label: 'Ruby' },
+  { id: 'r', label: 'R' },
+  { id: 'sql', label: 'SQL' },
+  { id: 'bash', label: 'Shell' },
+  { id: 'json', label: 'JSON' },
+  { id: 'yaml', label: 'YAML' },
+  { id: 'html', label: 'HTML / XML' },
+  { id: 'css', label: 'CSS' },
+  { id: 'markdown', label: 'Markdown' },
+  { id: 'text', label: '纯文本' },
+]
+
+/** 围栏信息字符串的第一个词（```ts title="a.ts" → ts），没有时为空字符串。 */
+export function fenceLanguage(params: string): string {
+  return params.trim().split(/\s+/, 1)[0] ?? ''
+}
+
+/** 两个语言名指同一种语言（别名视为相同，如 js 与 javascript、sh 与 bash）。 */
+export function sameLanguage(a: string, b: string): boolean {
+  if (a.toLowerCase() === b.toLowerCase()) return true
+  const language = hljs.getLanguage(a)
+  return language !== undefined && language === hljs.getLanguage(b)
+}
+
+/** 代码块角标：声明了语言时是它的名称（不认识的语言原样显示），自动识别时没有角标。 */
+export function codeLanguageLabel(params: string): string | null {
+  const name = fenceLanguage(params)
+  if (!name) return null
+  return CODE_LANGUAGES.find((language) => sameLanguage(language.id, name))?.label ?? name
+}
+
+/** highlight.js 认识的声明语言；不认识时返回 null。 */
 function declaredLanguage(params: string): string | null {
-  const name = params.trim().split(/\s+/, 1)[0]?.toLowerCase()
+  const name = fenceLanguage(params).toLowerCase()
   return name && hljs.getLanguage(name) ? name : null
 }
 
@@ -103,6 +152,8 @@ function tokenClass(token: CodeToken): string {
 export function highlightedCodeDOM(node: Node): HTMLElement {
   const pre = document.createElement('pre')
   if (node.attrs.params) pre.dataset.params = node.attrs.params as string
+  const label = codeLanguageLabel(node.attrs.params as string)
+  if (label) pre.dataset.language = label
   const code = pre.appendChild(document.createElement('code'))
   const text = node.textContent
   let offset = 0
@@ -121,6 +172,8 @@ function highlightDecorations(doc: Node): DecorationSet {
   const decorations: Decoration[] = []
   doc.descendants((node, pos) => {
     if (node.type !== nodes.code_block) return !node.isTextblock
+    const label = codeLanguageLabel(node.attrs.params as string)
+    if (label) decorations.push(Decoration.node(pos, pos + node.nodeSize, { 'data-language': label }))
     for (const token of tokensOf(node)) {
       decorations.push(Decoration.inline(pos + 1 + token.from, pos + 1 + token.to, { class: tokenClass(token) }))
     }

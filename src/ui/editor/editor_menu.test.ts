@@ -48,3 +48,31 @@ test('选中图片：添加 / 编辑图注、剪切 / 拷贝，没有尺寸或�
   expect(labels(editorContextMenu(state, ''))).toEqual(['添加图注', '-', 'cut', 'copy'])
   expect(labels(editorContextMenu(state, '实验装置'))).toEqual(['编辑图注', '-', 'cut', 'copy'])
 })
+
+function submenuOf(entries: readonly MenuEntry[], label: string): readonly MenuEntry[] {
+  const entry = entries.find((item) => 'label' in item && item.label === label)
+  if (!entry || !('submenu' in entry) || !entry.submenu) throw new Error(`submenu ${label} not found`)
+  return entry.submenu
+}
+
+function checkedLabels(entries: readonly MenuEntry[]): string[] {
+  return entries.flatMap((entry) => ('checked' in entry && entry.checked ? [entry.label] : []))
+}
+
+test('代码块中：“代码语言”子菜单在最前，当前语言打勾（别名视为相同）', () => {
+  const state = commandState(stateAt('```\nx\n```\n', 1))
+  expect(labels(editorContextMenu(state, null, '')).slice(0, 2)).toEqual(['代码语言', '-'])
+  expect(checkedLabels(submenuOf(editorContextMenu(state, null, ''), '代码语言'))).toEqual(['自动识别'])
+  expect(checkedLabels(submenuOf(editorContextMenu(state, null, 'py'), '代码语言'))).toEqual(['Python'])
+  expect(checkedLabels(submenuOf(editorContextMenu(state, null, 'sh'), '代码语言'))).toEqual(['Shell'])
+})
+
+test('手写的其他语言名列在自动识别之后并打勾', () => {
+  const submenu = submenuOf(editorContextMenu(commandState(stateAt('```\nx\n```\n', 1)), null, 'mermaid'), '代码语言')
+  expect(labels(submenu).slice(0, 3)).toEqual(['自动识别', 'mermaid', '-'])
+  expect(checkedLabels(submenu)).toEqual(['mermaid'])
+})
+
+test('不在代码块中没有代码语言菜单', () => {
+  expect(labels(editorContextMenu(commandState(stateAt('正文\n', 1)), null))).not.toContain('代码语言')
+})

@@ -14,6 +14,7 @@ import {
   toggleQuote,
   commandState,
   editorCommands,
+  setCodeLanguage,
 } from './commands.ts'
 import { nodes } from './schema.ts'
 
@@ -257,5 +258,20 @@ describe('工具栏状态', () => {
     expect(cell.table.enabled).toBe(false)
     expect(cell['bullet-list'].enabled).toBe(false)
     expect(cell.image.enabled).toBe(true)
+  })
+})
+
+describe('代码语言', () => {
+  test('设置光标所在代码块的语言，保留信息字符串的其余部分；自动识别去掉信息字符串', () => {
+    const plain = stateOf('```\nx = 1\n```\n', { cursorAfter: 'x' })
+    const python = run(plain, setCodeLanguage('python'))
+    expect(markdown(python)).toBe('```python\nx = 1\n```\n')
+    const titled = run(stateOf('```js title="a.js"\nx\n```\n', { cursorAfter: 'x' }), setCodeLanguage('typescript'))
+    expect(markdown(titled)).toBe('```typescript title="a.js"\nx\n```\n')
+    expect(markdown(run(python, setCodeLanguage('')))).toBe('```\nx = 1\n```\n')
+  })
+
+  test('不在代码块中时不可用', () => {
+    expect(setCodeLanguage('python')(stateOf('正文', { cursorAfter: '正' }))).toBe(false)
   })
 })

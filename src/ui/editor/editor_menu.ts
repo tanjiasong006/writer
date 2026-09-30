@@ -1,15 +1,17 @@
 import type { MenuEntry } from '../../application/desktop_shell.ts'
 import type { CommandState, EditorCommand } from './commands.ts'
 import { SHORTCUTS } from '../common/shortcuts.ts'
+import { CODE_LANGUAGES, sameLanguage } from './code_highlight.ts'
 
 /**
  * 正文的右键菜单：只列出与点击处直接相关的操作。
  *
  * - 选中的图片：添加 / 编辑图注、剪切 / 拷贝（图片没有单独的尺寸或对齐设置）。
  * - 表格中：插入 / 删除行与列、删除表格，放在最前面。
+ * - 代码块中：“代码语言”子菜单放在最前面（当前语言打勾）。
  * - 其余：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当前所在结构打勾）、插入表格与图片。
  *
- * 菜单项 id：`command:<EditorCommand>`；编辑图注是 `figure:caption`。
+ * 菜单项 id：`command:<EditorCommand>`；编辑图注是 `figure:caption`；代码语言是 `code-language:<语言>`（空为自动识别）。
  * 快捷键与菜单栏一致，只作显示（右键菜单打开期间才生效）。
  */
 
@@ -56,8 +58,34 @@ export function commandEntry(
   }
 }
 
-/** figureCaption：选中了独立成段的图片时是它的图注（可能为空），否则为 null。 */
-export function editorContextMenu(state: CommandState, figureCaption: string | null): MenuEntry[] {
+/** 代码语言子菜单：自动识别、常用语言；手写的其他语言名也列出并打勾，选择其他项时替换它。 */
+function codeLanguageMenu(current: string): MenuEntry {
+  const known = current === '' || CODE_LANGUAGES.some((language) => sameLanguage(language.id, current))
+  return {
+    id: 'code-language',
+    label: '代码语言',
+    submenu: [
+      { id: 'code-language:', label: '自动识别', checked: current === '' },
+      ...(known ? [] : [{ id: `code-language:${current}`, label: current, checked: true }]),
+      { separator: true },
+      ...CODE_LANGUAGES.map((language) => ({
+        id: `code-language:${language.id}`,
+        label: language.label,
+        checked: current !== '' && sameLanguage(language.id, current),
+      })),
+    ],
+  }
+}
+
+/**
+ * figureCaption：选中了独立成段的图片时是它的图注（可能为空），否则为 null。
+ * codeLanguage：光标在代码块中时是它声明的语言（没有时为空字符串），否则为 null。
+ */
+export function editorContextMenu(
+  state: CommandState,
+  figureCaption: string | null,
+  codeLanguage: string | null = null,
+): MenuEntry[] {
   if (figureCaption !== null) {
     return [
       { id: 'figure:caption', label: figureCaption === '' ? '添加图注' : '编辑图注' },
@@ -67,6 +95,7 @@ export function editorContextMenu(state: CommandState, figureCaption: string | n
     ]
   }
   const entries: MenuEntry[] = []
+  if (codeLanguage !== null) entries.push(codeLanguageMenu(codeLanguage), { separator: true })
   const inTable = state['row-after'].enabled
   if (inTable) {
     entries.push(

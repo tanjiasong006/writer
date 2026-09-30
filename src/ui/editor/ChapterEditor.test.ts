@@ -223,6 +223,17 @@ test('右键菜单：表格中列出行列操作，选择后作用于点击处',
   expect(wrapper.emitted('change')!.at(-1)![1]).toBe('| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n|  |  |\n')
 })
 
+test('右键菜单：代码块中选择代码语言，写入围栏并显示角标', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '```\nx = 1\n```\n' })
+  const view = viewOf(wrapper)
+  view.posAtCoords = () => ({ pos: 2, inside: -1 })
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2)))
+  await wrapper.find('.chapter-editor__mount').trigger('contextmenu')
+  await chooseFromContextMenu(wrapper, 'Python')
+  expect(wrapper.emitted('change')!.at(-1)![1]).toBe('```python\nx = 1\n```\n')
+  expect(view.dom.querySelector('pre')!.dataset.language).toBe('Python')
+})
+
 test('右键点在选中的任一单元格上时保留多个单元格的选区，删除行作用于全部选中的行', async () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |\n' })
   const view = viewOf(wrapper)

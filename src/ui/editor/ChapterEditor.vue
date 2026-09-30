@@ -6,7 +6,8 @@ import 'prosemirror-view/style/prosemirror.css'
 import 'prosemirror-gapcursor/style/gapcursor.css'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { ChapterDocuments } from './chapter_documents.ts'
-import { commandState, editorCommands, insertImage, type CommandState, type EditorCommand } from './commands.ts'
+import { commandState, editorCommands, insertImage, setCodeLanguage, type CommandState, type EditorCommand } from './commands.ts'
+import { fenceLanguage } from './code_highlight.ts'
 import { editorContextMenu } from './editor_menu.ts'
 import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
@@ -197,7 +198,12 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
   focus()
   const { selection } = view.state
   const onFigure = selection instanceof NodeSelection && selection.node.type === nodes.figure
-  const entries = editorContextMenu(commandState(view.state), onFigure ? (selection.node.attrs.alt as string) : null)
+  const inCode = selection.$from.parent.type === nodes.code_block
+  const entries = editorContextMenu(
+    commandState(view.state),
+    onFigure ? (selection.node.attrs.alt as string) : null,
+    inCode ? fenceLanguage(selection.$from.parent.attrs.params as string) : null,
+  )
   const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
 }
@@ -205,6 +211,10 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
 function runMenuItem(id: string): void {
   const [kind, value] = id.split(':')
   if (kind === 'command') runCommand(value as EditorCommand)
+  else if (kind === 'code-language' && view) {
+    setCodeLanguage(value ?? '')(view.state, view.dispatch)
+    focus()
+  }
   else if (id === 'figure:caption' && view) editSelectedCaption(view)
 }
 
