@@ -46,6 +46,16 @@ opt-level = 2
 [profile.dev.package.typst-library]
 opt-level = 2
 
+[profile.dev.package.krilla]
+opt-level = 2
+
+[profile.dev.package.png]
+opt-level = 2
+
+[patch.crates-io]
+# PNG 逐行预测的无损编码补丁，范围及升级方式见 vendor/krilla/WRITER-PATCH.md。
+krilla = { path = "vendor/krilla" }
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
@@ -59,3 +69,6 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# 直接验证本地 krilla 补丁的过滤数据与 PDF DecodeParms。
+png = "0.18.1"
+pdf-writer = "0.15"

@@ -10,6 +10,7 @@
 //! - Typst 的文件 id 全局驻留且数量有上限，因此虚拟路径固定（/main.typ、/img/<序号>.png），
 //!   每次导出后清理 comemo 缓存，长时间运行的应用不会累积内存。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -76,6 +77,7 @@ fn layout(
         root: project_root,
         out: String::new(),
         images: Vec::new(),
+        image_cache: HashMap::new(),
         report: ExportReport::default(),
         quote_font: String::new(),
     };
@@ -181,11 +183,21 @@ impl Container {
     }
 }
 
+#[derive(Clone, Copy)]
+struct PreparedImage {
+    index: usize,
+    width: u32,
+    height: u32,
+    format: &'static str,
+}
+
 struct Writer<'a> {
     theme: Theme,
     root: &'a Path,
     out: String,
     images: Vec<Bytes>,
+    /// 单次导出内复用安全解析后的文件；不缓存每次出现的显示尺寸。
+    image_cache: HashMap<PathBuf, PreparedImage>,
     report: ExportReport,
     /// 引用使用的字体列表（preamble 中按输出参数确定）。
     quote_font: String,
@@ -442,8 +454,27 @@ impl Writer<'_> {
     /// 高度不超过 max_height（Typst 长度表达式，可以引用排版时测得的尺寸与 layout 的 size）。
     /// 只给出宽度，高度按比例得到。
     fn image(&mut self, src: &str, alt: &str, max_width: f64, max_height: &str) -> String {
-        let Some(image) = resolve_image(self.root, src).and_then(|path| load_for_export(&path))
-        else {
+        // 每个引用仍先经过路径安全检查，避免缓存绕过项目边界。
+        let image = resolve_image(self.root, src).and_then(|path| {
+            if let Some(image) = self.image_cache.get(&path) {
+                return Some(*image);
+            }
+            let image = load_for_export(&path)?;
+            let prepared = PreparedImage {
+                index: self.images.len(),
+                width: image.width,
+                height: image.height,
+                format: if image.bytes.starts_with(&[0xff, 0xd8]) {
+                    "jpg"
+                } else {
+                    "png"
+                },
+            };
+            self.images.push(Bytes::new(image.bytes));
+            self.image_cache.insert(path, prepared);
+            Some(prepared)
+        });
+        let Some(image) = image else {
             self.report.missing_images.push(src.to_owned());
             let label = if alt.is_empty() { src } else { alt };
             return format!(
@@ -451,14 +482,9 @@ impl Writer<'_> {
                 string(&format!("[图片无法显示：{label}]"))
             );
         };
-        let index = self.images.len();
+        let index = image.index;
         // 虚拟路径固定为 .png，格式显式指定，避免 Typst 按扩展名解码 JPEG。
-        let format = if image.bytes.starts_with(&[0xff, 0xd8]) {
-            "jpg"
-        } else {
-            "png"
-        };
-        self.images.push(Bytes::new(image.bytes));
+        let format = image.format;
         let bounds = Bounds {
             width: max_width,
             height: f64::INFINITY,
@@ -665,6 +691,199 @@ mod tests {
             + text.matches("/Type/Page/").count()
     }
 
+    fn test_writer(root: &Path) -> Writer<'_> {
+        Writer {
+            theme: Theme::default(),
+            root,
+            out: String::new(),
+            images: Vec::new(),
+            image_cache: HashMap::new(),
+            report: ExportReport::default(),
+            quote_font: String::new(),
+        }
+    }
+
+    #[test]
+    fn repeated_images_share_bytes_but_keep_each_containers_size() {
+        let dir = project();
+        write_image(
+            &dir.path().join("assets/wide.png"),
+            1200,
+            600,
+            ImageFormat::Png,
+        );
+        let mut writer = test_writer(dir.path());
+        let wide = writer.image("../assets/wide.png", "First", 400.0, "600pt");
+        // 不同引用文本解析为同一安全路径；尺寸仍由每次出现的容器决定。
+        let narrow = writer.image("../assets/%77ide.png", "Second", 100.0, "200pt");
+        assert_eq!(writer.images.len(), 1, "同一文件只准备一次");
+        assert!(wide.contains("/img/0.png") && narrow.contains("/img/0.png"));
+        assert!(wide.contains("400.00pt") && narrow.contains("100.00pt"));
+        assert!(wide.contains("600pt") && narrow.contains("200pt"));
+        assert!(writer.report.missing_images.is_empty());
+    }
+
+    #[test]
+    fn image_reuse_does_not_keep_stale_files_across_exports() {
+        let dir = project();
+        let path = dir.path().join("assets/small.png");
+        let document = build(&request(
+            "",
+            &[(
+                "a",
+                vec![1],
+                "",
+                "![First](../assets/small.png)\n\n![Second](../assets/small.png)",
+            )],
+        ));
+        write_image(&path, 80, 40, ImageFormat::Png);
+        let (first, report) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert!(report.missing_images.is_empty());
+        let first_images = images(&first);
+        assert_eq!(first_images.len(), 2);
+        assert!(first_images
+            .iter()
+            .all(|image| (image.3 - 60.0).abs() < 0.1 && (image.4 - 30.0).abs() < 0.1));
+        write_image(&path, 160, 80, ImageFormat::Png);
+        let (second, report) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert!(report.missing_images.is_empty());
+        let second_images = images(&second);
+        assert_eq!(second_images.len(), 2);
+        assert!(second_images
+            .iter()
+            .all(|image| (image.3 - 120.0).abs() < 0.1 && (image.4 - 60.0).abs() < 0.1));
+        fs::write(&path, b"broken image").unwrap();
+        let (broken, report) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert!(images(&broken).is_empty());
+        assert_eq!(
+            report.missing_images,
+            vec!["../assets/small.png", "../assets/small.png"]
+        );
+    }
+
+    #[test]
+    fn image_reuse_preserves_layout_in_figures_quotes_and_tables() {
+        let dir = project();
+        for (extension, format) in [("png", ImageFormat::Png), ("jpg", ImageFormat::Jpeg)] {
+            let first = format!("../assets/first.{extension}");
+            let second = format!("../assets/second.{extension}");
+            let third = format!("../assets/third.{extension}");
+            let source = dir.path().join(format!("assets/first.{extension}"));
+            write_image(&source, 1200, 600, format);
+            fs::copy(
+                &source,
+                dir.path().join(format!("assets/second.{extension}")),
+            )
+            .unwrap();
+            fs::copy(
+                &source,
+                dir.path().join(format!("assets/third.{extension}")),
+            )
+            .unwrap();
+            let document = |quote: &str, table: &str| {
+                build(&request("", &[("a", vec![1], "Images", &format!(
+                    "![Figure]({first})\n\n> ![Quote]({quote})\n\n| Image | Description |\n| --- | --- |\n| ![Table]({table}) | Text |"
+                ))]))
+            };
+            // 三个不同文件强制分别准备，作为相同内容的参照排版。
+            let (reference, _) =
+                layout(&document(&second, &third), dir.path(), system_fonts()).unwrap();
+            let (reused, report) =
+                layout(&document(&first, &first), dir.path(), system_fonts()).unwrap();
+            assert!(report.missing_images.is_empty());
+            assert_eq!(images(&reused).len(), 3);
+            assert_eq!(reused.pages().len(), reference.pages().len());
+            assert_eq!(placed(&reused), placed(&reference));
+        }
+    }
+
+    /// 对比纯文字、JPEG、PNG、混合与重复图片。仅使用临时测试数据，字体库预热不计时。
+    /// `cargo test --lib measure_pdf_image_formats -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn measure_pdf_image_formats() {
+        let dir = project();
+        let fonts = system_fonts();
+        let mut seed = 7u32;
+        for n in 0..6 {
+            let photo = image::RgbImage::from_fn(1200, 800, |_, _| {
+                let mut next = || {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    seed as u8
+                };
+                image::Rgb([next(), next(), next()])
+            });
+            photo
+                .save(dir.path().join(format!("assets/{n}.jpg")))
+                .unwrap();
+            write_image(
+                &dir.path().join(format!("assets/{n}.png")),
+                1200,
+                800,
+                ImageFormat::Png,
+            );
+        }
+        for case in ["text", "jpeg", "png", "mixed", "repeated"] {
+            let count = if case == "repeated" { 24 } else { 6 };
+            let markdown = (0..count)
+                .map(|n| {
+                    let index = if case == "repeated" { 0 } else { n };
+                    let format = if case == "png" || (case == "mixed" && n % 2 == 0) {
+                        "png"
+                    } else {
+                        "jpg"
+                    };
+                    if case == "text" {
+                        "测试正文。".to_owned()
+                    } else {
+                        format!("测试正文。\n\n![测试图片](../assets/{index}.{format})")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let document = build(&request(
+                "图片编码测试",
+                &[("a", vec![1], "测试", &markdown)],
+            ));
+            let started = std::time::Instant::now();
+            let (word, report) = crate::export::docx::export(&document, dir.path()).unwrap();
+            let word_time = started.elapsed();
+            assert!(report.missing_images.is_empty());
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&word)).unwrap();
+            let mut media_bytes = 0;
+            for n in 0..archive.len() {
+                let part = archive.by_index(n).unwrap();
+                if part.name().starts_with("word/media/") {
+                    media_bytes += part.size();
+                }
+            }
+            let started = std::time::Instant::now();
+            let mut writer = test_writer(dir.path());
+            writer.preamble(&document, fonts.book());
+            for section in &document.sections {
+                writer.section(section);
+            }
+            let prep_time = started.elapsed();
+            let prepared_count = writer.images.len();
+            let prepared_bytes: usize = writer.images.iter().map(|b| b.len()).sum();
+            assert!(writer.report.missing_images.is_empty());
+            let world = PdfWorld::new(writer.out, writer.images, fonts);
+            let started = std::time::Instant::now();
+            let paged = typst::compile::<PagedDocument>(&world).output.unwrap();
+            let layout_time = started.elapsed();
+            let started = std::time::Instant::now();
+            let pdf = typst_pdf::pdf(&paged, &Default::default()).unwrap();
+            println!("{case}: Word={} bytes ({word_time:?}), media={media_bytes}; PDF={} bytes, prepared={prepared_count}/{prepared_bytes} bytes, prep={prep_time:?}, layout={layout_time:?}, encode={:?}, pages={}", word.len(), pdf.len(), started.elapsed(), paged.pages().len());
+            // 可选：保留输出用于外部阅读器核对，目录由调用者指定为测试目录。
+            if let Ok(out) = std::env::var("WRITER_SAMPLE_DIR") {
+                fs::write(Path::new(&out).join(format!("{case}.pdf")), &pdf).unwrap();
+            }
+            comemo::evict(0);
+        }
+    }
+
     /// 24 张 JPEG（约 29 MB）与正文的分阶段基准，不计 fixture 生成与字体库预热。
     /// `cargo test --lib measure_image_pdf_export -- --ignored --nocapture`
     #[test]
@@ -711,6 +930,7 @@ mod tests {
             root: dir.path(),
             out: String::new(),
             images: Vec::new(),
+            image_cache: HashMap::new(),
             report: ExportReport::default(),
             quote_font: String::new(),
         };
@@ -819,6 +1039,43 @@ mod tests {
     }
 
     #[test]
+    fn png_uses_lossless_row_prediction_instead_of_expanding_pixels() {
+        let dir = project();
+        let path = dir.path().join("assets/gradient.png");
+        write_image(&path, 1200, 800, ImageFormat::Png);
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "", "![](../assets/gradient.png)")],
+        ));
+        let (pdf, report) = export(&document, dir.path(), system_fonts()).unwrap();
+        assert!(report.missing_images.is_empty());
+        assert!(pdf.len() < fs::metadata(path).unwrap().len() as usize + 100_000);
+        let text = String::from_utf8_lossy(&pdf);
+        assert!(text.contains("/Predictor 15"));
+        assert!(text.contains("/Colors 3") && text.contains("/Columns 1200"));
+    }
+
+    #[test]
+    fn transparent_png_predicts_both_color_and_soft_mask() {
+        let dir = project();
+        image::RgbaImage::from_fn(80, 40, |x, y| {
+            image::Rgba([x as u8, y as u8, 128, ((x + y) % 256) as u8])
+        })
+        .save(dir.path().join("assets/alpha.png"))
+        .unwrap();
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "", "![](../assets/alpha.png)")],
+        ));
+        let (pdf, report) = export(&document, dir.path(), system_fonts()).unwrap();
+        assert!(report.missing_images.is_empty());
+        let text = String::from_utf8_lossy(&pdf);
+        assert_eq!(text.matches("/Predictor 15").count(), 2);
+        assert!(text.contains("/Colors 1") && text.contains("/Colors 3"));
+        assert!(text.contains("/SMask"));
+    }
+
+    #[test]
     fn full_document_compiles_to_pdf() {
         let dir = project();
         write_image(
@@ -897,7 +1154,7 @@ mod tests {
     }
 
     /// 分页结果中的文字与图片（页面坐标，磅）。
-    #[derive(Debug)]
+    #[derive(Debug, PartialEq)]
     enum Placed {
         Text {
             page: usize,
@@ -1377,6 +1634,11 @@ mod tests {
         assert_eq!(string("a\"b\\c\nd\u{0}"), "\"a\\\"b\\\\c\\nd\"");
     }
 }
+
+// 让补丁的回归测试随 Writer 的 cargo test 执行，无需另维护 vendor workspace。
+#[cfg(test)]
+#[path = "../../vendor/krilla/src/graphics/png_predictor.rs"]
+mod png_predictor_tests;
 
 /// 手动检查用：`WRITER_SAMPLE_DIR=<目录> cargo test write_sample_pdf -- --ignored`
 #[cfg(test)]

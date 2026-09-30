@@ -2442,8 +2442,6 @@ dependencies = [
 [[package]]
 name = "krilla"
 version = "0.8.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27da593198b20eeba65caeb73c2bbeec3e53ab08fa549898312ce81c4fce5e33"
 dependencies = [
  "base64 0.22.1",
  "bumpalo",
@@ -6488,6 +6486,8 @@ dependencies = [
  "comemo",
  "docx-rs",
  "image",
+ "pdf-writer",
+ "png 0.18.1",
  "pulldown-cmark",
  "serde",
  "serde_json",
