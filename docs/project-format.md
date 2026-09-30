@@ -66,7 +66,7 @@
 - JSON 以 UTF-8 保存，不转义中文。
 - manifest 只解析、保存已定义的有效字段，未知额外字段不保留，正常保存时从当前项目状态重新生成。
   这是有意的格式策略：旧版 Writer 保存带有未来新增可选字段的项目时可能丢弃这些字段。
-  引入 PDF 配置时必须评估该兼容限制，不默认承诺旧版往返保留新配置。
+  已评估：文档信息与 PDF 排版配置都是可选字段，`version` 保持 1，不承诺旧版 Writer 往返保留（见 3.2）。
 
 ### 3.1 取消旧文档样式字段
 
@@ -83,8 +83,47 @@
 - `version` 保持 1：取消可选样式字段不改变标题、章节树、正文文件对应关系及正文格式。
 - 编辑环境主题保存在应用级状态中，遵循 Writer Dev 与正式版隔离，不进入项目 manifest。
 - 单张图片尺寸、对齐、位置等信息不进入 manifest、Markdown、资源 metadata 或其他布局存储。
-- PDF 文档级排版配置的具体存储结构另行设计，不沿用旧 `style`；实施前更新本格式文档，
-  保持与正常项目保存事务一致。当前不提前定义新字段。
+- PDF 文档级排版配置使用新的 `pdf` 字段（见 3.2），不沿用旧 `style`，随正常项目保存事务提交。
+
+### 3.2 文档信息与 PDF 排版配置（已确定，尚未实施）
+
+```json
+{
+  "format": "writer-project",
+  "version": 1,
+  "title": "我的论文",
+  "subtitle": "副标题",
+  "author": "张三",
+  "pdf": { "paragraph": "indent", "toc": true, "tocDepth": 2, "chapterNumber": "chapter" },
+  "chapters": [],
+  "files": {}
+}
+```
+
+- `subtitle`、`author`：可选字符串，属于文档内容（`docs/pdf-layout.md` 第 2 节）。
+  空字符串等同于缺省，保存时不写出。
+- `pdf`：可选对象，只保存用户改过的项；没有改动时不写出。字段与取值：
+
+  | 字段 | 取值 |
+  |---|---|
+  | `paper` | `"a4"` / `"b5"` / `"a5"` / `"letter"` |
+  | `margin` | `"narrow"` / `"normal"` / `"wide"` |
+  | `binding` | `"single"` / `"double"` |
+  | `bodyFont` / `headingFont` | `"serif"` / `"sans"` |
+  | `bodySize` | `10.5` / `12` / `14` |
+  | `lineHeight` | `"compact"` / `"normal"` / `"loose"` |
+  | `paragraph` | `"indent"` / `"spacing"` |
+  | `cover` / `toc` / `chapterNewPage` | 布尔 |
+  | `tocDepth` | `1` / `2` / `3` |
+  | `chapterNumber` | `"plain"` / `"chapter"` / `"none"` |
+  | `header` | `"none"` / `"title"` / `"titleAndChapter"` |
+  | `pageNumber` | `"plain"` / `"page"` / `"total"` |
+  | `table` | `"threeLine"` / `"grid"` |
+
+- 排版配置有问题不阻止打开项目：`pdf` 不是对象时整体忽略；单个字段类型或取值非法时只忽略该字段
+  （回到默认值）；未知字段忽略。忽略的内容在下一次正常保存时不再写出，打开项目不写盘。
+- 文档信息字段类型非法时与标题一样拒绝打开（它们是内容，不静默丢弃）。
+- 与第 3 节的未知字段策略一致：旧版 Writer 保存时会丢弃这些新字段，这是已接受的限制。
 
 ## 4. 正文内容
 

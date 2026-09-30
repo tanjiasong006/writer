@@ -55,6 +55,7 @@ Domain 不包含面向用户的自然语言，用户可见文本由 UI 层负责
 - `docs/implementation-plan.md`：MVP 实施计划与进度。
 - `docs/known-risks.md`：已知风险与结论。
 - `docs/ui-design-principles.md`：UI / UX 设计准则（视觉、交互、状态、动画、验收标准）。
+- `docs/pdf-layout.md`：PDF 默认样式、文档信息与文档级排版配置。
 
 ## 开发规则
 
