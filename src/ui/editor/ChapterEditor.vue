@@ -402,7 +402,7 @@ defineExpose({
 .chapter-editor__body :deep(.editor-selection__box) {
   position: absolute;
   background: var(--color-doc-selection);
-  mix-blend-mode: multiply;
+  mix-blend-mode: var(--color-doc-selection-blend);
   pointer-events: none;
 }
 
