@@ -3,8 +3,9 @@ import type { FocusRegion } from './app_menu.ts'
 
 function regionOf(element: Element | null): FocusRegion {
   if (!(element instanceof HTMLElement)) return 'other'
-  if (element.closest('.chapter-editor__content')) return 'editor'
+  // 先判断输入框：正文中图片的图注也是普通输入框，撤销等交给浏览器。
   if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') return 'text-input'
+  if (element.closest('.chapter-editor__content')) return 'editor'
   if (element.closest('.chapter-tree__list')) return 'tree'
   return 'other'
 }

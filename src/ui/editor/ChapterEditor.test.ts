@@ -372,3 +372,93 @@ test('图片没有单张的布局设置：选中后不出现布局按钮，figur
   expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', IMAGE_CHAPTER])
 })
 
+
+function captionOf(view: EditorView): HTMLTextAreaElement {
+  return view.dom.querySelector('.editor-figure__caption-input')!
+}
+
+function typeCaption(caption: HTMLTextAreaElement, value: string): void {
+  caption.value = value
+  caption.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+function pressIn(element: HTMLElement, key: string): void {
+  element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+}
+
+test('图注：图片下方显示替代文字；没有图注时只有选中图片才显示“添加图注”', () => {
+  const view = viewOf(mountEditor({ chapterId: 'a', content: '![装置](../assets/装置.png)\n\n![](../assets/空.png)\n' }))
+  const [captioned, empty] = [...view.dom.querySelectorAll('.editor-figure')]
+  expect((captioned.querySelector('textarea') as HTMLTextAreaElement).value).toBe('装置')
+  expect(captioned.classList.contains('has-caption')).toBe(true)
+  expect(empty.classList.contains('has-caption')).toBe(false)
+  expect((empty.querySelector('textarea') as HTMLTextAreaElement).placeholder).toBe('添加图注')
+  // 行内图片没有图注。
+  const inline = viewOf(mountEditor({ chapterId: 'b', content: '文字![图](../assets/图.png)' }))
+  expect(inline.dom.querySelector('textarea')).toBeNull()
+})
+
+test('图注：编辑后 Enter 写回替代文字并选中图片，可撤销；编辑中不产生 change', () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: IMAGE_CHAPTER })
+  const view = viewOf(wrapper)
+  const caption = captionOf(view)
+  caption.focus()
+  typeCaption(caption, '  实验装置示意 ')
+  expect(wrapper.emitted('change')).toBeUndefined()
+
+  pressIn(caption, 'Enter')
+  expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', '说明\n\n![实验装置示意](../assets/装置.png)\n'])
+  expect(view.state.selection).toBeInstanceOf(NodeSelection)
+  expect(view.hasFocus()).toBe(true)
+  expect(caption.value).toBe('实验装置示意')
+
+  undo(view.state, view.dispatch)
+  expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', IMAGE_CHAPTER])
+  expect(caption.value).toBe('装置')
+})
+
+test('图注：Esc 放弃本次修改；焦点离开时写回；换行替换为空格', () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: IMAGE_CHAPTER })
+  const view = viewOf(wrapper)
+  const caption = captionOf(view)
+
+  caption.focus()
+  typeCaption(caption, '不要')
+  pressIn(caption, 'Escape')
+  expect(caption.value).toBe('装置')
+  expect(wrapper.emitted('change')).toBeUndefined()
+  expect(view.state.selection).toBeInstanceOf(NodeSelection)
+
+  caption.focus()
+  typeCaption(caption, '第一行\n第二行')
+  expect(caption.value).toBe('第一行 第二行')
+  caption.blur()
+  expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', '说明\n\n![第一行 第二行](../assets/装置.png)\n'])
+})
+
+test('图注：输入法组字中的 Enter 不结束编辑；文本框中的按键不交给正文', () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: IMAGE_CHAPTER })
+  const view = viewOf(wrapper)
+  const caption = captionOf(view)
+  caption.focus()
+  typeCaption(caption, '装置图')
+  caption.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }))
+  expect(document.activeElement).toBe(caption)
+  pressIn(caption, 'Backspace')
+  expect(view.state.doc.textContent).toBe('说明')
+  expect(wrapper.emitted('change')).toBeUndefined()
+})
+
+test('图注：选中图片后从右键菜单进入编辑（添加 / 编辑图注）', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: IMAGE_CHAPTER })
+  const view = viewOf(wrapper)
+  selectFirstImage(view)
+  const editor = wrapper.vm as unknown as { openMenuAtCaret(): Promise<void> }
+  void editor.openMenuAtCaret()
+  await flushPromises()
+  const item = [...document.querySelectorAll('[role="menuitem"]')].find((el) => el.textContent?.includes('编辑图注'))
+  expect(item).toBeDefined()
+  ;(item as HTMLElement).click()
+  await flushPromises()
+  expect(document.activeElement).toBe(captionOf(view))
+})

@@ -211,7 +211,7 @@ export const schema = new Schema({
 
     /**
      * 独占一段的图片（Markdown 中单独成段的 ![alt](src)）：块级、原子节点，与导出中的图（figure）对应，
-     * 有尺寸与对齐布局。它是一个整体：光标只能在它之前 / 之后的段落中，不能停在图片旁边。
+     * alt 是它的图注。它是一个整体：光标只能在它之前 / 之后的段落中，不能停在图片旁边。
      */
     figure: {
       attrs: imageAttrs,

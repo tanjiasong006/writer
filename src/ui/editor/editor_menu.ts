@@ -5,11 +5,11 @@ import { SHORTCUTS } from '../common/shortcuts.ts'
 /**
  * 正文的右键菜单：只列出与点击处直接相关的操作。
  *
- * - 选中的图片：剪切 / 拷贝（图片没有单独的尺寸或对齐设置）。
+ * - 选中的图片：添加 / 编辑图注、剪切 / 拷贝（图片没有单独的尺寸或对齐设置）。
  * - 表格中：插入 / 删除行与列、删除表格，放在最前面。
  * - 其余：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当前所在结构打勾）、插入表格与图片。
  *
- * 菜单项 id：`command:<EditorCommand>`。
+ * 菜单项 id：`command:<EditorCommand>`；编辑图注是 `figure:caption`。
  * 快捷键与菜单栏一致，只作显示（右键菜单打开期间才生效）。
  */
 
@@ -56,9 +56,16 @@ export function commandEntry(
   }
 }
 
-/** figureSelected：选中了独立成段的图片。 */
-export function editorContextMenu(state: CommandState, figureSelected: boolean): MenuEntry[] {
-  if (figureSelected) return [{ role: 'cut' }, { role: 'copy' }]
+/** figureCaption：选中了独立成段的图片时是它的图注（可能为空），否则为 null。 */
+export function editorContextMenu(state: CommandState, figureCaption: string | null): MenuEntry[] {
+  if (figureCaption !== null) {
+    return [
+      { id: 'figure:caption', label: figureCaption === '' ? '添加图注' : '编辑图注' },
+      { separator: true },
+      { role: 'cut' },
+      { role: 'copy' },
+    ]
+  }
   const entries: MenuEntry[] = []
   const inTable = state['row-after'].enabled
   if (inTable) {

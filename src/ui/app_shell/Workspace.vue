@@ -134,12 +134,12 @@ async function insertImage(chapterId: ChapterId): Promise<void> {
     actionError.value = messageForStorageFailure(result.error)
     return
   }
-  const { reference, fileName } = result.value
-  const alt = fileName.replace(/\.[^.]+$/, '')
-  if (editor.value?.insertImage(chapterId, reference, alt)) return
+  // 图注为空，不用文件名代替（图注会出现在导出中），需要时由作者添加。
+  const { reference } = result.value
+  if (editor.value?.insertImage(chapterId, reference, '')) return
   // 选择文件期间切换了章节：追加到发起请求的章节末尾，不插错位置。
   const text = props.session.document.contents.get(chapterId)
-  if (text !== undefined) props.session.setContent(chapterId, appendImage(text, reference, alt))
+  if (text !== undefined) props.session.setContent(chapterId, appendImage(text, reference, ''))
 }
 
 /** 正文中的图片引用 → 编辑器中可显示的地址（只显示项目内的文件）。 */

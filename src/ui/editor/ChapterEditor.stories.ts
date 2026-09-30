@@ -120,13 +120,14 @@ const svgImage = (label: string, width = 480, height = 200) =>
  * 图片按统一规则显示：独占一段的图片居中、保持比例、不放大、不超过正文宽度；没有单张图片的尺寸或对齐设置。
  * 点击选中图片后只有选中框；Delete 删除、Cmd+Z 撤销。
  * 独占一段的图片是一个整体：光标不会停在图片旁边；↑ / ↓ 进出图片，最后一张图片之后按 ↓ 即可继续写。
+ * 图注（替代文字）显示在图片下方，点击即可编辑，Enter 结束、Esc 放弃；第二张图没有图注，选中它时才显示“添加图注”。
  */
 export const Images: Story = {
   args: {
     chapterId: 'ch-4',
     number: '2.2',
     title: '实验装置',
-    content: '装置示意：\n\n![装置](../assets/装置.svg)\n\n![曲线](../assets/曲线.svg)\n\n![缺失的图](../assets/缺失.png)\n',
+    content: '装置示意：\n\n![图 2-1　实验装置示意](../assets/装置.svg)\n\n![](../assets/曲线.svg)\n\n![缺失的图](../assets/缺失.png)\n',
     resolveImage: (reference: string) =>
       reference.endsWith('装置.svg')
         ? svgImage('实验装置')

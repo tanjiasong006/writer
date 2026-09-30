@@ -11,7 +11,7 @@ import { editorContextMenu } from './editor_menu.ts'
 import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import { useMenu } from '../common/use_menu.ts'
-import { figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
+import { editSelectedCaption, figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
 import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from './editor_theme.ts'
 
 /**
@@ -24,6 +24,7 @@ import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from './e
  * - 编辑环境的展示参数（editor_theme.ts）以 CSS 变量作用在外层元素上：不改变文档、不产生 change、
  *   不进入撤销历史、不重建视图，也不读取项目数据。
  * - 图片按统一规则适应编辑区域，没有单张图片的尺寸 / 对齐设置；图片的插入、选择、删除属于正文编辑。
+ *   独立成段的图片下方显示并编辑图注（image_view.ts），图注文本框中的按键与右键不交给正文。
  * - 编辑器自己没有工具栏：命令的可用 / 勾选状态以 tools 发出，由工作区的工具栏与菜单栏显示，
  *   它们通过 runCommand 执行命令。右键菜单列出与点击处相关的操作。
  */
@@ -157,7 +158,8 @@ function inSelection(selection: Selection, pos: number): boolean {
 }
 
 async function openContextMenu(event: MouseEvent): Promise<void> {
-  if (!view) return
+  // 图注文本框中是普通文字编辑，不打开正文菜单。
+  if (!view || isCaption(event.target)) return
   event.preventDefault()
   const hit = view.posAtCoords({ left: event.clientX, top: event.clientY })
   if (hit) {
@@ -174,6 +176,7 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
 
 /** Shift+F10 / 菜单键：在光标处打开右键菜单（与章节树相同）。⌘/ 经菜单栏调用 openMenuAtCaret。 */
 function onKeydown(event: KeyboardEvent): void {
+  if (isCaption(event.target)) return
   if (!(event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) return
   event.preventDefault()
   void openMenuAtCaret()
@@ -191,7 +194,7 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
   focus()
   const { selection } = view.state
   const onFigure = selection instanceof NodeSelection && selection.node.type === nodes.figure
-  const entries = editorContextMenu(commandState(view.state), onFigure)
+  const entries = editorContextMenu(commandState(view.state), onFigure ? (selection.node.attrs.alt as string) : null)
   const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
 }
@@ -199,6 +202,11 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
 function runMenuItem(id: string): void {
   const [kind, value] = id.split(':')
   if (kind === 'command') runCommand(value as EditorCommand)
+  else if (id === 'figure:caption' && view) editSelectedCaption(view)
+}
+
+function isCaption(target: EventTarget | null): boolean {
+  return target instanceof Element && target.classList.contains('editor-figure__caption-input')
 }
 
 /**
@@ -598,6 +606,67 @@ defineExpose({
 .chapter-editor__body :deep(.editor-figure) {
   margin: var(--doc-image-spacing) 0;
   text-align: center;
+}
+
+/*
+ * 图注（image_view.ts）：紧贴图片、居中、小一号。它是一个随内容增高的文本框：隐藏的同内容 ::after
+ * 与文本框放在同一网格格中撑开高度。没有图注时只在选中图片或编辑时显示“添加图注”。
+ */
+.chapter-editor__body :deep(.editor-figure__caption) {
+  display: grid;
+  max-width: 36em;
+  margin: var(--space-3) auto 0;
+  font-family: var(--doc-caption-font);
+  font-size: var(--doc-caption-size);
+  line-height: 1.6;
+  color: var(--color-doc-muted);
+}
+
+.chapter-editor__body :deep(.editor-figure:not(.has-caption, .ProseMirror-selectednode, .is-editing) .editor-figure__caption) {
+  display: none;
+}
+
+.chapter-editor__body :deep(.editor-figure__caption::after),
+.chapter-editor__body :deep(.editor-figure__caption-input) {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border: none;
+  font: inherit;
+  text-align: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chapter-editor__body :deep(.editor-figure__caption::after) {
+  content: attr(data-value) ' ';
+  visibility: hidden;
+}
+
+.chapter-editor__body :deep(.editor-figure__caption-input) {
+  overflow: hidden;
+  resize: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: inherit;
+  /* 正文的文字光标是自绘的（caret-color 为透明），图注文本框用原生光标与选区底色。 */
+  caret-color: var(--color-doc-text);
+  outline: none;
+  cursor: text;
+}
+
+/* 只在编辑时显示文本框中的选区：选中整张图片时正文选区也包住图注，不应把图注画成已选中的文字。 */
+.chapter-editor__body :deep(.editor-figure__caption-input:focus::selection) {
+  background: var(--color-doc-selection);
+}
+
+.chapter-editor__body :deep(.editor-figure__caption-input::placeholder) {
+  color: var(--color-text-tertiary);
+}
+
+.chapter-editor__body :deep(.editor-figure__caption-input:focus) {
+  background: var(--color-fill-hover);
 }
 
 .chapter-editor__body :deep(.editor-image img) {

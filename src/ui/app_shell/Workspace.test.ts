@@ -323,7 +323,7 @@ test('插入图片：复制进项目并在光标处插入引用', async () => {
   )
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ...MOD }))
   await flushPromises()
-  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言\n\n![实验装置](../assets/实验装置.png)')
+  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言\n\n![](../assets/实验装置.png)')
 })
 
 test('插入图片：取消选择不做任何事；导入失败显示原因', async () => {
@@ -361,7 +361,7 @@ test('插入图片期间切换了章节：图片追加到发起请求的章节�
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ...MOD }))
   await flushPromises()
   const contents = services.storage.committed(PATH)!.contents
-  expect(contents.get('a')).toBe('引言\n\n![a](../assets/a.png)\n')
+  expect(contents.get('a')).toBe('引言\n\n![](../assets/a.png)\n')
   expect(contents.get('b')).toBe('方法正文')
 })
 
