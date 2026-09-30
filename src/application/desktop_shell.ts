@@ -68,7 +68,7 @@ export interface DesktopShell {
   loadUiState(projectPath: string): Promise<string | null>
   /** 尽力保存项目的界面状态；失败静默忽略（界面状态丢失不影响文档）。 */
   saveUiState(projectPath: string, state: string): Promise<void>
-  /** 把本地文件路径转换成界面可以显示的地址（如预览中的图片）。 */
+  /** 把本地文件路径转换成界面可以显示的地址（如编辑器中的图片）。 */
   toDisplayUrl(filePath: string): string
   /** 设置窗口标题（系统标题栏、窗口列表中显示）。失败静默忽略。 */
   setWindowTitle(title: string): void

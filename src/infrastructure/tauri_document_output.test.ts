@@ -40,5 +40,8 @@ test('Rust 返回的结构化错误原样传递，未知错误归为 unknown', a
   invokeMock.mockImplementation(async () => {
     throw new Error('boom')
   })
-  expect(await output.renderPreview('/p', request)).toEqual({ ok: false, error: { code: 'unknown', message: 'boom' } })
+  expect(await output.exportDocument('/p', request, 'pdf', '/x.pdf')).toEqual({
+    ok: false,
+    error: { code: 'unknown', message: 'boom' },
+  })
 })

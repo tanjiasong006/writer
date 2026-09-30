@@ -1,4 +1,4 @@
-//! Word / PDF 导出。两者都从 `render::Document` 生成，保证与预览结构一致。
+//! Word / PDF 导出。两者都从 `render::Document` 生成，保证彼此结构一致。
 //!
 //! 通用约定：
 //! - 输出文件先写到同目录临时文件，完整写入并 fsync 后再 rename，失败时不会留下半个文件，
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     #[ignore]
     fn bench_large_document() {
-        use crate::render::{build, html, RenderChapter, RenderRequest};
+        use crate::render::{build, RenderChapter, RenderRequest};
         use std::time::Instant;
         let dir = tempfile::TempDir::new().unwrap();
         let paragraph = "长文档写作需要清晰的结构与稳定的输出。".repeat(20);
@@ -179,12 +179,6 @@ mod tests {
         let t = Instant::now();
         let document = build(&request);
         println!("parse: {:?}", t.elapsed());
-        let t = Instant::now();
-        let preview = html::render(&document, dir.path());
-        println!("preview html: {:?} ({} KB)", t.elapsed(), preview.len() / 1024);
-        if let Ok(out) = std::env::var("WRITER_SAMPLE_DIR") {
-            fs::write(std::path::Path::new(&out).join("large-preview.html"), &preview).unwrap();
-        }
         let t = Instant::now();
         let (docx, _) = docx::export(&document, dir.path()).unwrap();
         println!("docx: {:?} ({} KB)", t.elapsed(), docx.len() / 1024);

@@ -16,7 +16,6 @@ const tools = commandState(createEditorState(parseMarkdown('正文')))
 
 function context(patch: Partial<AppMenuContext> = {}): AppMenuContext {
   return {
-    mode: 'edit',
     focus: 'editor',
     tools,
     hasSelectedChapter: true,
@@ -61,10 +60,8 @@ describe('可用状态随焦点变化（响应链）', () => {
     expect(item(workspaceMenus(context({ focus: 'other' })), 'edit:undo').disabled).toBe(true)
   })
 
-  test('预览中正文命令不可用，预览打勾；没有章节时章节命令不可用', () => {
-    const preview = workspaceMenus(context({ mode: 'preview' }))
-    expect(item(preview, 'editor:table').disabled).toBe(true)
-    expect(item(preview, 'view:preview').checked).toBe(true)
+  test('没有章节时章节命令不可用；菜单中没有全文预览', () => {
+    expect(parseMenuItemId('view:preview')).toBeNull()
     const empty = workspaceMenus(context({ hasSelectedChapter: false, tools: null }))
     expect(item(empty, 'chapter:rename').disabled).toBe(true)
     expect(item(empty, 'chapter:new').disabled).toBeUndefined()
@@ -81,14 +78,13 @@ describe('可用状态随焦点变化（响应链）', () => {
     expect(item(workspaceMenus(context({ tools: inCell, focus: 'tree' })), 'editor:row-after').disabled).toBe(true)
   })
 
-  test('⌘/ 在正文与章节树中打开操作菜单；其他位置、预览中不响应', () => {
+  test('⌘/ 在正文与章节树中打开操作菜单；其他位置不响应', () => {
     const slash = key({ key: '/', code: 'Slash', ...(IS_MAC ? { metaKey: true } : { ctrlKey: true }) })
     expect(item(workspaceMenus(context()), 'edit:context-menu').shortcut).toBe(SHORTCUTS.contextMenu)
     expect(menuItemForKey(workspaceMenus(context()), slash)).toBe('edit:context-menu')
     expect(menuItemForKey(workspaceMenus(context({ focus: 'tree' })), slash)).toBe('edit:context-menu')
     expect(menuItemForKey(workspaceMenus(context({ focus: 'tree', hasSelectedChapter: false })), slash)).toBeNull()
     expect(menuItemForKey(workspaceMenus(context({ focus: 'other' })), slash)).toBeNull()
-    expect(menuItemForKey(workspaceMenus(context({ mode: 'preview' })), slash)).toBeNull()
   })
 
   test('导出进行中不能再次导出；侧栏项的名称随状态变化', () => {

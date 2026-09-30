@@ -30,7 +30,7 @@ import {
 } from '../../testing/app_harness.ts'
 
 /**
- * 工作区（以整个应用挂载，经内存服务）：章节、正文编辑、菜单栏与快捷键、插入图片、文档样式、预览、导出、侧栏与焦点。
+ * 工作区（以整个应用挂载，经内存服务）：章节、正文编辑、菜单栏与快捷键、插入图片、文档样式、导出、侧栏与焦点。
  * 应用级流程见 App.test.ts。
  */
 
@@ -235,7 +235,7 @@ test('新建章节后编辑器切换到新章节', async () => {
   expect(editorText(wrapper)).toBe('')
 })
 
-test('键盘：↓ 切换章节，Enter 进入正文（预览中也回到编辑），章节菜单（Shift+F10）上移章节并保存', async () => {
+test('键盘：↓ 切换章节，Enter 进入正文，章节菜单（Shift+F10）上移章节并保存', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   const wrapper = await mountApp(services)
@@ -247,7 +247,6 @@ test('键盘：↓ 切换章节，Enter 进入正文（预览中也回到编辑�
   await flushPromises()
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('2方法')
 
-  await button(wrapper, '全文预览').trigger('click')
   await label('b').trigger('keydown', { key: 'Enter' })
   await flushPromises()
   expect(editorView(wrapper).hasFocus()).toBe(true)
@@ -366,7 +365,7 @@ test('插入图片期间切换了章节：图片追加到发起请求的章节�
   expect(contents.get('b')).toBe('方法正文')
 })
 
-test('文档样式：修改正文字体即时作用于编辑器，不改变正文与撤销历史；预览、导出使用同一主题；重开后仍在', async () => {
+test('文档样式：修改正文字体即时作用于编辑器，不改变正文与撤销历史；导出使用同一主题；重开后仍在', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
   services.shell.exportPath = '/导出/毕业论文.pdf'
@@ -401,16 +400,11 @@ test('文档样式：修改正文字体即时作用于编辑器，不改变正�
   expect(services.storage.committed(PATH)!.style.overrides).toEqual({ bodyFont: 'sans', lineHeight: 2 })
   expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言！')
 
-  // 预览与导出使用同一套语义样式。
+  // 导出使用同一套语义样式。
   await button(wrapper, '导出').trigger('click')
   await button(wrapper, '导出为 PDF…').trigger('click')
   await flushPromises()
   expect(services.output.exports[0].request.theme.body).toMatchObject({ font: 'sans', lineHeight: 2 })
-  await button(wrapper, '全文预览').trigger('click')
-  await flushPromises()
-  expect(services.output.previews.at(-1)!.theme.body).toMatchObject({ font: 'sans', lineHeight: 2 })
-  const preview = wrapper.find('.document-preview').element as HTMLElement
-  expect(preview.style.getPropertyValue('--doc-line-height')).toBe('2')
 
   // 重新打开项目：样式恢复。
   unmountApp(wrapper)
@@ -468,48 +462,6 @@ test('图片布局：在编辑器中调整后按图片保存到文档样式，�
   expect(services.storage.committed(PATH)!.style.images.size).toBe(0)
 })
 
-test('全文预览：显示所有章节，编辑后刷新，点击章节同步选中', async () => {
-  vi.useFakeTimers()
-  const services = seededServices()
-  services.shell.lastProjectPath = PATH
-  const wrapper = await mountApp(services)
-  await vi.advanceTimersByTimeAsync(0)
-
-  await button(wrapper, '全文预览').trigger('click')
-  await vi.advanceTimersByTimeAsync(0)
-  expect(services.output.previews[0].chapters.map((c) => [c.number.join('.'), c.title])).toEqual([
-    ['1', '绪论'],
-    ['1.1', '背景'],
-    ['2', '方法'],
-  ])
-  expect(wrapper.find('.document-preview').text()).toContain('方法正文')
-  expect(wrapper.findComponent(ChapterEditor).exists()).toBe(false)
-
-  // 在章节树中重命名，预览随之刷新。
-  await wrapper.findAll('.chapter-tree__row')[2].find('.chapter-tree__more').trigger('click')
-  await menuItem(wrapper, '重命名').trigger('click')
-  await wrapper.find('.chapter-tree__rename-input').setValue('研究方法')
-  await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Enter' })
-  await vi.advanceTimersByTimeAsync(500)
-  expect(wrapper.find('.document-preview').text()).toContain('研究方法')
-
-  await wrapper.find('section[data-chapter-id="b"]').trigger('click')
-  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('2研究方法')
-
-  await button(wrapper, '全文预览').trigger('click') // 再次点击回到编辑
-  expect(wrapper.find('.chapter-editor__heading').text()).toBe('2研究方法')
-})
-
-test('全文预览失败时显示原因', async () => {
-  const services = seededServices()
-  services.shell.lastProjectPath = PATH
-  services.output.failNext({ code: 'unknown', message: '渲染进程无响应' })
-  const wrapper = await mountApp(services)
-  await button(wrapper, '全文预览').trigger('click')
-  await flushPromises()
-  expect(wrapper.find('.workspace__preview-error').text()).toContain('渲染进程无响应')
-})
-
 test('导出 Word：选择位置后导出当前文档（含未保存修改），完成后提示', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
@@ -556,20 +508,6 @@ test('导出：取消选择位置不导出；失败时显示原因；图片缺�
   await button(wrapper, '导出为 PDF…').trigger('click')
   await flushPromises()
   expect(wrapper.find('.workspace__notice').text()).toContain('1 张图片无法嵌入')
-})
-
-test('全文预览中按 Esc 回到编辑，焦点回到正文', async () => {
-  const services = seededServices()
-  services.shell.lastProjectPath = PATH
-  const wrapper = await mountApp(services)
-  await button(wrapper, '全文预览').trigger('click')
-  await flushPromises()
-  expect(wrapper.find('.document-preview').exists()).toBe(true)
-
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
-  await flushPromises()
-  expect(wrapper.find('.document-preview').exists()).toBe(false)
-  expect(document.activeElement?.classList.contains('chapter-editor__content')).toBe(true)
 })
 
 test('侧栏宽度：分隔线可用方向键调整，限制在 180–480px', async () => {

@@ -75,7 +75,7 @@ export const SaveFailing: Story = {
   ],
 }
 
-/** 大文档：1050 个章节、每章约 2000 字，用于检查章节树、切换章节、输入与预览的性能。 */
+/** 大文档：1050 个章节、每章约 2000 字，用于检查章节树、切换章节、输入与导出请求组装的性能。 */
 export const LargeDocument: Story = {
   decorators: [
     withServices((services) => {

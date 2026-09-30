@@ -17,7 +17,6 @@ import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 export type FocusRegion = 'editor' | 'tree' | 'text-input' | 'other'
 
 export interface AppMenuContext {
-  readonly mode: 'edit' | 'preview'
   readonly focus: FocusRegion
   /** 当前章节的编辑命令状态；没有打开章节时为 null。 */
   readonly tools: CommandState | null
@@ -32,7 +31,7 @@ const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'reveal', 'export-docx', 
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu'] as const
 const FORMAT_ACTIONS = ['style'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
-const VIEW_ACTIONS = ['sidebar', 'preview', 'switch-focus'] as const
+const VIEW_ACTIONS = ['sidebar', 'switch-focus'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
 
 type FileAction = (typeof FILE_ACTIONS)[number]
@@ -139,8 +138,8 @@ export function welcomeMenus(): WorkspaceMenu[] {
 }
 
 export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
-  const { mode, focus, tools } = context
-  const editing = mode === 'edit' && focus === 'editor' && tools !== null
+  const { focus, tools } = context
+  const editing = focus === 'editor' && tools !== null
   /** 正文命令：勾选状态总是跟随当前章节，可用状态要求正文获得焦点。 */
   const editorItem = (
     command: EditorCommand,
@@ -264,7 +263,6 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
     {
       label: '显示',
       items: [
-        // 全文预览没有自然的"⌘ + 单键"，不设快捷键；预览中按 Esc 回到编辑。
         {
           id: 'view:sidebar',
           label: context.sidebarVisible ? '隐藏侧栏' : '显示侧栏',
@@ -277,8 +275,6 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
           shortcut: SHORTCUTS.switchFocus,
           disabled: focus === 'text-input',
         },
-        { separator: true },
-        { id: 'view:preview', label: '全文预览', checked: mode === 'preview' },
       ],
     },
   ]

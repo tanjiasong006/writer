@@ -65,7 +65,7 @@ function blockReload(event: KeyboardEvent): void {
 
 /**
  * 网页默认的右键菜单（重新载入、检查元素……）不属于桌面应用：界面中有意义的位置（章节、正文）有自己的右键菜单，
- * 其他位置右键不弹出任何菜单。输入框保留系统的剪切 / 拷贝 / 粘贴菜单；选中了文字（如全文预览中）时保留系统的拷贝菜单。
+ * 其他位置右键不弹出任何菜单。输入框保留系统的剪切 / 拷贝 / 粘贴菜单；选中了文字时保留系统的拷贝菜单。
  */
 function blockPageContextMenu(event: MouseEvent): void {
   if (event.defaultPrevented) return

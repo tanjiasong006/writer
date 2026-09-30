@@ -1,8 +1,7 @@
-//! 全文渲染：把前端按章节树顺序展开的文档解析成统一模型，供预览（HTML）与导出（Word / PDF）使用。
+//! 全文渲染：把前端按章节树顺序展开的文档解析成统一模型，供导出（Word / PDF）使用。
 //!
 //! 章节标题与编号只来自文档结构（前端传入），正文 Markdown 中不包含它们（docs/decisions.md 第 3 节）。
 
-pub mod html;
 pub mod markdown;
 pub mod theme;
 

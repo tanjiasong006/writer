@@ -1,7 +1,7 @@
 import type { OutputFailure } from '../../application/document_output.ts'
 import { messageForIo } from './storage_messages.ts'
 
-/** 预览 / 导出失败原因 → 面向用户的中文说明。 */
+/** 导出失败原因 → 面向用户的中文说明。 */
 export function messageForOutputFailure(failure: OutputFailure): string {
   switch (failure.code) {
     case 'no-cjk-font':

@@ -12,14 +12,14 @@ import {
 import type { IoKind } from './project_storage.ts'
 
 /**
- * 全文输出（预览、导出）的端口与请求组装。渲染由 Rust `render` 模块完成，
- * 预览、Word、PDF 共用同一份请求与同一个 Markdown 解析器（docs/decisions.md 第 5 节）。
+ * 全文输出（Word / PDF 导出）的端口与请求组装。渲染由 Rust `render` 模块完成，
+ * Word、PDF 共用同一份请求与同一个 Markdown 解析器（docs/decisions.md 第 5 节）。
  */
 
 /**
  * 按章节树先序展开的全文：章节标题与编号来自结构，正文不含它们。
  * 排版来自 theme（已按主题与用户调整解析好的语义样式）与 images（图片文件键 → 布局），
- * 预览、Word、PDF 各自把它们翻译成自己的样式。
+ * Word、PDF 各自把它们翻译成自己的样式。
  */
 export interface RenderRequest {
   readonly title: string
@@ -54,8 +54,6 @@ export interface ExportReport {
 }
 
 export interface DocumentOutput {
-  /** 全文预览 HTML（已转义）；图片以 data-writer-src 给出本地路径。 */
-  renderPreview(projectPath: string, request: RenderRequest): Promise<OutputResult<string>>
   /**
    * 导出到 targetPath。导出内容是内存中的当前文档（包含尚未保存的修改）。
    * 目标文件原子写入：失败时不会留下半个文件，也不破坏同名旧文件。
@@ -77,15 +75,6 @@ export function exportDocument(
   targetPath: string,
 ): Promise<OutputResult<ExportReport>> {
   return output.exportDocument(projectPath, buildRenderRequest(document), format, targetPath)
-}
-
-/** 渲染当前会话文档的全文预览。 */
-export function previewDocument(
-  output: DocumentOutput,
-  projectPath: string,
-  document: WriterDocument,
-): Promise<OutputResult<string>> {
-  return output.renderPreview(projectPath, buildRenderRequest(document))
 }
 
 /** 按章节树先序（即阅读顺序）展开文档。 */

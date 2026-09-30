@@ -13,7 +13,7 @@ import { tableNodes } from 'prosemirror-tables'
 /**
  * 正文结构的权威定义。
  *
- * 只包含正文持久化格式（Markdown，docs/decisions.md 第 2 节）能表达、且预览与导出
+ * 只包含正文持久化格式（Markdown，docs/decisions.md 第 2 节）能表达、且导出
  * （Rust pulldown-cmark）能渲染的结构：段落、标题、引用、列表（含任务列表标记）、代码块、
  * 分隔线、表格、图片（独占一段的 figure 与行内图片）、硬换行，以及粗体、斜体、删除线、行内代码、链接。
  * 不能用 Markdown 表达的结构（合并单元格、单元格内多段落等）不进入 schema。
@@ -210,7 +210,7 @@ export const schema = new Schema({
     text: { group: 'inline' },
 
     /**
-     * 独占一段的图片（Markdown 中单独成段的 ![alt](src)）：块级、原子节点，与预览 / 导出中的图（figure）对应，
+     * 独占一段的图片（Markdown 中单独成段的 ![alt](src)）：块级、原子节点，与导出中的图（figure）对应，
      * 有尺寸与对齐布局。它是一个整体：光标只能在它之前 / 之后的段落中，不能停在图片旁边。
      */
     figure: {

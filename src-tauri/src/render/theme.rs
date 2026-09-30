@@ -36,16 +36,6 @@ impl ImageSize {
             ImageSize::Full => Some(1.0),
         }
     }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ImageSize::Original => "original",
-            ImageSize::Small => "small",
-            ImageSize::Medium => "medium",
-            ImageSize::Large => "large",
-            ImageSize::Full => "full",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -54,16 +44,6 @@ pub enum ImageAlign {
     Left,
     Center,
     Right,
-}
-
-impl ImageAlign {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ImageAlign::Left => "left",
-            ImageAlign::Center => "center",
-            ImageAlign::Right => "right",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]

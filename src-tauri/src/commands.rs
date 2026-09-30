@@ -63,7 +63,7 @@ pub async fn project_open(
     .await
 }
 
-/// 把项目目录加入 asset 协议的允许范围：编辑器与预览中的图片由 webview 直接读取项目内的文件。
+/// 把项目目录加入 asset 协议的允许范围：编辑器中的图片由 webview 直接读取项目内的文件。
 /// 必须在打开 / 新建项目时就加入，编辑器一挂载就会加载图片。
 fn allow_project_files(app: &tauri::AppHandle, path: &Path) {
     let _ = app.asset_protocol_scope().allow_directory(path, true);
@@ -140,16 +140,6 @@ pub async fn project_write_ui_state(path: PathBuf, state: String) -> Result<(), 
 #[tauri::command]
 pub async fn project_import_asset(path: PathBuf, source: PathBuf) -> Result<String, StorageError> {
     run_storage(move || storage::assets::import_asset(&RealFs, &path, &source)).await
-}
-
-/// 全文预览 HTML。图片以本地路径给出，由 webview 通过 asset 协议读取（打开项目时已允许项目目录）。
-#[tauri::command]
-pub async fn render_preview(path: PathBuf, document: RenderRequest) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        render::html::render(&render::build(&document), &path)
-    })
-    .await
-    .map_err(|error| error.to_string())
 }
 
 /// 导出 Word：在后台线程生成，原子写入目标文件。

@@ -59,7 +59,7 @@
   --color-danger-fill: #fdf1f0;
   --color-success-text: #2c6e3f;
 
-  /* 正文与预览中非主题的中性色（引用线、代码底色、表格线、选区）。 */
+  /* 正文中非主题的中性色（引用线、代码底色、表格线、选区）。 */
   --color-doc-text: #1f1f21;
   --color-doc-muted: #55555a;
   --color-doc-rule: #d8d8d4;

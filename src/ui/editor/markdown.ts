@@ -11,7 +11,7 @@ import { marks, nodes, schema } from './schema.ts'
 /**
  * 正文持久化格式（Markdown）与编辑器文档之间的转换。
  *
- * Markdown 方言与预览 / 导出使用的 Rust pulldown-cmark 保持一致：CommonMark + GFM 表格、删除线、任务列表；
+ * Markdown 方言与导出使用的 Rust pulldown-cmark 保持一致：CommonMark + GFM 表格、删除线、任务列表；
  * 原始 HTML 一律视为文字。序列化结果再次解析后结构不变（round trip），见 markdown.test.ts。
  */
 
@@ -89,7 +89,7 @@ tokenizer.core.ruler.push('writer_task_list', (state) => {
 })
 
 /**
- * 只含一张图片的段落是独立的图（figure），与预览 / 导出的判断相同：把 paragraph_open、inline（只有一张图片）、
+ * 只含一张图片的段落是独立的图（figure），与导出的判断相同：把 paragraph_open、inline（只有一张图片）、
  * paragraph_close 合成一个 figure 记号。任务列表标记去掉后留下的空文字不算内容。图片与文字同处一段时仍是段落。
  */
 tokenizer.core.ruler.push('writer_figure', (state) => {

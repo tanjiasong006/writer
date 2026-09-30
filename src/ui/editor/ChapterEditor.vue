@@ -392,7 +392,7 @@ defineExpose({
 
 /*
  * 章节标题是这一页的开头，随正文一起滚动，不占用固定的界面区域。
- * 它按在文档中的层级使用主题的标题样式（与预览 / 导出一致），与正文共用版心。
+ * 它按在文档中的层级使用主题的标题样式，与正文共用版心。
  */
 .chapter-editor__heading {
   max-width: var(--doc-column);
@@ -421,8 +421,8 @@ defineExpose({
 }
 
 /*
- * 正文排版与全文预览（DocumentPreview）一致：宽度相同，字体、字号、行距、段距、标题、引用、代码、
- * 表格、图注与图片布局都来自文档主题的 CSS 变量（ui/document_style/theme_css.ts）。
+ * 正文排版：字体、字号、行距、段距、标题、引用、代码、表格、图注与图片布局
+ * 都来自文档主题的 CSS 变量（ui/document_style/theme_css.ts）。
  * ProseMirror 生成的 DOM 不带 scoped 属性，因此用 :deep。
  */
 .chapter-editor__body :deep(.chapter-editor__content) {

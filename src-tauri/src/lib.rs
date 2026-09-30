@@ -32,7 +32,6 @@ pub fn run() {
             commands::project_read_ui_state,
             commands::project_write_ui_state,
             commands::project_import_asset,
-            commands::render_preview,
             commands::export_docx,
             commands::export_pdf,
             commands::reveal_in_file_manager,

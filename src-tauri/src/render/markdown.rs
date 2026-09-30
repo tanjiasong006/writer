@@ -1,7 +1,7 @@
-//! Markdown → 块 / 行内模型。预览、Word、PDF 共用这一份解析结果，保证三者结构一致。
+//! Markdown → 块 / 行内模型。Word、PDF 共用这一份解析结果，保证两者结构一致；
+//! 与编辑器（另一套实现）的一致性由共享语义 fixture 约束（docs/decisions.md 第 8 节）。
 //!
-//! 原始 HTML 一律作为普通文本处理：预览运行在能调用 Tauri IPC 的 webview 中，
-//! 绝不能让正文里的 HTML 被当作标记执行。
+//! 原始 HTML 一律作为普通文本处理，与编辑器的方言一致。
 
 use std::iter::Peekable;
 

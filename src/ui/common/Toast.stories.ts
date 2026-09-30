@@ -26,5 +26,5 @@ export const Error: Story = {
 
 /** 长文字折行，关闭按钮保持在右侧。 */
 export const LongMessage: Story = {
-  args: { message: 'content 文件夹中有 3 个未被文档引用的文件，已原样保留。它们不会出现在预览与导出中，也不会被删除。' } as never,
+  args: { message: 'content 文件夹中有 3 个未被文档引用的文件，已原样保留。它们不会出现在导出中，也不会被删除。' } as never,
 }

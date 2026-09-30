@@ -6,7 +6,7 @@ import { findChapter } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { hasContent } from '../../domain/document/document.ts'
 import { resolveTheme } from '../../domain/document_style/document_style.ts'
-import { exportDocument, previewDocument } from '../../application/document_output.ts'
+import { exportDocument } from '../../application/document_output.ts'
 import ChapterManager from '../chapter_tree/ChapterManager.vue'
 import SaveStatus from './SaveStatus.vue'
 import DocumentTitle from './DocumentTitle.vue'
@@ -15,13 +15,11 @@ import { useServices } from '../services.ts'
 import { useSession } from './use_session.ts'
 import { useUiState } from './use_ui_state.ts'
 import { useSidebar, SIDEBAR_DEFAULT, SIDEBAR_MIN } from './use_sidebar.ts'
-import { usePreview } from './use_preview.ts'
 import { useExport } from './use_export.ts'
 import { useFocusRegion } from './use_focus_region.ts'
 import { useStylePanel } from './use_style_panel.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
-import DocumentPreview from '../preview/DocumentPreview.vue'
 import DocumentStylePanel from '../document_style/DocumentStylePanel.vue'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import type { SelectedFigure } from '../editor/image_layout.ts'
@@ -36,13 +34,13 @@ import { menuItemForKey, parseMenuItemId, workspaceMenus, type MenuCommand } fro
  * 已打开项目的工作区。
  *
  * - 左侧栏：章节树；宽度可拖动调整，可以隐藏（显示 → 隐藏侧栏，或把分隔线拖到最窄处以外）。
- * - 右侧：一行工具栏 + 正文编辑器或全文预览。工具栏开头是文档名（点击打开文档菜单），
- *   右边只放高频操作：插入表格 / 图片，以及预览、文档样式、导出。其余命令在菜单栏、右键菜单与快捷键中。
+ * - 右侧：一行工具栏 + 正文编辑器。工具栏开头是文档名（点击打开文档菜单），
+ *   右边只放高频操作：插入表格 / 图片，以及文档样式、导出。其余命令在菜单栏、右键菜单与快捷键中。
  * - unified 窗口（macOS）：工具栏与标题栏合为一体，窗口按钮浮在侧栏左上角，工具栏空白处可以拖动窗口。
  * - 菜单栏与快捷键来自同一份菜单（app_menu.ts），可用状态随焦点所在区域变化。
  * - 两侧独立滚动（ui-spec §27）。提示浮在正文区底部，不挤压布局。文档修改一律经 ProjectSession。
  *
- * 各项相对独立的职责在同目录的 use_*.ts 中（界面状态、侧栏、预览、导出、焦点区域、样式面板），
+ * 各项相对独立的职责在同目录的 use_*.ts 中（界面状态、侧栏、导出、焦点区域、样式面板），
  * 这里负责把它们与菜单命令、章节树、编辑器连接起来。
  */
 const props = defineProps<{
@@ -103,34 +101,6 @@ watch(
   { immediate: true },
 )
 onBeforeUnmount(() => shell.setWindowTitle(shell.appName))
-
-/** 正文区模式：编辑当前章节，或全文预览。 */
-const mode = ref<'edit' | 'preview'>('edit')
-
-const preview = usePreview({
-  source: document,
-  active: () => mode.value === 'preview',
-  render: () => previewDocument(output, props.session.path, document.value),
-})
-const previewHtml = preview.html
-const previewError = preview.error
-
-async function setMode(next: 'edit' | 'preview'): Promise<void> {
-  if (mode.value === next) return
-  mode.value = next
-  scrolled.value = false
-  if (next === 'preview') {
-    preview.open()
-    return
-  }
-  // 从预览回到编辑：继续在当前章节写作。
-  await nextTick()
-  editor.value?.focus()
-}
-
-function togglePreview(): void {
-  void setMode(mode.value === 'edit' ? 'preview' : 'edit')
-}
 
 const {
   exporting,
@@ -195,12 +165,8 @@ function resolveImage(reference: string): string | null {
   return path === null ? null : shell.toDisplayUrl(path)
 }
 
-/** 章节树中按 Enter：回到编辑模式并把焦点交给正文编辑器。 */
+/** 章节树中按 Enter：把焦点交给正文编辑器。 */
 async function openChapter(): Promise<void> {
-  if (mode.value !== 'edit') {
-    await setMode('edit')
-    return
-  }
   await nextTick()
   editor.value?.focus()
 }
@@ -212,7 +178,7 @@ async function focusTree(): Promise<void> {
   chapters.value?.focusCurrent()
 }
 
-/** ⌘J：在章节树与正文之间切换；焦点在其他位置（工具栏、预览）时进入章节树。 */
+/** ⌘J：在章节树与正文之间切换；焦点在其他位置（如工具栏）时进入章节树。 */
 function switchFocus(): void {
   if (focusRegion.value === 'tree') void openChapter()
   else void focusTree()
@@ -257,7 +223,7 @@ async function openTitleMenu(rect: DOMRect, keyboard: boolean): Promise<void> {
 
 /**
  * 文档样式（整本书的设置，不属于正文工具栏）。与 tree 一样只依赖样式对象：
- * 编辑正文时样式引用不变，主题不会重新解析，编辑器与预览的样式也不会重算。
+ * 编辑正文时样式引用不变，主题不会重新解析，编辑器的样式也不会重算。
  */
 const documentStyle = computed(() => document.value.style)
 const theme = computed(() => resolveTheme(documentStyle.value))
@@ -287,7 +253,7 @@ const scrolled = ref(false)
 
 function onMainScroll(event: Event): void {
   const target = event.target as HTMLElement
-  if (target.classList?.contains('chapter-editor__scroller') || target.classList?.contains('workspace__preview')) {
+  if (target.classList?.contains('chapter-editor__scroller')) {
     scrolled.value = target.scrollTop > 0
   }
 }
@@ -296,7 +262,6 @@ const NO_MOVES = { up: false, down: false, outdent: false, indent: false } as co
 
 const menus = computed(() =>
   workspaceMenus({
-    mode: mode.value,
     focus: focusRegion.value,
     tools: selectedChapter.value ? tools.value : null,
     hasSelectedChapter: selectedChapter.value !== null,
@@ -369,7 +334,6 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       return
     case 'view':
       if (command.action === 'sidebar') void setSidebarVisible(!sidebarVisible.value)
-      else if (command.action === 'preview') togglePreview()
       else switchFocus()
       return
     case 'chapter':
@@ -411,12 +375,6 @@ function onKeydown(event: KeyboardEvent): void {
   if (id !== null) {
     event.preventDefault()
     runMenuItem(id)
-    return
-  }
-  // 全文预览中按 Esc 回到编辑（菜单、面板、对话框、重命名自己处理的 Esc 不会走到这里）。
-  if (event.key === 'Escape' && mode.value === 'preview') {
-    event.preventDefault()
-    void setMode('edit')
   }
 }
 
@@ -522,7 +480,7 @@ async function createFirstChapter(): Promise<void> {
 
         <div class="workspace__spacer" data-tauri-drag-region></div>
 
-        <div v-if="mode === 'edit' && selectedChapter" class="workspace__group" role="toolbar" aria-label="插入">
+        <div v-if="selectedChapter" class="workspace__group" role="toolbar" aria-label="插入">
           <button
             type="button"
             class="workspace__tool"
@@ -550,18 +508,6 @@ async function createFirstChapter(): Promise<void> {
         </div>
 
         <div class="workspace__group" role="toolbar" aria-label="文档">
-          <button
-            type="button"
-            class="workspace__tool"
-            tabindex="0"
-            :class="{ 'workspace__tool--on': mode === 'preview' }"
-            aria-label="全文预览"
-            :aria-pressed="mode === 'preview'"
-            :title="mode === 'preview' ? '回到编辑（Esc）' : '全文预览'"
-            @click="togglePreview"
-          >
-            <Icon name="preview" />
-          </button>
           <div class="workspace__anchor">
             <button
               ref="styleButton"
@@ -612,18 +558,8 @@ async function createFirstChapter(): Promise<void> {
       </header>
 
       <div class="workspace__content">
-        <div v-if="mode === 'preview'" class="workspace__preview">
-          <p v-if="previewError" class="workspace__preview-error" role="alert">{{ previewError }}</p>
-          <DocumentPreview
-            :html="previewHtml"
-            :active-chapter-id="selectedId"
-            :to-display-url="shell.toDisplayUrl"
-            :theme="theme"
-            @select="selectedId = $event"
-          />
-        </div>
         <ChapterEditor
-          v-else-if="selectedChapter && selectedId !== null"
+          v-if="selectedChapter && selectedId !== null"
           ref="editor"
           :chapter-id="selectedId"
           :content="document.contents.get(selectedId) ?? ''"
@@ -847,7 +783,7 @@ async function createFirstChapter(): Promise<void> {
   position: relative;
 }
 
-/* 工具栏按钮：无边框的图标按钮，默认次级前景色；hover 出现浅底，打开 / 开启时保持按下的样子。 */
+/* 工具栏按钮：无边框的图标按钮，默认次级前景色；hover 出现浅底，打开时保持按下的样子。 */
 .workspace__tool {
   display: flex;
   flex: none;
@@ -871,12 +807,6 @@ async function createFirstChapter(): Promise<void> {
 
 .workspace__tool:active:not(:disabled) {
   background: var(--color-fill-pressed);
-}
-
-.workspace__tool--on,
-.workspace__tool--on:hover:not(:disabled) {
-  background: var(--color-accent-fill);
-  color: var(--color-accent-text);
 }
 
 .workspace__tool:disabled {
@@ -922,20 +852,6 @@ async function createFirstChapter(): Promise<void> {
 .workspace__content {
   flex: 1;
   min-height: 0;
-}
-
-.workspace__preview {
-  height: 100%;
-  overflow-y: auto;
-}
-
-.workspace__preview-error {
-  max-width: var(--doc-column);
-  box-sizing: border-box;
-  margin: var(--space-6) auto 0;
-  padding: 0 var(--doc-gutter);
-  color: var(--color-danger-text);
-  font-size: var(--text-m);
 }
 
 /* 没有打开章节：一句说明 + 主要操作，垂直居中在正文区（扣除工具栏高度，视觉上居中）。 */

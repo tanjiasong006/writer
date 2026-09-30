@@ -56,7 +56,7 @@ describe('Markdown → 文档', () => {
     )
   })
 
-  test('软换行：中文之间去掉，其他情况变成空格（与预览 / 导出一致）', () => {
+  test('软换行：中文之间去掉，其他情况变成空格（与导出一致）', () => {
     expect(parseMarkdown('第一行\n第二行\nEnglish\nline').textContent).toBe('第一行第二行 English line')
   })
 

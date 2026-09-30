@@ -1,7 +1,7 @@
 //! Word（.docx）导出，基于 docx-rs。
 //!
 //! - 章节标题使用内置标题样式（Heading 1..9），Word 导航窗格与目录可直接使用；编号是静态文本，
-//!   与预览、PDF 完全一致，不依赖 Word 的自动编号。
+//!   与 PDF 一致，不依赖 Word 的自动编号。
 //! - 正文内的 `#` 标题叠加在章节层级之下，不带编号。
 //! - 所有写入 XML 的文本先去掉 XML 1.0 不允许的控制字符，否则 Word 会拒绝打开整个文件。
 //! - 图片缺失或损坏时输出占位文字并记录在报告中，绝不 panic。
@@ -188,7 +188,7 @@ impl Writer<'_> {
                 let mut p = self
                     .indent(Paragraph::new().style("Code"), context)
                     .add_run(run);
-                // 与预览、PDF 一致的浅灰底色。
+                // 与 PDF 一致的浅灰底色。
                 p.property = p
                     .property
                     .shading(Shading::new().shd_type(ShdType::Clear).fill("F3F4F6"));
