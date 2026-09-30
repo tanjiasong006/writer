@@ -345,10 +345,10 @@ impl Writer<'_> {
                     })
                     .collect();
                 let mut cells = Vec::new();
-                // 列宽由内容决定；单元格中的图片不超过按列数等分正文宽度、去掉左右内边距后的宽度，
-                // 避免一张图片把整列撑到正文宽度（与 Word 的等宽列一致）。
-                // 高度：含图片的行不能跨页拆开，而表头在每页重复，因此正文行中的图片不超过正文区减去
-                // 排版时实际测得的表头高度与单元格上下内边距。
+                // 没有图片的表格列宽由内容决定。含图片的表格各列等宽（与 Word 相同）：单元格中的图片
+                // 不超过单元格宽度；含图片的行不能跨页拆开，而表头在每页重复，因此正文行中的图片不超过
+                // 正文区减去表头高度与单元格上下内边距。表头高度在排版时按与最终表格相同的列宽、
+                // 在表格实际所在容器的宽度下测量，折行与最终结果一致。
                 let cell_width = TEXT_WIDTH_PT / columns as f64 - 2.0 * TABLE_INSET_PT;
                 let cell_limit = num(TEXT_HEIGHT_PT - 2.0 * TABLE_INSET_PT - IMAGE_HEIGHT_SLACK);
                 // 表头在每页重复，其中的图片不超过正文区高度的四分之一（与 Word 相同），不能占满页面。
@@ -370,11 +370,16 @@ impl Writer<'_> {
                     cells.extend(row(self, r, &body_cell));
                 }
                 let align = align.join(", ");
+                let cells = cells.join(", ");
+                let with_images = std::iter::once(header).chain(rows).flatten().any(|cell| has_image(cell));
+                if !with_images {
+                    return format!("#table(columns: {columns}, align: ({align},), table.header({head}), {cells})");
+                }
                 format!(
-                    "#context {{\nlet writer-table-head = measure(block(width: {width}pt, table(columns: {columns}, align: ({align},), table.header({head})))).height\n\
-                     table(columns: {columns}, align: ({align},), table.header({head}), {cells})\n}}",
-                    width = num(TEXT_WIDTH_PT),
-                    cells = cells.join(", ")
+                    "#layout(size => {{\n\
+                     let columns = (1fr,) * {columns}\n\
+                     let writer-table-head = measure(block(width: size.width, table(columns: columns, align: ({align},), table.header({head})))).height\n\
+                     table(columns: columns, align: ({align},), table.header({head}), {cells})\n}})"
                 )
             }
             Block::Rule => "#line(length: 100%, stroke: 0.5pt + luma(180))".to_owned(),
@@ -450,10 +455,20 @@ impl Writer<'_> {
         };
         let (width, height) = display_size_pt(image.width, image.height, bounds);
         format!(
-            "layout(size => image(\"/img/{index}.png\", width: calc.max(1pt, calc.min({width:.2}pt, size.width, ({max_height}) * {ratio:.6}))))",
+            // 不设最小宽度：极窄的长图宽度可以小于 1pt，高度上限优先（宽度由高度上限按比例反推）。
+            "layout(size => image(\"/img/{index}.png\", width: calc.max(0pt, calc.min({width:.2}pt, size.width, ({max_height}) * {ratio}))))",
             ratio = width / height,
         )
     }
+}
+
+fn has_image(inlines: &[Inline]) -> bool {
+    inlines.iter().any(|inline| match inline {
+        Inline::Image { .. } => true,
+        Inline::Strong(c) | Inline::Emphasis(c) | Inline::Strike(c) => has_image(c),
+        Inline::Link { children, .. } => has_image(children),
+        _ => false,
+    })
 }
 
 /// Typst 数值字面量：最多保留两位小数（输出参数都是有限值）。
@@ -976,6 +991,61 @@ mod tests {
         let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
         let (_, _, _, _, height) = images(&paged)[0];
         assert!((height - TEXT_HEIGHT_PT / 4.0).abs() < 0.5, "{height}");
+        assert_inside_text_area(&paged);
+    }
+
+    #[test]
+    fn header_wrapping_is_measured_with_the_final_column_widths() {
+        let dir = project();
+        write_image(&dir.path().join("assets/长.png"), 200, 4000, ImageFormat::Png);
+        let markdown = format!(
+            "| {} | 说明 |\n| --- | --- |\n| ![长](../assets/长.png) | {} |",
+            "很长的表头文字".repeat(3).chars().take(20).collect::<String>(),
+            "W".repeat(40)
+        );
+        for markdown in [markdown.clone(), format!("> {}", markdown.replace('\n', "\n> "))] {
+            let document = build(&request("", &[("a", vec![1], "表", &markdown)]));
+            let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+            assert_eq!(images(&paged).len(), 1);
+            assert_inside_text_area(&paged);
+        }
+    }
+
+    #[test]
+    fn long_tables_with_images_still_break_across_pages() {
+        let dir = project();
+        write_image(&dir.path().join("assets/图.png"), 400, 300, ImageFormat::Png);
+        let mut markdown = String::from("| 序号 | 图 |\n| --- | --- |\n");
+        for i in 1..=12 {
+            markdown.push_str(&format!("| {i} | ![图](../assets/图.png) |\n"));
+        }
+        let document = build(&request("", &[("a", vec![1], "表", &markdown)]));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert!(paged.pages().len() > 1);
+        assert_eq!(images(&paged).len(), 12);
+        assert_inside_text_area(&paged);
+        // 表头在每页重复。
+        let heads = placed(&paged)
+            .into_iter()
+            .filter(|p| matches!(p, Placed::Text { text, .. } if text.contains("序号")))
+            .count();
+        assert_eq!(heads, paged.pages().len());
+    }
+
+    #[test]
+    fn extremely_narrow_images_keep_the_height_limit() {
+        let dir = project();
+        write_image(&dir.path().join("assets/细.png"), 10, 10000, ImageFormat::Png);
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "细", "![细](../assets/细.png)\n\n文字 ![细](../assets/细.png) 文字")],
+        ));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert_eq!(images(&paged).len(), 2);
+        for (_, _, y, _, height) in images(&paged) {
+            assert!(y >= MARGIN_PT - 0.5, "{y}");
+            assert!(height <= TEXT_HEIGHT_PT, "{height}");
+        }
         assert_inside_text_area(&paged);
     }
 
