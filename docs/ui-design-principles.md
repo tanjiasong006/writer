@@ -8,7 +8,7 @@
 - 本文件：全局原则、默认流程与验收标准。
 - 组件级规格（如 `src/ui/chapter_tree/ui-spec.md`）：具体尺寸、状态、交互细节。与本文件冲突时以组件级规格为准，
   并把冲突告知产品负责人。
-- 编辑器行为不变量见 `src/ui/editor/CONTRACT.md`，文档排版（主题、字体）见 `docs/decisions.md` 第 6、8 节。
+- 编辑器行为不变量见 `src/ui/editor/CONTRACT.md`，编辑环境主题与输出排版的边界见 `docs/decisions.md` 第 5、6、8 节。
 
 ## 1. 目标
 
@@ -44,7 +44,9 @@ focus / disabled、动画时长与缓动，不应由各组件随意定义孤立�
 
 - 新增视觉参数前，先检查现有 token 和周围组件已使用的值能否表达。
 - 当前状况：界面 token 集中在 `src/ui/tokens.css`，全局基础样式在 `src/ui/base.css`（应用与 Storybook 共用）；
-  文档主题的 CSS 变量（`ui/document_style/theme_css.ts`）只用于正文排版，不是界面 token。
+  当前 `ui/document_style/theme_css.ts` 的共享文档主题实现待解除绑定。
+  编辑环境主题控制写作展示，属于应用偏好；输出排版参数独立，不要求与编辑展示一致。
+  正文展示变量与界面 token 可以按职责区分，但不得因此把编辑环境主题保存为项目样式。
 - 可以在触及相关区域时逐步把重复数值收拢为共享 token；不要为了"建立设计系统"大规模重写稳定代码。
 
 ## 6. 完整状态

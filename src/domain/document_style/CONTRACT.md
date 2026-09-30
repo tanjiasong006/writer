@@ -1,49 +1,38 @@
-# document_style
+# document_style（待移除的旧领域模块）
 
-## 职责
+## 状态
 
-整本文档的视觉设计（主题）与图片文件（asset）级布局覆盖的领域模型（docs/decisions.md 第 8 节）。
-只有语义参数（字体族、磅值、倍数、语义尺寸），不含 CSS 或任何渲染器实现；纯逻辑，不涉及存储格式与 UI 文案。
+本模块原先承担文档主题、主题调整与图片文件级布局覆盖，现有代码尚未移除。
+该职责已被 `docs/decisions.md` 第 8 节取代，不再作为目标领域模型或后续扩展依据。
 
-## 数据结构
+## 目标边界
 
-```ts
-interface DocumentStyle {          // 持久化的内容（writer.json 的 style）
-  readonly theme: ThemeId          // 'book' | 'classic' | 'technical'
-  readonly overrides: StyleOverrides   // 主题之上的调整：bodyFont / bodySize / lineHeight / headingFont / heading1-3Size
-  readonly images: ImageLayouts    // 图片文件键 → { size?, align? }
-}
+- `WriterDocument` 只包含标题、章节树、正文，不依赖 `DocumentStyle`。
+- 编辑环境主题是应用级偏好，影响写作展示，不进入项目、不影响输出。
+- Word 使用规范的默认输出样式，PDF 使用独立的文档级排版配置与自动规则。
+- 不提供或持久化单张图片的尺寸、对齐、位置等局部布局，不为此创建元素身份。
+- 编辑展示与输出可以复用必要的参数类型或纯函数，但不得要求共享同一个主题实例、主题标识或样式状态。
 
-interface DocumentTheme {          // 解析结果：各渲染器共同的输入
-  body       { font, size, lineHeight, paragraphSpacing }
-  title      { font, size }
-  heading1-3 { font, size, spacingBefore, spacingAfter }   // 第 3 级及更深共用 heading3
-  blockquote { font, size }
-  codeBlock  { size }
-  table      { size }
-  image      { size, align, spacing }                       // 图片默认布局
-  caption    { font, size }
-}
-```
+## 后续代码调整
 
-单位：字号为磅；`lineHeight` 为相邻基线距离 / 字号；间距为 em。
+- 移除 `DocumentStyle`、主题覆盖和图片布局映射，以及 `defaultDocumentStyle`、`isDefaultStyle`、
+  `resolveTheme`、`selectTheme`、`overrideStyle`、`resetOverrides`、`setImageLayout` 等旧文档样式操作。
+- 移除 Domain 文档的 `style` / `setStyle` 和 Application 会话中的对应修改用例。
+- 移除 manifest 的样式解析 / 生成；旧字段读取忽略，正常保存不再写出，不迁移旧值。
+- 移除预览专用链路，解除 `DocumentTheme` 作为编辑器与 Word / PDF 共同输入的约束。
+  编辑展示、Word 默认输出、PDF 排版分别取得自己的参数；具体新类型与目录按实际职责确定。
+- Rust `render::resolve_image` 的资源安全解析继续保留，独立于布局键。
+- Rust `image_key` 与布局调用一同删除。TS `imageKey` 还被 `project_format.resolveAssetReference`
+  用于计算编辑图片显示路径，不能只删除布局调用就直接删掉函数：先把实际需要的引用解码、
+  规范化与越界拒绝逻辑放入资源解析职责，再删除旧 `imageKey` API 和布局键契约。
+  保留资源解析的路径安全测试，不以布局移除为由放宽路径限制。
+- `fixtures/image-keys.json` 不再作为布局身份共享契约；移除它，仍有用途的路径用例转入资源解析测试。
+  `fixtures/default-theme.json` 不再作为编辑与导出必须一致的契约；删除或拆成各场景独立的默认参数 fixture，
+  不能保留共享主题值相等的断言。
+- 替换旧主题 / 布局契约测试，验证内容与结构完整、旧样式忽略、输出与编辑偏好互不影响。
+  不再要求三种场景字体栈、字号、折行或图片比例一致。
 
-## 输入输出
+## 未决事项
 
-- `resolveTheme(style)`：主题 + 调整 → `DocumentTheme`。
-- `selectTheme` / `overrideStyle` / `resetOverrides` / `setImageLayout`：返回新样式，结果不变时返回同一对象。
-- `effectiveImageLayout(theme, override)`：图片自己的设置优先，其余跟随主题。
-- `headingStyle(theme, level)`：第 level 级标题的样式。
-- `imageKey(reference)`：图片文件键（正文引用指向的项目内文件，相对项目根目录的规范路径）；项目外 / 远程 / 非法为 null。
-
-## 不变量
-
-- `overrides` 中只有合法值（字体族受控；字号 6–72 磅；行距 1–3），且与主题值不同；与主题相同的值被去掉。
-- `images` 中没有空布局；布局按图片文件键记录，不按位置。同一文件的多处出现共享布局（不是元素实例身份）。
-- 切换主题清空 `overrides`，保留 `images`。
-- 与 Rust `render::theme` / `render::image_key` 语义一致：默认主题共享 `src-tauri/fixtures/default-theme.json`，
-  图片文件键共享 `src-tauri/fixtures/image-keys.json`。
-
-## 非目标
-
-不提供按段落或按选中文字的字体、字号、颜色；不提供任意 CSS 或任意像素尺寸；不包含系统字体列表。
+编辑环境主题的可调整项、PDF 配置字段与存储结构另行设计。
+在实际需要前不新增 Repository、Service 或泛化配置接口；移除旧样式无需等待新的完整设置系统。

@@ -1,9 +1,11 @@
 # editor
 
+> 本文件描述已确认的目标契约。现有文档主题绑定和图片布局控制尚待移除，不能作为后续扩展依据。
+
 ## 职责
 
 章节正文的结构化编辑（ProseMirror）。正文在应用中始终是 Markdown 字符串（Domain `WriterDocument.contents`），
-编辑器在 UI 层把它解析为 ProseMirror 文档、编辑后再写回 Markdown。Domain、Application、存储与 Rust 预览 / 导出不感知 ProseMirror。
+编辑器在 UI 层把它解析为 ProseMirror 文档、编辑后再写回 Markdown。Domain、Application、存储与 Rust 导出不感知 ProseMirror。
 
 ## 模块
 
@@ -19,8 +21,7 @@
 | `figure_editing.ts` | 独立成段的图片（figure 节点）的编辑：Enter、Backspace / Delete，以及把只剩一张图片的段落转成 figure。 |
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |
 | `image_view.ts` | 图片节点视图（figure 与行内图片）：按项目资源显示，无法显示时占位。 |
-| `image_layout.ts` | 图片布局：插件状态（图片文件键 → 布局、主题默认）、figure 装饰、可撤销的 `ImageLayoutStep`。 |
-| `ChapterEditor.vue` / `ImageLayoutControls.vue` | 挂载 EditorView、响应章节切换、发出 change / image-layout；选中图片时在图片上方显示布局按钮；右键菜单。编辑器没有自己的工具栏：它发出 `tools`（命令状态 + 选中的图片），由工作区的工具栏与菜单栏显示，通过 `runCommand` / `changeFigureLayout` 接受命令。 |
+| `ChapterEditor.vue` | 挂载 EditorView、响应章节切换、发出 change；右键菜单。编辑器没有自己的工具栏：它发出 `tools` 供工作区与菜单显示，通过 `runCommand` 接受内容编辑命令。 |
 
 ## 数据流
 
@@ -41,15 +42,43 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
 - 父组件回传的 content 与缓存一致时什么都不做；不一致（外部修改）时用一个事务替换文档并以新正文为基准，不回发 change。
 - 任何结构（列表、引用、代码块、表格、图片）都能只用键盘进入和离开；写作中的 Tab / Shift+Tab 由编辑器处理，
   焦点不会意外移出正文；先按 Esc 再按 Tab / Shift+Tab 时焦点按浏览器默认方式离开正文。
-- 独占一段的 Markdown 图片在编辑器中是块级原子节点 figure（有布局），与文字同处一段、在表格单元格或标题中的是行内图片 image。
+- 独占一段的 Markdown 图片在编辑器中是块级原子节点 figure，与文字同处一段、在表格单元格或标题中的是行内图片 image。
   光标不能停在 figure 旁边，文字（包括输入法）只会进入前后的段落。Markdown 不变：figure 写成与只含这张图片的段落相同的文字；
-  编辑使段落只剩一张（不带链接的）图片时，它成为 figure，与预览 / 导出的判断一致。
+  编辑使段落只剩一张（不带链接的）图片时，它成为 figure，与 Rust 内容解析的独立图片判断一致；
+  该语义由跨实现测试约束，不依赖应用内预览。
 - `serializeChapter` 的结果再次解析后结构与文字不变；Markdown 无法表达的格式在写出时调整或去掉，文字永远不变。
 - 图片节点只保存正文中的原始引用；显示地址不进入文档，远程与项目外的地址不加载。
-- 文档主题只以 CSS 变量作用在组件外层（`ui/document_style/theme_css.ts`）：不改变文档、不产生 change、不进入撤销历史、不重建视图。
-- 图片布局不进入文档与 Markdown：由插件状态 + figure 上的装饰呈现；用户修改产生不改变文档的 `ImageLayoutStep`（进入撤销历史，
-  选区不变），编辑器据此发出 `image-layout`；上层的布局 / 主题变化以不进入历史的同步事务回到插件状态（切换章节时同样同步）。
+- 编辑环境主题来自应用级偏好，以展示参数作用在组件上：不改变文档、不产生 change、不进入正文撤销历史、不重建视图。
+  不读取项目样式，不影响 Word / PDF 输出；默认提供美观、易读的内容展示。
+- 图片按统一展示规则适应编辑区域；不提供单张图片的尺寸 / 对齐 / 位置控制，不保存局部布局状态，不发出 `image-layout`。
+  图片插入、选择、删除与正文撤销仍属于内容编辑能力。
+  行内图片（含表格单元格中的长图）也应有统一的展示高度上限，保持比例、不裁切，
+  不允许单张超长图片无限撑高内容区；具体上限及查看原图方式在编辑环境设计时确定，
+  不沿用 PDF 的页面高度，也不写入项目。
+
+## 内容契约测试
+
+`markdown.test.ts` 负责 ProseMirror 转换与往返；Rust `render::markdown` 测试负责输出中间模型。
+后续新增共享 Markdown 语义 fixture，以入库的 `.serialized.md` golden 连接两端：
+Vitest 用 `await expect(output).toMatchFileSnapshot(path)` 验证实际 `serialize(parse(input))` 输出，
+通过自带 `-u` 更新 golden，不新增更新脚本或开关；默认配置使用 `update: 'none'` 或等效选项，
+保证默认测试运行只读，缺失文件也失败。Rust 读取原文与 golden，分别验证预期 IR；更新后两侧都需通过，
+预期语义单独审查，不随 golden 自动改写。具体流程见 decisions 第 8 节。
+共享资产放在 `src-tauri/fixtures/`，使用中立 JSON 块树作为预期语义，双方测试各自投影后比较；
+具体子目录及 schema 在实现时确定，不成为产品模型或运行时协议。
+至少覆盖 figure / 行内图片、图注、表格、列表、标题、中文强调、HTML 与换行；
+比较预期内容与结构，不要求内部节点类型或 Markdown 字节完全相同。
+这些验证在移除预览后继续保留，不引入自定义 Vue SFC 加载器，也无需运行时串联 TS 与 Rust。
+
+## 旧能力移除范围
+
+移除 `image_layout.ts` 的局部布局插件、同步事务与 `ImageLayoutStep`，以及 `ImageLayoutControls.vue`、
+图片布局菜单、`changeFigureLayout`、布局 props / emits 和对应的旧 Story / 测试。
+保留图片节点视图、figure 内容编辑和资源安全解析；装饰机制可继续用于非布局的编辑反馈。
+主题入口调整为编辑环境设置，主题偏好由应用状态保存，不通过 `ProjectSession` 修改文档。
+可调整项与界面交互另行设计，实施时按 UI 准则更新 Story 并进行界面验收。
 
 ## 非目标
 
 不支持 Markdown 无法保存的结构（合并单元格、单元格内多段落、列宽、文字颜色等）；不提供 Markdown 源码编辑模式。
+不提供应用内全文阅读或分页预览；移除预览不把其连续阅读与章节同步职责转移给单章编辑器。
