@@ -1,15 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { findChapter, type ChapterId, type ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
-import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
-import { autoScrollStep, resolveDropPosition, type DropPosition } from './drop_target.ts'
-import {
-  canMoveChapter,
-  keyboardMoveIntent,
-  moveChapterTo,
-  type KeyboardMoveDirection,
-  type MoveIntent,
-} from '../../application/move_chapter.ts'
+import { keyboardMoveIntent, type KeyboardMoveDirection, type MoveIntent } from '../../application/move_chapter.ts'
+import { ancestorPath, numberWidths, visibleRows, type ChapterRow } from './tree_rows.ts'
+import { useTreeDrag } from './use_tree_drag.ts'
+import { useInlineRename } from './use_inline_rename.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
 import Icon from '../common/Icon.vue'
 import { useMenu } from '../common/use_menu.ts'
@@ -28,6 +23,8 @@ import { MOVE_LABELS } from '../app_shell/app_menu.ts'
  * 所有会产生结构变化的行为都只发出意图事件，由上层（Application）执行；
  * 组件不判断移动是否合法、不构造新树，也不包含任何章节结构规则。
  * 折叠、菜单、正在编辑的章节都是纯 UI 状态，不回写 tree。
+ *
+ * 显示行的摊平在 tree_rows.ts，拖拽在 use_tree_drag.ts，内联重命名在 use_inline_rename.ts。
  */
 
 const props = defineProps<{
@@ -61,14 +58,6 @@ const emit = defineEmits<{
   /** Enter：进入当前章节的正文编辑（包括为新章节确认标题后）。 */
   open: [chapterId: ChapterId]
 }>()
-
-interface ChapterRow {
-  readonly id: ChapterId
-  readonly title: string
-  readonly number: string
-  readonly depth: number
-  readonly hasChildren: boolean
-}
 
 /**
  * 被用户折叠的章节 id；只影响显示，不进入 Domain。
@@ -114,184 +103,6 @@ watch(
   },
 )
 
-/** 返回从根到 id 的祖先 id 列表（不含 id 本身）；找不到返回 null。 */
-function ancestorPath(nodes: ChapterTree, id: ChapterId): ChapterId[] | null {
-  for (const node of nodes) {
-    if (node.id === id) return []
-    const childPath = ancestorPath(node.children, id)
-    if (childPath !== null) return [node.id, ...childPath]
-  }
-  return null
-}
-
-/** 正在被拖动的章节 id；为 null 表示没有拖拽。 */
-const draggingId = ref<ChapterId | null>(null)
-
-/** 被拖动的章节及其所有子章节：它们会一起移动，因此一起变淡。 */
-const draggingIds = computed<ReadonlySet<ChapterId>>(() => {
-  const ids = new Set<ChapterId>()
-  const node = draggingId.value === null ? null : findChapter(props.tree, draggingId.value)
-  const collect = (current: { readonly id: ChapterId; readonly children: ChapterTree }) => {
-    ids.add(current.id)
-    for (const child of current.children) collect(child)
-  }
-  if (node) collect(node)
-  return ids
-})
-
-/**
- * 当前落点：目标章节 id 与相对位置；离开有效目标后清空。
- * zone 为 tail 表示树下方的空白区域：放到最后一个根章节之后（成为最后一个一级章节）。
- */
-interface DropTarget {
-  readonly id: ChapterId
-  readonly position: DropPosition
-  readonly zone: 'row' | 'tail'
-}
-const dropTarget = shallowRef<DropTarget | null>(null)
-
-function setDropTarget(next: DropTarget | null): void {
-  const current = dropTarget.value
-  if (current === next) return
-  if (current && next && current.id === next.id && current.position === next.position && current.zone === next.zone) return
-  dropTarget.value = next
-}
-
-/**
- * 松手后被拖动章节的新编号（如 "2.2"），显示在落点旁：用户在松手前就知道章节会去哪里、成为哪一级。
- * 由 Application 在当前树上执行同一次移动得到；只在落点变化时计算。
- */
-const dropNumber = computed<string | null>(() => {
-  const target = dropTarget.value
-  const chapterId = draggingId.value
-  if (target === null || chapterId === null) return null
-  const result = moveChapterTo(props.tree, { chapterId, targetChapterId: target.id, position: target.position })
-  if (!result.ok) return null
-  return (computeChapterNumbers(result.tree).get(chapterId) ?? []).join('.')
-})
-
-function startDrag(event: DragEvent, row: ChapterRow): void {
-  closeMenu()
-  draggingId.value = row.id
-  setDropTarget(null)
-  const dataTransfer = event.dataTransfer
-  if (!dataTransfer) return
-  dataTransfer.effectAllowed = 'move'
-  if (typeof dataTransfer.setDragImage !== 'function') return
-  // Drag Preview 只带编号 + 标题的轻量浮层，不复制整行节点 UI。
-  const preview = document.createElement('div')
-  preview.textContent = `${row.number}  ${row.title}`
-  Object.assign(preview.style, {
-    position: 'fixed',
-    top: '-1000px',
-    left: '-1000px',
-    maxWidth: '280px',
-    padding: '0 10px',
-    height: '26px',
-    lineHeight: '26px',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    background: 'var(--color-bg-raised)',
-    borderRadius: 'var(--radius-m)',
-    boxShadow: 'var(--shadow-popover)',
-    fontFamily: 'var(--font-ui)',
-    fontSize: 'var(--text-m)',
-    color: 'var(--color-text)',
-    whiteSpace: 'pre',
-    pointerEvents: 'none',
-  })
-  document.body.appendChild(preview)
-  dataTransfer.setDragImage(preview, 12, 13)
-  // 浏览器已同步读取图像，下一帧移除即可。
-  window.setTimeout(() => preview.remove(), 0)
-}
-
-/** 章节树所在的滚动区域；找不到时为 null。 */
-function scrollContainer(): HTMLElement | null {
-  let node = listElement.value?.parentElement ?? null
-  while (node) {
-    const overflow = getComputedStyle(node).overflowY
-    if (overflow === 'auto' || overflow === 'scroll') return node
-    node = node.parentElement
-  }
-  return null
-}
-
-/** 拖拽到滚动区域上 / 下边缘附近时自动滚动，长章节树中也能把章节拖到很远的位置。 */
-function autoScroll(event: DragEvent): void {
-  if (draggingId.value === null) return
-  const container = scrollContainer()
-  if (!container) return
-  const rect = container.getBoundingClientRect()
-  const step = autoScrollStep(event.clientY, { top: rect.top, height: rect.height })
-  if (step !== 0) container.scrollTop += step
-}
-
-/** 拖到折叠章节的 inside 区域并停留时自动展开它（ui-spec §18）。 */
-const EXPAND_DELAY_MS = 600
-let expandTimer: ReturnType<typeof setTimeout> | null = null
-let expandTargetId: ChapterId | null = null
-
-function scheduleExpand(chapterId: ChapterId | null): void {
-  if (chapterId === expandTargetId) return
-  if (expandTimer !== null) clearTimeout(expandTimer)
-  expandTimer = null
-  expandTargetId = chapterId
-  if (chapterId === null) return
-  expandTimer = setTimeout(() => {
-    expandTimer = null
-    if (draggingId.value !== null && collapsedIds.value.has(chapterId)) toggle(chapterId)
-  }, EXPAND_DELAY_MS)
-}
-
-/**
- * 有效落点时接受放下（preventDefault）并显示反馈；无效落点（自身、自身后代、不会产生位移的位置）
- * 不接受，系统显示"不可放下"的光标，也不显示任何插入线（ui-spec §17）。
- */
-function dragOverRow(event: DragEvent, row: ChapterRow): void {
-  const dragging = draggingId.value
-  if (dragging === null) return
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-  const position = resolveDropPosition(event.clientY, { top: rect.top, height: rect.height })
-  const intent: MoveIntent = { chapterId: dragging, targetChapterId: row.id, position }
-  if (row.id === dragging || !canMoveChapter(props.tree, intent)) {
-    setDropTarget(null)
-    scheduleExpand(null)
-    return
-  }
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-  setDropTarget({ id: row.id, position, zone: 'row' })
-  scheduleExpand(position === 'inside' && row.hasChildren && collapsedIds.value.has(row.id) ? row.id : null)
-}
-
-/** 树下方的空白区域：放到最后一个根章节之后。 */
-function dragOverTail(event: DragEvent): void {
-  const dragging = draggingId.value
-  const last = props.tree[props.tree.length - 1]
-  scheduleExpand(null)
-  if (dragging === null || last === undefined) return
-  const intent: MoveIntent = { chapterId: dragging, targetChapterId: last.id, position: 'after' }
-  if (last.id === dragging || !canMoveChapter(props.tree, intent)) {
-    setDropTarget(null)
-    return
-  }
-  event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
-  setDropTarget({ id: last.id, position: 'after', zone: 'tail' })
-}
-
-function leaveRow(event: DragEvent, chapterId: ChapterId): void {
-  // 进入行内的子元素也会触发 dragleave；只有真正离开这一行时才清除。
-  const next = event.relatedTarget as Node | null
-  if (next && (event.currentTarget as HTMLElement).contains(next)) return
-  if (dropTarget.value?.id === chapterId && dropTarget.value.zone === 'row') setDropTarget(null)
-}
-
-function leaveTail(): void {
-  if (dropTarget.value?.zone === 'tail') setDropTarget(null)
-}
-
 /** 刚刚移动的章节：短暂高亮它的新位置，说明结构发生了什么变化。 */
 const settledId = ref<ChapterId | null>(null)
 let settleTimer: ReturnType<typeof setTimeout> | null = null
@@ -306,33 +117,35 @@ function markSettled(chapterId: ChapterId): void {
   }, SETTLE_MS)
 }
 
-/** 松手：有有效落点时发一个 move 意图，然后一律清空拖拽状态。 */
-function drop(): void {
-  const target = dropTarget.value
-  const chapterId = draggingId.value
-  if (chapterId !== null && target !== null) {
-    emit('move', { chapterId, targetChapterId: target.id, position: target.position })
-    markSettled(chapterId)
-  }
-  endDrag()
-}
-
-/** 松手或拖拽结束都清空拖拽状态；本组件不修改 tree。 */
-function endDrag(): void {
-  draggingId.value = null
-  setDropTarget(null)
-  scheduleExpand(null)
-}
-
-onBeforeUnmount(() => {
-  if (expandTimer !== null) clearTimeout(expandTimer)
-  if (settleTimer !== null) clearTimeout(settleTimer)
+const {
+  draggingId,
+  draggingIds,
+  dropTarget,
+  dropNumber,
+  rowDropTarget,
+  startDrag,
+  autoScroll,
+  dragOverRow,
+  dragOverTail,
+  leaveRow,
+  leaveTail,
+  drop,
+  endDrag,
+} = useTreeDrag({
+  tree: () => props.tree,
+  collapsedIds,
+  list: listElement,
+  expand: toggle,
+  onStart: closeMenu,
+  onDrop: (intent) => {
+    emit('move', intent)
+    markSettled(intent.chapterId)
+  },
 })
 
-function rowDropTarget(chapterId: ChapterId): DropTarget | null {
-  const target = dropTarget.value
-  return target !== null && target.zone === 'row' && target.id === chapterId ? target : null
-}
+onBeforeUnmount(() => {
+  if (settleTimer !== null) clearTimeout(settleTimer)
+})
 
 function dropClass(chapterId: ChapterId): string | null {
   const target = rowDropTarget(chapterId)
@@ -441,7 +254,10 @@ function onMenuSelect(chapterId: ChapterId, action: string): void {
   else if (action === 'create-child') requestCreateChild(chapterId)
   else if (action === 'rename') requestStartRename(chapterId)
   else if (action === 'delete') requestDelete(chapterId)
-  else if (action.startsWith('move-')) requestMove(chapterId, action.slice('move-'.length) as KeyboardMoveDirection)
+  else {
+    const move = MOVE_LABELS.find((item) => action === `move-${item.direction}`)
+    if (move) requestMove(chapterId, move.direction)
+  }
 }
 
 function requestCreateRoot(): void {
@@ -607,109 +423,24 @@ function onLabelKeydown(event: KeyboardEvent, row: ChapterRow): void {
   if (target !== null) selectAndFocus(target)
 }
 
-/** 内联重命名的临时文本；由 editingId 驱动初始化。 */
-const draft = ref('')
-const renameInput = ref<HTMLInputElement | null>(null)
-/** 本次编辑是否已结束，避免 Esc 触发卸载后 blur 再次提交。 */
-let renameDone = false
-
-function setRenameInput(element: Element | { $el?: Element } | null): void {
-  renameInput.value = (element as HTMLInputElement | null) ?? null
-}
-
-async function focusRenameInput(): Promise<void> {
-  await nextTick()
-  renameInput.value?.focus()
-  renameInput.value?.select()
-}
-
-watch(
-  () => props.editingId,
-  (id) => {
-    renameDone = false
-    if (id === null || id === undefined) {
-      draft.value = ''
-      return
-    }
-    draft.value = findChapter(props.tree, id)?.title ?? ''
-    void focusRenameInput()
-  },
-  { immediate: true },
-)
-
-/** Enter / 失焦提交；空标题视为放弃，避免标题变空。 */
-function commitRename(): void {
-  const id = props.editingId
-  if (id === null || id === undefined || renameDone) return
-  renameDone = true
-  const title = draft.value.trim()
-  if (title.length === 0) emit('cancel-rename')
-  else emit('rename', id, title)
-}
-
-function cancelRename(): void {
-  if (renameDone) return
-  renameDone = true
-  emit('cancel-rename')
-}
-
-/**
- * 用键盘结束重命名（Enter 确认 / Esc 放弃）：输入框随之消失，焦点回到该章节所在行，不会掉到页面上。
- * 新建的章节与已有章节相同：确认标题后留在章节树，可以继续调整结构，再用 Enter 或 ⌘J 进入正文。
- * 失焦提交时焦点已经在别处，不再移动。
- */
-function finishRenameByKey(submit: boolean): void {
-  const id = props.editingId
-  if (id === null || id === undefined || renameDone) return
-  if (submit) commitRename()
-  else cancelRename()
-  void focusRow(id)
-}
-
-/** 把树摊平成带层级的显示行；折叠节点不展开其后代。 */
-const rows = computed<ChapterRow[]>(() => {
-  const numbers = computeChapterNumbers(props.tree)
-  const result: ChapterRow[] = []
-
-  const visit = (nodes: ChapterTree, depth: number): void => {
-    for (const node of nodes) {
-      const hasChildren = node.children.length > 0
-      result.push({
-        id: node.id,
-        title: node.title,
-        number: (numbers.get(node.id) ?? []).join('.'),
-        depth,
-        hasChildren,
-      })
-      if (hasChildren && !collapsedIds.value.has(node.id)) {
-        visit(node.children, depth + 1)
-      }
-    }
-  }
-
-  visit(props.tree, 0)
-  return result
+const {
+  draft,
+  setInput: setRenameInput,
+  commit: commitRename,
+  finishByKey: finishRenameByKey,
+} = useInlineRename({
+  editingId: () => props.editingId,
+  titleOf: (chapterId) => findChapter(props.tree, chapterId)?.title ?? '',
+  onRename: (chapterId, title) => emit('rename', chapterId, title),
+  onCancel: () => emit('cancel-rename'),
+  focusRow: (chapterId) => void focusRow(chapterId),
 })
 
-/**
- * 同一父章节下的编号占同样的宽度（按其中最长的编号），"1.9"与"1.10"之后的标题左端对齐，密集的层级更容易扫读。
- * 编号用等宽数字：宽度按数字个数（ch）加分隔点估算（同级编号的点数相同）。
- */
-function siblingKey(number: string): string {
-  return number.slice(0, Math.max(0, number.lastIndexOf('.')))
-}
-
-const numberDigits = computed(() => {
-  const digits = new Map<string, number>()
-  for (const row of rows.value) {
-    const key = siblingKey(row.number)
-    digits.set(key, Math.max(digits.get(key) ?? 0, row.number.replace(/\./g, '').length))
-  }
-  return digits
-})
+const rows = computed<ChapterRow[]>(() => visibleRows(props.tree, collapsedIds.value))
+const numberWidth = computed(() => numberWidths(rows.value))
 
 function numberStyle(row: ChapterRow): { minWidth: string } {
-  return { minWidth: `calc(${numberDigits.value.get(siblingKey(row.number)) ?? 0}ch + ${row.depth} * 0.3em)` }
+  return { minWidth: numberWidth.value.get(row.id) ?? '0' }
 }
 
 const emptyAction = ref<HTMLButtonElement | null>(null)
