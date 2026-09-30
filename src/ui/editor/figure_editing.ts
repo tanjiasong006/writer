@@ -14,7 +14,9 @@ import { nodes } from './schema.ts'
  *   这一段是空段落时同时删掉它（ProseMirror 默认会直接删掉图片）；
  * - 编辑使某个段落只剩一张图片时（删掉图片旁的文字、粘贴只含图片的段落），它成为 figure，与导出的判断一致；
  * - 正文还没有焦点时点击图片（例如刚在章节树中切换了章节）也直接选中这张图片：浏览器聚焦时放置的光标
- *   会在 ProseMirror 选中图片之后才到达并覆盖它，因此这里先聚焦、再选中，不让浏览器放置光标。
+ *   会在 ProseMirror 选中图片之后才到达并覆盖它，因此这里先聚焦、再选中，不让浏览器放置光标；
+ * - 图片（包括行内图片）不能拖动。节点仍标记为可拖动：WebKit 在可拖动且不可文字选择的元素上按下鼠标时
+ *   不开始原生文字选择（见 ChapterEditor.vue 中的样式），这里取消拖动本身。
  */
 
 /** 选中图片时在其后、光标在块之间的空隙时在空隙处新建段落。 */
@@ -87,6 +89,11 @@ export function figureEditing(): Plugin {
           event.preventDefault()
           view.focus()
           view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, hit.inside)))
+          return true
+        },
+        dragstart(_view, event) {
+          if (!(event.target as Element).closest?.('.editor-image')) return false
+          event.preventDefault()
           return true
         },
       },

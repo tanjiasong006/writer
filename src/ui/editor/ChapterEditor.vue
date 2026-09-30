@@ -504,6 +504,21 @@ defineExpose({
   background: var(--color-fill-hover);
 }
 
+/*
+ * 图片是可拖动的原子节点：WebKit 中，在可拖动但允许文字选择的元素上按下鼠标会开始原生文字选择，
+ * 起点落在图片之前的文字里，稍一移动就选中图片上方的文字。图片不可文字选择，按下只由 ProseMirror 选中图片
+ * （拖动本身由 figure_editing.ts 取消）；图注文本框仍可选择文字。
+ */
+.chapter-editor__body :deep(.editor-image) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.chapter-editor__body :deep(.editor-figure__caption-input) {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* 选中的图片只在图片本身外画一个框（不用 ProseMirror 默认画在外层容器上的框）。 */
 .chapter-editor__body :deep(.editor-image.ProseMirror-selectednode) {
   outline: none;

@@ -384,6 +384,20 @@ test('图片没有单张的布局设置：选中后不出现布局按钮，figur
   expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', IMAGE_CHAPTER])
 })
 
+test('图片（包括行内图片）不能拖动，选中后也不能', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: `${IMAGE_CHAPTER}\n行内![图](../assets/小.png)图片\n` })
+  const view = viewOf(wrapper)
+  selectFirstImage(view)
+  await wrapper.vm.$nextTick()
+  for (const image of view.dom.querySelectorAll('.editor-image')) {
+    const target = image.firstElementChild ?? image
+    const dragstart = new Event('dragstart', { bubbles: true, cancelable: true })
+    target.dispatchEvent(dragstart)
+    expect(dragstart.defaultPrevented).toBe(true)
+  }
+  expect(view.dom.querySelectorAll('.editor-image')).toHaveLength(2)
+})
+
 
 function captionOf(view: EditorView): HTMLTextAreaElement {
   return view.dom.querySelector('.editor-figure__caption-input')!
