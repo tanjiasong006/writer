@@ -1,0 +1,13 @@
+{
+  "blocks": [
+    {
+      "type": "table",
+      "align": ["left", "right", "center"],
+      "header": [[{ "text": "组别" }], [{ "text": "样本数" }], [{ "text": "说明" }]],
+      "rows": [
+        [[{ "text": "对照组" }], [{ "text": "30" }], [{ "text": "基线", "marks": ["strong"] }]],
+        [[{ "text": "实验组" }], [{ "text": "32" }], [{ "image": "../assets/曲线.png", "alt": "曲线" }]]
+      ]
+    }
+  ]
+}

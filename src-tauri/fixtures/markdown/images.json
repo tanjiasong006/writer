@@ -1,0 +1,19 @@
+{
+  "blocks": [
+    { "type": "paragraph", "inlines": [{ "text": "示意图如下：" }] },
+    { "type": "figure", "src": "../assets/装置.png", "alt": "实验装置" },
+    { "type": "figure", "src": "../assets/无图注.png", "alt": "" },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "正文中的 " },
+        { "image": "../assets/图标.png", "alt": "图标" },
+        { "text": " 行内图片。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [{ "image": "../assets/链接.png", "alt": "带链接的图", "marks": ["link:https://example.com"] }]
+    }
+  ]
+}

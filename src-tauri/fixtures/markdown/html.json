@@ -1,0 +1,6 @@
+{
+  "blocks": [
+    { "type": "paragraph", "inlines": [{ "text": "<div class=\"x\">块级 HTML</div>" }] },
+    { "type": "paragraph", "inlines": [{ "text": "行内 <b>标签</b> 视为文字。" }] }
+  ]
+}

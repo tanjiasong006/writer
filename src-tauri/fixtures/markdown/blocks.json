@@ -1,0 +1,14 @@
+{
+  "blocks": [
+    {
+      "type": "quote",
+      "blocks": [
+        { "type": "paragraph", "inlines": [{ "text": "引用第一段" }] },
+        { "type": "quote", "blocks": [{ "type": "paragraph", "inlines": [{ "text": "嵌套引用" }] }] }
+      ]
+    },
+    { "type": "code", "language": "rust", "text": "fn main() {}" },
+    { "type": "rule" },
+    { "type": "code", "language": null, "text": "缩进代码" }
+  ]
+}

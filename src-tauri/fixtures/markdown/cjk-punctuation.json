@@ -1,0 +1,13 @@
+{
+  "说明": "CommonMark 的定界规则：** 前是中文、后是全角标点时不能开始强调，第一段保留为文字（docs/known-risks.md 第 7 节）。第二段按规则解析为粗体里再套粗体，显示为整段粗体。",
+  "blocks": [
+    { "type": "paragraph", "inlines": [{ "text": "这是**“重要”**的结论。" }] },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "“引号”开头与结尾“引号”", "marks": ["strong"] },
+        { "text": "。" }
+      ]
+    }
+  ]
+}

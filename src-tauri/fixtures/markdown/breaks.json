@@ -1,0 +1,7 @@
+{
+  "blocks": [
+    { "type": "paragraph", "inlines": [{ "text": "中文段落折行不产生空格。" }] },
+    { "type": "paragraph", "inlines": [{ "text": "English line breaks become spaces." }] },
+    { "type": "paragraph", "inlines": [{ "text": "硬换行" }, { "break": true }, { "text": "在这里。" }] }
+  ]
+}

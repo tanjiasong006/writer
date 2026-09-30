@@ -1,0 +1,55 @@
+{
+  "blocks": [
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [
+        { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "甲" }] }] },
+        {
+          "task": null,
+          "blocks": [
+            { "type": "paragraph", "inlines": [{ "text": "乙" }] },
+            {
+              "type": "list",
+              "ordered": true,
+              "start": 1,
+              "items": [
+                { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "子一" }] }] },
+                { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "子二" }] }] }
+              ]
+            }
+          ]
+        },
+        { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "丙" }] }] }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 3,
+      "items": [
+        { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "三" }] }] },
+        { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "四" }] }] }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [
+        { "task": false, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "待办" }] }] },
+        { "task": true, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "已完成" }] }] }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [
+        { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "松散列表第一项" }] }] },
+        { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "松散列表第二项" }] }] }
+      ]
+    }
+  ]
+}

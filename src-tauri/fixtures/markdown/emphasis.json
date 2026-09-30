@@ -1,0 +1,39 @@
+{
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "普通" },
+        { "text": "粗体", "marks": ["strong"] },
+        { "text": "、" },
+        { "text": "斜体", "marks": ["emphasis"] },
+        { "text": "、" },
+        { "text": "删除", "marks": ["strike"] },
+        { "text": "与" },
+        { "code": "代码" },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "中文" },
+        { "text": "强调", "marks": ["strong"] },
+        { "text": "紧贴文字，" },
+        { "text": "粗体中", "marks": ["strong"] },
+        { "text": "嵌套斜体", "marks": ["emphasis", "strong"] },
+        { "text": "继续", "marks": ["strong"] },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "访问" },
+        { "text": "官网 ", "marks": ["link:https://example.com"] },
+        { "text": "首页", "marks": ["link:https://example.com", "strong"] },
+        { "text": "查看。" }
+      ]
+    }
+  ]
+}

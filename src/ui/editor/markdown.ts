@@ -72,6 +72,29 @@ tokenizer.core.ruler.push('writer_soft_break', (state) => {
   }
 })
 
+/**
+ * 同一种强调嵌套在自身之中（如 `**“甲”**乙**“丙”**` 按 CommonMark 解析为粗体里再套粗体）：
+ * 渲染结果是整段粗体，但编辑器的标记没有层数，内层结束时会把外层的标记一起去掉。
+ * 这里去掉内层的开始 / 结束记号，让外层标记覆盖整个范围，与导出（pulldown-cmark）的显示一致。
+ */
+tokenizer.core.ruler.push('writer_nested_marks', (state) => {
+  for (const token of state.tokens) {
+    if (token.type !== 'inline' || !token.children) continue
+    const depth = new Map<string, number>()
+    token.children = token.children.filter((child) => {
+      const match = /^(strong|em|s)_(open|close)$/.exec(child.type)
+      if (!match) return true
+      const current = depth.get(match[1]) ?? 0
+      if (match[2] === 'open') {
+        depth.set(match[1], current + 1)
+        return current === 0
+      }
+      depth.set(match[1], current - 1)
+      return current === 1
+    })
+  }
+})
+
 tokenizer.core.ruler.push('writer_task_list', (state) => {
   const tokens = state.tokens
   for (let i = 0; i + 2 < tokens.length; i++) {

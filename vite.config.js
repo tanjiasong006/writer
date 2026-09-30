@@ -8,8 +8,10 @@ export default defineConfig(() => ({
   plugins: [vue()],
 
   // Vitest 用最小的 DOM 环境跑 Vue 组件测试。
+  // 默认测试运行只读：快照 / golden 文件缺失或不一致都失败，只有显式的 `vitest run -u` 才写入。
   test: {
     environment: "happy-dom",
+    update: "none",
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

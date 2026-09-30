@@ -506,6 +506,12 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
     （正文、列表 / 引用缩进后、表格单元格）与完整正文区高度；独立图片居中，为图注及间距预留高度，
     Word 以 keepNext 与图注保持同页，PDF figure 不拆分、放不下时整体移到下一页。DPI 仍按固定 96 换算（待定）。
   - Word 仍使用内置样式：正文 Normal（文档默认），标题 Heading 1–9（带大纲级别），图注 Caption；测试覆盖。
+- 编辑与输出的内容契约测试完成：`src-tauri/fixtures/markdown/` 下 9 个共享用例（图片 / 图注、表格、列表、
+  标题、强调、中文标点边界、原始 HTML、换行、引用 / 代码 / 分隔线），前端 `markdown_contract.test.ts` 验证
+  原文语义、golden 与往返，Rust `render::contract_tests` 验证原文与 golden 的 IR；默认测试运行只读
+  （`update: "none"`，缺失 golden 失败，已验证）。编写用例时发现并修复一处不一致：同种强调嵌套在自身之中
+  （`**“甲”**乙**“丙”**`）时编辑器会在内层结束处丢掉外层粗体，而导出显示为整段粗体；
+  现在编辑器解析时合并同种嵌套标记（`markdown.ts` 的 `writer_nested_marks`）。
 
 ### 后续实现验收
 
@@ -530,7 +536,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   不以人工 HTML 预览替代这些测试，详见 decisions 第 8 节。
 - 跨语言流程使用 `src-tauri/fixtures/` 下的入库 golden：Vitest 用 `toMatchFileSnapshot` 比较实际编辑器输出，
   自带 `-u` 更新 `.serialized.md`；Rust 分别验证原文与 golden。预期语义为中立 JSON 块树，双方测试各自投影，
-  具体子目录及 schema 在实现时确定。更新后审查差异并通过两侧测试，不另写更新脚本或开关。
+  用例组织与语义格式见 decisions 第 8 节。更新后审查差异并通过两侧测试，不另写更新脚本或开关。
   默认测试运行只读，使用 `update: 'none'` 或等效选项保证缺失 golden 时失败，不隐式创建文件。
 - 编辑环境设计时落实行内长图的展示高度上限并更新 Story，验证表格单元格中图片的比例与可读性。
 - 调整旧 Story / 测试并补充默认图片展示、图片选择与删除、编辑环境偏好等实际新增或修改行为的覆盖；

@@ -1,0 +1,12 @@
+{
+  "blocks": [
+    { "type": "heading", "level": 1, "inlines": [{ "text": "一级标题" }] },
+    { "type": "paragraph", "inlines": [{ "text": "正文段落。" }] },
+    {
+      "type": "heading",
+      "level": 2,
+      "inlines": [{ "text": "二级 " }, { "text": "强调", "marks": ["strong"] }, { "text": " 标题" }]
+    },
+    { "type": "heading", "level": 6, "inlines": [{ "text": "六级标题" }] }
+  ]
+}

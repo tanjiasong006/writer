@@ -58,13 +58,13 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
 ## 内容契约测试
 
 `markdown.test.ts` 负责 ProseMirror 转换与往返；Rust `render::markdown` 测试负责输出中间模型。
-后续新增共享 Markdown 语义 fixture，以入库的 `.serialized.md` golden 连接两端：
+共享 Markdown 语义 fixture（`markdown_contract.test.ts` 与 Rust `render::contract_tests`）以入库的 `.serialized.md` golden 连接两端：
 Vitest 用 `await expect(output).toMatchFileSnapshot(path)` 验证实际 `serialize(parse(input))` 输出，
 通过自带 `-u` 更新 golden，不新增更新脚本或开关；默认配置使用 `update: 'none'` 或等效选项，
 保证默认测试运行只读，缺失文件也失败。Rust 读取原文与 golden，分别验证预期 IR；更新后两侧都需通过，
 预期语义单独审查，不随 golden 自动改写。具体流程见 decisions 第 8 节。
 共享资产放在 `src-tauri/fixtures/`，使用中立 JSON 块树作为预期语义，双方测试各自投影后比较；
-具体子目录及 schema 在实现时确定，不成为产品模型或运行时协议。
+用例组织与语义格式见 decisions 第 8 节“实施”一项；它们不成为产品模型或运行时协议。
 至少覆盖 figure / 行内图片、图注、表格、列表、标题、中文强调、HTML 与换行；
 比较预期内容与结构，不要求内部节点类型或 Markdown 字节完全相同。
 这些验证在移除预览后继续保留，不引入自定义 Vue SFC 加载器，也无需运行时串联 TS 与 Rust。

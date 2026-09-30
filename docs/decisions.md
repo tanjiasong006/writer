@@ -178,6 +178,14 @@
     golden 及其更新流程是测试资产，不参与产品运行时，不引入自定义 Vue SFC 加载器。
 - 覆盖独立图片 / 行内图片及图注判断、表格、列表、正文标题、中文强调边界、原始 HTML、换行与嵌套；
   已知 Markdown 表达限制单独声明，不要求内部表示或 Markdown 字节一致。
+- 实施（已完成）：用例在 `src-tauri/fixtures/markdown/`，每个用例 `<name>.md`（原文）、`<name>.json`
+  （人工审查的预期语义，可带 `说明` 字段声明已知限制）、`<name>.serialized.md`（golden）。
+  测试位于 `src/ui/editor/markdown_contract.test.ts`（与 `markdown.test.ts` 同属编辑器转换测试）
+  和 Rust `render::contract_tests`（`render::markdown` IR 的契约测试）；`vite.config.js` 设 `update: "none"`。
+  语义格式：块为 `{type: paragraph|heading|figure|quote|code|rule|list|table, …}`，列表项为
+  `{task: null|true|false, blocks}`；行内为文字 / 行内代码 / 图片片段加排序后的标记集合
+  （`strong`、`emphasis`、`strike`、`link:<url>`），相邻同标记文字合并，硬换行为 `{break: true}`。
+  两端各自在测试侧投影：Rust 的软换行记为空格、任务标记（☐ / ☑）记为 `task`、同种强调的嵌套视为同一标记。
 - `buildRenderRequest` 的 Application 测试负责章节顺序、标题层级与自动编号；
   Word / PDF 的输出测试负责把共享 IR 正确转成各自输出。移除 HTML 预览不取消这些验证责任。
 
