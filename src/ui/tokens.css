@@ -3,7 +3,7 @@
  *
  * 所有界面组件的颜色、字号、间距、尺寸、圆角、阴影与动画都从这里取值；新增视觉参数前先看这里能否表达。
  * 编辑环境的正文展示参数（字体、字号、行距等）不在这里，见 ui/editor/editor_theme.ts。
- * MVP 只提供浅色外观。
+ * 外观跟随系统：:root 是浅色值，深色值在文件末尾的 prefers-color-scheme: dark 中只覆盖颜色与阴影。
  */
 :root {
   /* 字体 */
@@ -130,6 +130,64 @@
   --z-popover: 20;
   --z-dialog: 40;
   --z-toast: 50;
+}
+
+/* 深色外观：与浅色保持相同的层级关系（hover 弱于 selected、强调色只用于当前与焦点），只替换颜色与阴影。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-text: #e8e8ea;
+    --color-text-secondary: #a4a4a9;
+    --color-text-tertiary: #7c7c82;
+    --color-text-disabled: #55555a;
+    --color-text-on-accent: #ffffff;
+
+    --color-bg: #1e1e20;
+    --color-bg-sidebar: #252527;
+    --color-bg-raised: #2c2c2f;
+    --color-scrim: rgba(0, 0, 0, 0.45);
+
+    --color-separator: rgba(255, 255, 255, 0.08);
+    --color-separator-strong: rgba(255, 255, 255, 0.14);
+    --color-control-border: rgba(255, 255, 255, 0.18);
+
+    --color-fill-hover: rgba(255, 255, 255, 0.055);
+    --color-fill-pressed: rgba(255, 255, 255, 0.1);
+
+    --color-accent: #3b78de;
+    --color-accent-hover: #4a86e8;
+    --color-accent-text: #7eaaf4;
+    --color-accent-fill: rgba(74, 134, 232, 0.18);
+    --color-accent-fill-strong: rgba(74, 134, 232, 0.28);
+    --color-focus-ring: rgba(94, 148, 238, 0.6);
+
+    --color-danger: #d9443c;
+    --color-danger-hover: #e5574f;
+    --color-danger-text: #ff8078;
+    --color-danger-fill: rgba(229, 83, 75, 0.14);
+    --color-success-text: #72c48d;
+
+    --color-doc-text: #e2e2e4;
+    --color-doc-muted: #a2a2a7;
+    --color-doc-rule: #48484c;
+    --color-doc-fill: #2a2a2d;
+    --color-doc-table-rule: rgba(226, 226, 228, 0.6);
+    --color-doc-cell-hint: rgba(255, 255, 255, 0.08);
+    --color-doc-selection: #2d4a78;
+    --color-doc-selection-inactive: #3a3a3e;
+    --color-code-comment: #8a8a90;
+    --color-code-keyword: #e07ba4;
+    --color-code-string: #8fc58c;
+    --color-code-number: #d9a566;
+    --color-code-title: #80b0f0;
+    --color-code-type: #b69cec;
+    --color-code-meta: #9a9aa0;
+
+    /* 深色背景上阴影不易分辨，靠一圈浅色细边勾出浮层边界。 */
+    --shadow-popover: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 2px 6px rgba(0, 0, 0, 0.3),
+      0 10px 28px rgba(0, 0, 0, 0.45);
+    --shadow-dialog: 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 4px 12px rgba(0, 0, 0, 0.35),
+      0 24px 56px rgba(0, 0, 0, 0.55);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

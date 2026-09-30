@@ -9,8 +9,8 @@
   font-size: var(--text-m);
   line-height: var(--leading-normal);
   font-weight: 400;
-  /* MVP 只提供浅色外观，组件配色都按浅色设计（ui/tokens.css）。 */
-  color-scheme: light;
+  /* 外观跟随系统，浅色与深色配色都在 ui/tokens.css。 */
+  color-scheme: light dark;
   color: var(--color-text);
   background-color: var(--color-bg);
 

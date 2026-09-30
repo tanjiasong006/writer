@@ -89,7 +89,7 @@ import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
   padding: 0 var(--space-5);
   border: none;
   border-radius: var(--radius-m);
-  background: var(--color-bg);
+  background: var(--color-bg-raised);
   box-shadow: inset 0 0 0 1px var(--color-separator), 0 1px 1px rgba(0, 0, 0, 0.03);
   color: var(--color-text);
   font: inherit;
