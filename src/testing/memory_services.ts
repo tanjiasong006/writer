@@ -1,4 +1,4 @@
-import type { AppMenu, AppServices, DesktopShell } from '../application/desktop_shell.ts'
+import type { AppMenu, AppServices, Appearance, DesktopShell } from '../application/desktop_shell.ts'
 import { MemoryProjectStorage } from './memory_project_storage.ts'
 import { MemoryDocumentOutput } from './memory_document_output.ts'
 
@@ -38,6 +38,8 @@ export class MemoryShell implements DesktopShell {
   /** 模拟开发版的 WRITER_OPEN_PROJECT。 */
   startupProject: string | null = null
   windowTitle = 'Writer'
+  /** 最近一次设置的外观；null 表示还没有设置过。 */
+  appearance: Appearance | null = null
   closeHandler: (() => Promise<boolean>) | null = null
 
   async pickNewProjectPath() {
@@ -87,6 +89,10 @@ export class MemoryShell implements DesktopShell {
 
   toDisplayUrl(filePath: string) {
     return `file://${filePath}`
+  }
+
+  setAppearance(appearance: Appearance) {
+    this.appearance = appearance
   }
 
   setWindowTitle(title: string) {

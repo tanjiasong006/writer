@@ -19,6 +19,9 @@ export type MenuEntry =
   | { readonly separator: true }
   | { readonly role: 'cut' | 'copy' | 'paste' | 'select-all' | 'close-window' }
 
+/** 应用外观：跟随系统，或固定为浅色 / 深色。 */
+export type Appearance = 'system' | 'light' | 'dark'
+
 /** 应用菜单栏的一个顶层菜单（文件、编辑……）。应用菜单与窗口菜单由系统实现补上。 */
 export interface AppMenu {
   readonly label: string
@@ -70,6 +73,8 @@ export interface DesktopShell {
   saveUiState(projectPath: string, state: string): Promise<void>
   /** 把本地文件路径转换成界面可以显示的地址（如编辑器中的图片）。 */
   toDisplayUrl(filePath: string): string
+  /** 设置应用外观（窗口、系统菜单与对话框、界面配色一起切换）。失败静默忽略。 */
+  setAppearance(appearance: Appearance): void
   /** 设置窗口标题（系统标题栏、窗口列表中显示）。失败静默忽略。 */
   setWindowTitle(title: string): void
   /** 应用名称：正式版 "Writer"，开发版 "Writer Dev"（窗口标题、菜单中显示，便于区分）。 */

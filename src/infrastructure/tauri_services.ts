@@ -1,3 +1,4 @@
+import { setTheme } from '@tauri-apps/api/app'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ask, open, save } from '@tauri-apps/plugin-dialog'
@@ -110,6 +111,13 @@ function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): D
 
     toDisplayUrl(filePath) {
       return convertFileSrc(filePath)
+    },
+
+    setAppearance(appearance) {
+      // 应用级主题：窗口、系统菜单与对话框跟着切换，网页的 prefers-color-scheme 随之改变（ui/tokens.css）。
+      void setTheme(appearance === 'system' ? null : appearance).catch(() => {
+        // 外观只是偏好，设置失败时保持当前外观。
+      })
     },
 
     setWindowTitle(title) {

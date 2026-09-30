@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import type { Appearance } from '../../application/desktop_shell.ts'
 import type { ProjectSession } from '../../application/project_session.ts'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { findChapter } from '../../domain/chapter_tree/chapter_tree.ts'
@@ -46,12 +47,14 @@ const props = defineProps<{
   session: ProjectSession
   /** 应用层的提示（如打开项目时的说明），与工作区自己的提示显示在同一处。 */
   notice?: string | null
+  appearance: Appearance
 }>()
 
 const emit = defineEmits<{
   'new-project': []
   'open-project': []
   'dismiss-notice': []
+  'set-appearance': [appearance: Appearance]
 }>()
 
 const { shell, output } = useServices()
@@ -295,6 +298,7 @@ const menus = computed(() =>
     exporting: exporting.value !== null,
     hasChapters: tree.value.length > 0,
     reading: reading.value,
+    appearance: props.appearance,
   }),
 )
 
@@ -351,6 +355,9 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       if (command.action === 'sidebar') void setSidebarVisible(!sidebarVisible.value)
       else if (command.action === 'reader') toggleReading()
       else switchFocus()
+      return
+    case 'appearance':
+      emit('set-appearance', command.appearance)
       return
     case 'chapter':
     case 'move-chapter': {

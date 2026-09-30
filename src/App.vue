@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   createProject,
   openProject,
@@ -13,7 +13,8 @@ import Workspace from './ui/app_shell/Workspace.vue'
 import { messageForStorageFailure } from './ui/app_shell/storage_messages.ts'
 import { useServices } from './ui/services.ts'
 import Toast from './ui/common/Toast.vue'
-import { menuItemForKey, welcomeMenus } from './ui/app_shell/app_menu.ts'
+import { menuItemForKey, parseMenuItemId, welcomeMenus } from './ui/app_shell/app_menu.ts'
+import { useAppearance } from './ui/app_shell/use_appearance.ts'
 import { blockReload, isHandled } from './ui/common/shortcuts.ts'
 import './ui/base.css'
 
@@ -23,6 +24,7 @@ import './ui/base.css'
  * 保存失败时由用户决定是否丢弃，绝不静默丢失修改。
  */
 const { storage, shell } = useServices()
+const appearance = useAppearance(shell)
 
 type View =
   | { readonly kind: 'starting' }
@@ -69,27 +71,30 @@ function blockPageContextMenu(event: MouseEvent): void {
 }
 
 /**
- * 没有打开文档时的菜单栏与快捷键（新建、打开）。打开文档后由工作区设置完整的菜单栏并响应快捷键。
+ * 没有打开文档时的菜单栏与快捷键（新建、打开、外观）。打开文档后由工作区设置完整的菜单栏并响应快捷键。
  */
-const WELCOME_MENUS = welcomeMenus()
+const welcome = computed(() => welcomeMenus(appearance.current.value))
 
 function runWelcomeMenuItem(id: string): void {
-  if (busy.value || view.value.kind === 'open') return
+  if (view.value.kind === 'open') return
+  const command = parseMenuItemId(id)
+  if (command?.group === 'appearance') appearance.set(command.appearance)
+  if (busy.value) return
   if (id === 'file:new') void newProject()
   else if (id === 'file:open') void openExisting()
 }
 
 watch(
-  () => view.value.kind,
-  (kind) => {
-    if (kind !== 'open') shell.setAppMenu?.(WELCOME_MENUS, runWelcomeMenuItem)
+  [() => view.value.kind, welcome],
+  ([kind, menus]) => {
+    if (kind !== 'open') shell.setAppMenu?.(menus, runWelcomeMenuItem)
   },
   { immediate: true },
 )
 
 function onShortcut(event: KeyboardEvent): void {
   if (isHandled(event) || view.value.kind === 'open') return
-  const id = menuItemForKey(WELCOME_MENUS, event)
+  const id = menuItemForKey(welcome.value, event)
   if (id === null) return
   event.preventDefault()
   runWelcomeMenuItem(id)
@@ -215,7 +220,9 @@ function titleFromPath(path: string): string {
       :key="view.key"
       :session="view.session"
       :notice="notice"
+      :appearance="appearance.current.value"
       @dismiss-notice="notice = null"
+      @set-appearance="appearance.set"
       @new-project="newProject"
       @open-project="openExisting"
     />

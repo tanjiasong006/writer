@@ -24,15 +24,24 @@ function context(patch: Partial<AppMenuContext> = {}): AppMenuContext {
     exporting: false,
     hasChapters: true,
     reading: false,
+    appearance: 'system',
     ...patch,
   }
 }
 
 function item(menus: readonly AppMenu[], id: string): Extract<MenuEntry, { id: string }> {
-  for (const menu of menus) {
-    for (const entry of menu.items) {
-      if (!('separator' in entry) && !('role' in entry) && entry.id === id) return entry
+  const visit = (entries: readonly MenuEntry[]): Extract<MenuEntry, { id: string }> | null => {
+    for (const entry of entries) {
+      if ('separator' in entry || 'role' in entry) continue
+      if (entry.id === id) return entry
+      const inner = entry.submenu ? visit(entry.submenu) : null
+      if (inner) return inner
     }
+    return null
+  }
+  for (const menu of menus) {
+    const found = visit(menu.items)
+    if (found) return found
   }
   throw new Error(`no ${id}`)
 }
@@ -110,6 +119,17 @@ describe('可用状态随焦点变化（响应链）', () => {
     expect(item(menus, 'file:export-pdf').disabled).toBe(true)
     expect(item(menus, 'view:sidebar').label).toBe('显示侧栏')
   })
+
+  test('显示 → 外观：三个互斥的勾选项，欢迎页也有', () => {
+    const checked = (menus: readonly AppMenu[]) =>
+      (['system', 'light', 'dark'] as const).filter((appearance) => item(menus, `appearance:${appearance}`).checked)
+    expect(checked(workspaceMenus(context()))).toEqual(['system'])
+    expect(checked(workspaceMenus(context({ appearance: 'dark' })))).toEqual(['dark'])
+    expect(checked(welcomeMenus('light'))).toEqual(['light'])
+    expect(item(welcomeMenus('system'), 'appearance').submenu).toHaveLength(4)
+    expect(parseMenuItemId('appearance:dark')).toEqual({ group: 'appearance', appearance: 'dark' })
+    expect(parseMenuItemId('appearance:sepia')).toBeNull()
+  })
 })
 
 /** 菜单中所有带快捷键的项。 */
@@ -132,7 +152,7 @@ describe('快捷键', () => {
       ...Object.values(SHORTCUTS),
       ...shortcuts(workspaceMenus(context())).map(([, shortcut]) => shortcut),
       ...shortcuts(workspaceMenus(context({ focus: 'tree' }))).map(([, shortcut]) => shortcut),
-      ...shortcuts(welcomeMenus()).map(([, shortcut]) => shortcut),
+      ...shortcuts(welcomeMenus('system')).map(([, shortcut]) => shortcut),
     ]
     const documentLevel = new Set<string>([SHORTCUTS.newDocument, SHORTCUTS.openDocument, SHORTCUTS.reader])
     for (const shortcut of all) {
@@ -234,10 +254,16 @@ describe('快捷键', () => {
 describe('菜单项 id', () => {
   test('菜单中的每一项都能还原成命令', () => {
     for (const focus of ['editor', 'tree', 'text-input', 'other'] as const) {
-      const entries = [...welcomeMenus(), ...workspaceMenus(context({ focus }))].flatMap((menu) => menu.items)
-      for (const entry of entries) {
-        if ('id' in entry) expect(parseMenuItemId(entry.id), entry.id).not.toBeNull()
+      const entries = [...welcomeMenus('system'), ...workspaceMenus(context({ focus }))].flatMap((menu) => menu.items)
+      const visit = (list: readonly MenuEntry[]): void => {
+        for (const entry of list) {
+          if (!('id' in entry)) continue
+          // 子菜单本身不对应命令，只检查其中的项。
+          if (entry.submenu) visit(entry.submenu)
+          else expect(parseMenuItemId(entry.id), entry.id).not.toBeNull()
+        }
       }
+      visit(entries)
     }
   })
 

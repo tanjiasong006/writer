@@ -9,6 +9,7 @@
     "core:default",
     "core:window:allow-destroy",
     "core:window:allow-set-title",
+    "core:app:allow-set-app-theme",
     "dialog:default",
     "core:window:allow-start-dragging",
     "core:menu:default"

@@ -46,7 +46,7 @@ export function commandEntry(
   command: EditorCommand,
   state: CommandState | null,
   options: { readonly checkable?: boolean; readonly label?: string } = {},
-): MenuEntry {
+): Omit<Extract<MenuEntry, { readonly id: string }>, 'submenu'> {
   const { label, shortcut } = COMMAND_LABELS[command]
   const item = state?.[command]
   return {

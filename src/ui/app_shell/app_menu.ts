@@ -1,4 +1,4 @@
-import type { AppMenu, MenuEntry } from '../../application/desktop_shell.ts'
+import type { AppMenu, Appearance, MenuEntry } from '../../application/desktop_shell.ts'
 import type { KeyboardMoveDirection } from '../../application/move_chapter.ts'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import { COMMAND_LABELS, commandEntry } from '../editor/editor_menu.ts'
@@ -29,6 +29,7 @@ export interface AppMenuContext {
   readonly hasChapters: boolean
   /** 是否在全文阅读中。 */
   readonly reading: boolean
+  readonly appearance: Appearance
 }
 
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'reveal', 'export-docx', 'export-pdf'] as const
@@ -36,6 +37,7 @@ const EDIT_ACTIONS = ['undo', 'redo', 'context-menu'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
+const APPEARANCES = ['system', 'light', 'dark'] as const satisfies readonly Appearance[]
 
 type FileAction = (typeof FILE_ACTIONS)[number]
 type EditAction = (typeof EDIT_ACTIONS)[number]
@@ -53,6 +55,9 @@ export type MenuItemId =
   | `chapter:${ChapterAction}`
   | `chapter:move-${KeyboardMoveDirection}`
   | `view:${ViewAction}`
+  | `appearance:${Appearance}`
+  /** 子菜单本身（不对应命令）。 */
+  | 'appearance'
 
 /** 菜单项要执行的命令。 */
 export type MenuCommand =
@@ -63,6 +68,7 @@ export type MenuCommand =
   | { readonly group: 'chapter'; readonly action: ChapterAction }
   | { readonly group: 'move-chapter'; readonly direction: KeyboardMoveDirection }
   | { readonly group: 'view'; readonly action: ViewAction }
+  | { readonly group: 'appearance'; readonly appearance: Appearance }
 
 function oneOf<T extends string>(values: readonly T[], value: string): value is T {
   return (values as readonly string[]).includes(value)
@@ -92,6 +98,8 @@ export function parseMenuItemId(id: string): MenuCommand | null {
     }
     case 'view':
       return oneOf(VIEW_ACTIONS, name) ? { group: 'view', action: name } : null
+    case 'appearance':
+      return oneOf(APPEARANCES, name) ? { group: 'appearance', appearance: name } : null
     default:
       return null
   }
@@ -100,6 +108,7 @@ export function parseMenuItemId(id: string): MenuCommand | null {
 /** id 按 MenuItemId 检查的菜单（结构与 AppMenu 相同，交给 DesktopShell 时不需要转换）。 */
 type WorkspaceMenuItem = Omit<Extract<MenuEntry, { readonly id: string }>, 'id' | 'submenu'> & {
   readonly id: MenuItemId
+  readonly submenu?: readonly WorkspaceMenuEntry[]
 }
 type WorkspaceMenuEntry = WorkspaceMenuItem | Exclude<MenuEntry, { readonly id: string }>
 
@@ -119,8 +128,25 @@ export const MOVE_LABELS: ReadonlyArray<{
   { direction: 'indent', label: '降级', shortcut: SHORTCUTS.indentChapter },
 ]
 
+/**
+ * 显示 → 外观：三个互斥的勾选项。
+ * 欢迎页与工作区都有，打开文档前也能切换。
+ */
+function appearanceMenu(current: Appearance): WorkspaceMenuEntry {
+  const option = (appearance: Appearance, label: string): WorkspaceMenuItem => ({
+    id: `appearance:${appearance}`,
+    label,
+    checked: current === appearance,
+  })
+  return {
+    id: 'appearance',
+    label: '外观',
+    submenu: [option('system', '跟随系统'), { separator: true }, option('light', '浅色'), option('dark', '深色')],
+  }
+}
+
 /** 欢迎页（没有打开文档）时的菜单栏。 */
-export function welcomeMenus(): WorkspaceMenu[] {
+export function welcomeMenus(appearance: Appearance): WorkspaceMenu[] {
   return [
     {
       label: '文件',
@@ -132,6 +158,7 @@ export function welcomeMenus(): WorkspaceMenu[] {
       ],
     },
     { label: '编辑', items: [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'select-all' }] },
+    { label: '显示', items: [appearanceMenu(appearance)] },
   ]
 }
 
@@ -279,6 +306,8 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
           shortcut: SHORTCUTS.switchFocus,
           disabled: focus === 'text-input',
         },
+        { separator: true },
+        appearanceMenu(context.appearance),
       ],
     },
   ]

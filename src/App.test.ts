@@ -16,6 +16,7 @@ import {
   documentTitle,
   editorView,
   typeAtEnd,
+  appMenuItem,
 } from './testing/app_harness.ts'
 
 /** 应用级流程：欢迎页、新建 / 打开 / 切换项目、关闭窗口、启动项目、应用级保护。工作区内的操作见 ui/app_shell/Workspace.test.ts。 */
@@ -302,4 +303,39 @@ test('开发版指定的启动项目（WRITER_OPEN_PROJECT）优先于上次打�
   const wrapper = await mountApp(services)
   expect(documentTitle(wrapper)).toBe('测试项目')
   expect(services.shell.lastProjectPath).toBe('/tmp/测试项目')
+})
+
+test('外观：启动时应用保存的偏好；欢迎页与工作区的"显示 → 外观"切换同一个偏好', async () => {
+  const services = seededServices()
+  services.shell.enableAppMenu()
+  services.shell.preferences.set('appearance', 'dark')
+  await mountApp(services)
+  expect(services.shell.appearance).toBe('dark')
+  expect(appMenuItem(services, 'appearance:dark').checked).toBe(true)
+
+  services.shell.chooseMenuItem('appearance:light')
+  await flushPromises()
+  expect(services.shell.appearance).toBe('light')
+  expect(services.shell.getPreference('appearance')).toBe('light')
+  expect(appMenuItem(services, 'appearance:light').checked).toBe(true)
+  expect(appMenuItem(services, 'appearance:dark').checked).toBe(false)
+
+  services.shell.lastProjectPath = PATH
+  unmountAll()
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  expect(wrapper.find('.workspace').exists()).toBe(true)
+  expect(appMenuItem(services, 'appearance:light').checked).toBe(true)
+  services.shell.chooseMenuItem('appearance:system')
+  await flushPromises()
+  expect(services.shell.appearance).toBe('system')
+  expect(services.shell.getPreference('appearance')).toBe('system')
+  expect(appMenuItem(services, 'appearance:system').checked).toBe(true)
+})
+
+test('外观：保存的值无法识别时跟随系统', async () => {
+  const services = createMemoryServices()
+  services.shell.preferences.set('appearance', 'sepia')
+  await mountApp(services)
+  expect(services.shell.appearance).toBe('system')
 })
