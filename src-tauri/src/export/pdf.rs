@@ -1,7 +1,8 @@
 //! PDF 导出：把 `render::Document` 生成 Typst 源码，用内嵌的 Typst 排版为 PDF。
 //!
 //! - 用户文本一律以 Typst 字符串字面量（`#"..."`）注入，不存在"正文里的符号被当作 Typst 语法"的问题。
-//! - 排版使用 PDF 的默认输出参数（`export::theme`）：在 preamble 中翻译成 Typst 的 set / show 规则。
+//! - 排版使用 PDF 的默认输出参数（`Theme::pdf()`）：在 preamble 中翻译成 Typst 的 set / show 规则；
+//!   页面结构（封面、目录、一级章节另起一页、页眉页码）见 docs/pdf-layout.md 第 3 节。
 //! - 图片按统一规则自动排版（`export::images`）：保持比例、不放大，不超过所在容器的宽度与完整正文区高度；
 //!   独立成段的图片居中，有图注时为图注预留空间。尺寸与图片落在页上的位置无关：当前页放不下时，
 //!   图片与图注作为一个整体移到下一页，不为塞进页底而缩小。
@@ -43,6 +44,14 @@ const TEXT_BOTTOM_EDGE_EM: f64 = 0.2;
 const TABLE_INSET_PT: f64 = 6.0;
 /// 标题的行高（字号的倍数）。
 const HEADING_LINE_HEIGHT: f64 = 1.4;
+/// 正文段落的首行缩进（em）。
+const FIRST_LINE_INDENT_EM: f64 = 2.0;
+/// 一级章节另起一页后，标题上方的留白（磅）。
+const CHAPTER_TOP_SPACE_PT: f64 = 36.0;
+/// 页眉、页码的字号（磅）。
+const META_TEXT_PT: f64 = 9.0;
+/// 目录显示的章节层级。
+const TOC_DEPTH: usize = 2;
 
 static FONTS: OnceLock<FontStore> = OnceLock::new();
 
@@ -73,7 +82,7 @@ fn layout(
     }
 
     let mut writer = Writer {
-        theme: Theme::default(),
+        theme: Theme::pdf(),
         root: project_root,
         out: String::new(),
         images: Vec::new(),
@@ -204,6 +213,8 @@ struct Writer<'a> {
 }
 
 impl Writer<'_> {
+    /// 文档级样式与页面结构：封面（有标题时）→ 目录（有章节时，罗马数字页码）→ 正文（页眉，页码从 1 开始）。
+    /// 之后依次输出各章节（docs/pdf-layout.md 第 3 节）。
     fn preamble(&mut self, document: &Document, book: &FontBook) {
         let font_list = |family: FontFamily| {
             let names = available_families(book, family);
@@ -224,6 +235,7 @@ impl Writer<'_> {
         let theme = self.theme;
         let body = &theme.body;
         let mono = font_list(FontFamily::Mono);
+        let sans = font_list(FontFamily::Sans);
         let title = string(&document.title);
         // 标题前后的间距按"行框之外的外边距"定义，行框本身含半个行距（标题行高 1.4、正文按输出行距）；
         // 这里的排版框是 1em，因此把两侧的半个行距补进标题前后的间距。
@@ -241,9 +253,9 @@ impl Writer<'_> {
         };
         self.out.push_str(&format!(
             "#set document(title: {title})\n\
-             #set page(paper: \"a4\", margin: 25mm, numbering: \"1\", number-align: center)\n\
+             #set page(paper: \"a4\", margin: 25mm, numbering: none, header: none, footer: none)\n\
              #set text(font: {body_font}, size: {body_size}pt, lang: \"zh\", region: \"cn\", top-edge: 0.8em, bottom-edge: -{bottom_edge}em)\n\
-             #set par(justify: true, leading: {leading}em, spacing: {spacing}em)\n\
+             #set par(justify: true, leading: {leading}em, spacing: {spacing}em, first-line-indent: (amount: {indent}em, all: true))\n\
              #set heading(numbering: none)\n",
             body_font = font_list(body.font.into()),
             bottom_edge = num(TEXT_BOTTOM_EDGE_EM),
@@ -253,26 +265,44 @@ impl Writer<'_> {
             leading = num(body.line_height - 1.0),
             // 段距在行距之外再加 paragraph_spacing。
             spacing = num(body.line_height - 1.0 + body.paragraph_spacing),
+            indent = num(FIRST_LINE_INDENT_EM),
         ));
-        // 第 3 级及更深的标题使用 heading3；第 1、2 级的规则在后，优先生效。
+        // 更深的标题规则在前，第 1–3 级的规则在后，优先生效。
         self.out
-            .push_str(&heading_rules("heading", &theme.heading3));
+            .push_str(&heading_rules("heading", &theme.heading4));
+        self.out
+            .push_str(&heading_rules("heading.where(level: 3)", &theme.heading3));
         self.out
             .push_str(&heading_rules("heading.where(level: 1)", &theme.heading1));
         self.out
             .push_str(&heading_rules("heading.where(level: 2)", &theme.heading2));
         self.out.push_str(&format!(
-            "#show raw: set text(font: {mono}, size: {inline_code}pt)\n\
+            // 一级章节（以及目录标题）另起一页，上方留白；页首的块间距会被丢弃，因此用固定留白。
+            "#show heading.where(level: 1): it => {{ pagebreak(weak: true); v({chapter_top}pt); it }}\n\
+             #show list: set par(first-line-indent: 0em)\n\
+             #show enum: set par(first-line-indent: 0em)\n\
+             #show table: set par(first-line-indent: 0em)\n\
+             #show figure: set par(first-line-indent: 0em)\n\
+             #show outline: set par(first-line-indent: 0em)\n\
+             #show outline.entry.where(level: 1): set text(font: {sans})\n\
+             #show outline.entry.where(level: 1): set block(above: 1em)\n\
+             #show raw: set text(font: {mono}, size: {inline_code}pt)\n\
+             #show raw.where(block: false): it => highlight(fill: luma(238), radius: 2pt, extent: 1pt, it)\n\
              #show raw.where(block: true): set text(size: {code}pt)\n\
-             #show raw.where(block: true): block.with(fill: luma(243), inset: 8pt, radius: 3pt, width: 100%)\n\
-             #set table(stroke: 0.5pt + luma(160), inset: {inset}pt)\n\
+             #show raw.where(block: true): block.with(fill: luma(245), inset: 8pt, radius: 3pt, width: 100%)\n\
+             #set table(stroke: none, inset: {inset}pt)\n\
+             #let writer-three-line(last) = (_, y) => (\n\
+               top: if y == 0 {{ 1pt }} else {{ none }},\n\
+               bottom: if y == last {{ 1pt }} else if y == 0 {{ 0.5pt }} else {{ none }},\n\
+             )\n\
              #show table: set text(size: {table}pt)\n\
              #show table.cell.where(y: 0): set text(weight: \"bold\")\n\
              #set figure(numbering: none)\n\
              #show figure: set block(above: {figure}em, below: {figure}em)\n\
              #let writer-caption = (font: {caption_font}, size: {caption}pt)\n\
              #show figure.caption: set text(..writer-caption, fill: luma(100))\n\
-             #show link: set text(fill: rgb(\"#2563eb\"))\n",
+             #show link: set text(fill: rgb(\"#1f4e9a\"))\n",
+            chapter_top = num(CHAPTER_TOP_SPACE_PT),
             inline_code = num(body.size * 0.9),
             inset = num(TABLE_INSET_PT),
             code = num(theme.code_block),
@@ -281,11 +311,44 @@ impl Writer<'_> {
             caption_font = font_list(theme.caption.font.into()),
             caption = num(theme.caption.size),
         ));
+        // 页眉：左侧文档标题，右侧当前一级章节；每章首页不显示。页脚：居中页码。
+        // 页眉位于页首，用原生的 before / after 选择器查找前后章节：
+        // 在脚本中逐页遍历全部章节会让千章文档的排版慢数倍。
+        self.out.push_str(&format!(
+            "#let writer-footer = context align(center, text(size: {meta}pt, fill: luma(100), counter(page).display()))\n\
+             #let writer-header = context {{\n\
+               let chapter = heading.where(level: 1, outlined: true)\n\
+               let next = query(selector(chapter).after(here()))\n\
+               if next.len() == 0 or next.first().location().page() != here().page() {{\n\
+                 let before = query(selector(chapter).before(here()))\n\
+                 set text(size: {meta}pt, fill: luma(100))\n\
+                 set par(first-line-indent: 0em, justify: false)\n\
+                 block(width: 100%, inset: (bottom: 4pt), stroke: (bottom: 0.4pt + luma(160)),\n\
+                   grid(columns: (1fr, 1fr), gutter: 1em, align(left)[#{title}], align(right, if before.len() > 0 {{ before.last().body }})))\n\
+               }}\n\
+             }}\n",
+            meta = num(META_TEXT_PT),
+        ));
         if !document.title.trim().is_empty() {
             self.out.push_str(&format!(
-                "#align(center, text(font: {font}, size: {size}pt, weight: \"bold\")[#{title}])\n\n",
+                "#page[\n\
+                 #set par(first-line-indent: 0em, justify: false)\n\
+                 #v(28%)\n\
+                 #align(center, text(font: {font}, size: {size}pt, weight: \"bold\")[#{title}])\n\
+                 #v(1.5em)\n\
+                 #align(center, line(length: 40%, stroke: 0.6pt + luma(120)))\n\
+                 ]\n",
                 font = font_list(theme.title.font.into()),
                 size = num(theme.title.size),
+            ));
+        }
+        if !document.sections.is_empty() {
+            self.out.push_str(&format!(
+                "#set page(numbering: \"i\", footer: writer-footer)\n\
+                 #counter(page).update(1)\n\
+                 #outline(depth: {TOC_DEPTH})\n\
+                 #set page(numbering: \"1\", header: writer-header, footer: writer-footer)\n\
+                 #counter(page).update(1)\n\n"
             ));
         }
         self.quote_font = font_list(theme.blockquote.font.into());
@@ -342,7 +405,7 @@ impl Writer<'_> {
             Block::Quote(blocks) => {
                 let content = self.blocks(blocks, section);
                 format!(
-                    "#block(inset: (left: 10pt, y: 2pt), stroke: (left: 2pt + luma(200)))[#set text(font: {}, size: {}pt, fill: luma(80))\n{content}]",
+                    "#block(inset: (left: 10pt, y: 2pt), stroke: (left: 2pt + luma(200)))[#set text(font: {}, size: {}pt, fill: luma(80))\n#set par(first-line-indent: 0em)\n{content}]",
                     self.quote_font,
                     num(self.theme.blockquote.size),
                 )
@@ -388,17 +451,19 @@ impl Writer<'_> {
                 let align = align.join(", ");
                 let cells = cells.join(", ");
                 let with_images = std::iter::once(header).chain(rows).flatten().any(|cell| has_image(cell));
+                // 三线表：顶线、表头下的细线与底线；表头随跨页重复，顶线与表头线也随之重复。
+                let stroke = format!("writer-three-line({})", rows.len());
                 if !with_images {
-                    return format!("#table(columns: {columns}, align: ({align},), table.header({head}), {cells})");
+                    return format!("#table(columns: {columns}, align: ({align},), stroke: {stroke}, table.header({head}), {cells})");
                 }
                 format!(
                     "#layout(size => {{\n\
                      let columns = (1fr,) * {columns}\n\
                      let writer-table-head = measure(block(width: size.width, table(columns: columns, align: ({align},), table.header({head})))).height\n\
-                     table(columns: columns, align: ({align},), table.header({head}), {cells})\n}})"
+                     table(columns: columns, align: ({align},), stroke: {stroke}, table.header({head}), {cells})\n}})"
                 )
             }
-            Block::Rule => "#line(length: 100%, stroke: 0.5pt + luma(180))".to_owned(),
+            Block::Rule => "#align(center, line(length: 30%, stroke: 0.5pt + luma(160)))".to_owned(),
         }
     }
 
@@ -693,7 +758,7 @@ mod tests {
 
     fn test_writer(root: &Path) -> Writer<'_> {
         Writer {
-            theme: Theme::default(),
+            theme: Theme::pdf(),
             root,
             out: String::new(),
             images: Vec::new(),
@@ -926,7 +991,7 @@ mod tests {
         println!("Word export: {:?}, {} bytes", started.elapsed(), word.len());
         assert!(report.missing_images.is_empty());
         let mut writer = Writer {
-            theme: Theme::default(),
+            theme: Theme::pdf(),
             root: dir.path(),
             out: String::new(),
             images: Vec::new(),
@@ -1158,6 +1223,7 @@ mod tests {
     enum Placed {
         Text {
             page: usize,
+            x: f64,
             y: f64,
             size: f64,
             family: String,
@@ -1186,6 +1252,7 @@ mod tests {
                     FrameItem::Group(group) => walk(page, &group.frame, at, out),
                     FrameItem::Text(text) => out.push(Placed::Text {
                         page,
+                        x: at.x.to_pt(),
                         y: at.y.to_pt(),
                         size: text.size.to_pt(),
                         family: text.font.info().family.to_lowercase(),
@@ -1247,15 +1314,16 @@ mod tests {
         let heading: Vec<_> = items
             .iter()
             .filter_map(|p| match p {
+                // 第 0 页是目录，其中的条目也包含章节标题。
                 Placed::Text {
-                    size, family, text, ..
-                } if text.contains("标题甲") => Some((*size, family.clone())),
+                    page, size, family, text, ..
+                } if *page > 0 && text.contains("标题甲") => Some((*size, family.clone())),
                 _ => None,
             })
             .collect();
         assert!(!heading.is_empty());
         for (size, family) in &heading {
-            assert_eq!(*size, 16.0);
+            assert_eq!(*size, 18.0);
             assert!(in_family(family, FontFamily::Sans), "heading font {family}");
         }
 
@@ -1279,13 +1347,102 @@ mod tests {
         body_lines.dedup_by(|a, b| (*a - *b).abs() < 0.01);
         assert!(body_lines.len() >= 3, "paragraph should wrap");
         for pair in body_lines.windows(2) {
-            // 相邻基线距离 = 字号 × 行距倍数（12 × 1.8）。
+            // 相邻基线距离 = 字号 × 行距倍数（12 × 1.75）。
             assert!(
-                (pair[1] - pair[0] - 21.6).abs() < 0.05,
+                (pair[1] - pair[0] - 21.0).abs() < 0.05,
                 "line pitch {}",
                 pair[1] - pair[0]
             );
         }
+    }
+
+    /// 每页的文字（按排版顺序拼接）。
+    fn page_texts(paged: &PagedDocument) -> Vec<String> {
+        let mut pages = vec![String::new(); paged.pages().len()];
+        for item in placed(paged) {
+            if let Placed::Text { page, text, .. } = item {
+                pages[page].push_str(&text);
+            }
+        }
+        pages
+    }
+
+    #[test]
+    fn cover_contents_and_chapters_each_start_a_page() {
+        let dir = project();
+        let long = "很长的正文用于跨页。".repeat(400);
+        let document = build(&request(
+            "封面标题",
+            &[
+                ("a", vec![1], "第一章节", &long),
+                ("b", vec![1, 1], "第一小节", "小节正文。"),
+                ("c", vec![2], "第二章节", "第二章正文。"),
+            ],
+        ));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let texts = page_texts(&paged);
+        // 封面：只有标题，没有页码。
+        assert_eq!(texts[0], "封面标题");
+        assert!(paged.pages()[0].numbering.is_none());
+        // 目录：两级条目，页码使用罗马数字。
+        assert!(texts[1].contains("目录") && texts[1].contains("1 第一章节") && texts[1].contains("1.1 第一小节"));
+        assert!(texts[1].ends_with('i'), "{}", texts[1]);
+        // 正文从第 1 页开始；章节首页没有页眉。
+        assert!(texts[2].starts_with("1 第一章节"), "{}", texts[2]);
+        assert_eq!(paged.pages()[2].number, 1);
+        assert!(texts[2].ends_with('1'));
+        // 章节的后续页：页眉包含文档标题与当前一级章节。
+        assert!(texts[3].starts_with("封面标题1 第一章节"), "{}", texts[3]);
+        // 第二章另起一页，小节不另起一页。
+        let second = texts.iter().position(|t| t.contains("第二章节") && !t.contains("目录")).unwrap();
+        assert!(texts[second].starts_with("2 第二章节"), "{}", texts[second]);
+        assert!(!texts[second - 1].contains("第二章正文"));
+        assert!(texts.iter().any(|t| t.contains("第一小节") && t.contains("很长的正文")));
+    }
+
+    #[test]
+    fn untitled_documents_have_no_cover() {
+        let dir = project();
+        let document = build(&request("", &[("a", vec![1], "章", "正文。")]));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let texts = page_texts(&paged);
+        assert_eq!(paged.pages().len(), 2);
+        assert!(texts[0].contains("目录"));
+        assert!(texts[1].starts_with("1 章"));
+    }
+
+    #[test]
+    fn body_paragraphs_indent_their_first_line_but_lists_and_quotes_do_not() {
+        let dir = project();
+        let paragraph = "首行缩进的段落。".repeat(12);
+        let markdown = format!("{paragraph}\n\n- 列表项\n\n> 引用段落");
+        let document = build(&request("", &[("a", vec![1], "章", &markdown)]));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let lines: Vec<(f64, f64, String)> = placed(&paged)
+            .into_iter()
+            .filter_map(|p| match p {
+                Placed::Text { page: 1, x, y, text, .. } => Some((x, y, text)),
+                _ => None,
+            })
+            .collect();
+        let starts = |needle: &str| -> Vec<f64> {
+            let mut rows: Vec<(f64, f64)> = lines
+                .iter()
+                .filter(|(_, _, t)| t.contains(needle))
+                .map(|(x, y, _)| (*y, *x))
+                .collect();
+            rows.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            rows.dedup_by(|a, b| (a.0 - b.0).abs() < 0.01);
+            rows.into_iter().map(|(_, x)| x).collect()
+        };
+        let paragraph = starts("段落。");
+        assert!(paragraph.len() >= 2, "paragraph should wrap");
+        // 首行缩进 2 字符（24 磅），后续行顶格。
+        assert!((paragraph[0] - MARGIN_PT - 24.0).abs() < 0.5, "{paragraph:?}");
+        assert!((paragraph[1] - MARGIN_PT).abs() < 0.5, "{paragraph:?}");
+        // 列表与引用内的段落不缩进：列表文字紧跟项目符号，引用文字紧跟左侧竖线与内边距。
+        assert!(starts("列表项")[0] < MARGIN_PT + 24.0, "{:?}", starts("列表项"));
+        assert!(starts("引用段落")[0] < MARGIN_PT + 24.0, "{:?}", starts("引用段落"));
     }
 
     #[test]
@@ -1332,8 +1489,8 @@ mod tests {
         let images = images(&paged);
         assert_eq!(images.len(), 1);
         let (page, _, y, width, height) = images[0];
-        // 标题与正文之后放不下：整体移到第二页，而不是缩小后塞进第一页的剩余空间。
-        assert_eq!(page, 1);
+        // 第 0 页是目录。标题与正文之后放不下：整体移到下一页，而不是缩小后塞进章节首页的剩余空间。
+        assert_eq!(page, 2);
         // 高度按完整正文区扣除实际测得的一行图注（10 磅字号、1em 行框）与间距计算，比例不变。
         let expected = TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK - FIGURE_GAP_EM * 12.0 - 10.0;
         assert!((height - expected).abs() < 0.5, "{height} vs {expected}");
@@ -1345,7 +1502,7 @@ mod tests {
             _ => None,
         });
         let (caption_page, caption_y) = caption.expect("caption");
-        assert_eq!(caption_page, 1);
+        assert_eq!(caption_page, 2);
         assert!(caption_y <= page_height - MARGIN_PT + 0.5, "{caption_y}");
     }
 
@@ -1365,6 +1522,13 @@ mod tests {
         assert!((width / height - 4.0).abs() < 0.01);
     }
 
+    /// 页脚中的页码：正文为阿拉伯数字，目录为小写罗马数字。
+    fn is_page_label(paged: &PagedDocument, page: usize, text: &str) -> bool {
+        let text = text.trim();
+        text == paged.pages()[page].number.to_string()
+            || (!text.is_empty() && text.chars().all(|c| "ivxlc".contains(c)))
+    }
+
     /// 所有页面上的图片与文字基线都在正文区内：不越过上边距，底边不进入页脚页码区域。
     fn assert_inside_text_area(paged: &PagedDocument) {
         let page_height = paged.pages()[0].frame.height().to_pt();
@@ -1376,7 +1540,7 @@ mod tests {
                     assert!(y >= top, "page {page}: image top {y} < {top}");
                     assert!(y + height <= bottom, "page {page}: image bottom {} > {bottom}", y + height)
                 }
-                Placed::Text { page, y, text, .. } if text.trim() != (page + 1).to_string() => {
+                Placed::Text { page, y, text, .. } if !is_page_label(paged, page, &text) => {
                     assert!(y <= bottom, "page {page}: text {text:?} baseline {y} > {bottom}")
                 }
                 _ => {}
@@ -1465,12 +1629,12 @@ mod tests {
         assert!(paged.pages().len() > 1);
         assert_eq!(images(&paged).len(), 12);
         assert_inside_text_area(&paged);
-        // 表头在每页重复。
+        // 表头在正文的每页重复（第 0 页是目录）。
         let heads = placed(&paged)
             .into_iter()
             .filter(|p| matches!(p, Placed::Text { text, .. } if text.contains("序号")))
             .count();
-        assert_eq!(heads, paged.pages().len());
+        assert_eq!(heads, paged.pages().len() - 1);
     }
 
     #[test]

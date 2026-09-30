@@ -1,8 +1,8 @@
 //! 导出的默认输出参数：字体族、字号、行距、段距、各级标题、引用、代码、表格、图注。
 //!
 //! 这是 Word 与 PDF 的输出参数类型，与编辑环境的展示参数无关，也不来自项目数据
-//! （docs/decisions.md 第 5、8 节）。Word 与 PDF 各自取得默认值（目前取值相同）；
-//! 未来的 PDF 排版配置独立传入，不恢复共享主题。只有语义参数，不含任何 CSS。
+//! （docs/decisions.md 第 5、8 节）。Word 使用 `Theme::default()`，PDF 使用 `Theme::pdf()`
+//! （docs/pdf-layout.md 第 3 节）；未来的 PDF 排版配置独立传入，不恢复共享主题。只有语义参数，不含任何 CSS。
 
 /// 受控的字体族；具体字体的 fallback 链见 `export::fonts`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +44,8 @@ pub struct Theme {
     pub heading1: HeadingStyle,
     pub heading2: HeadingStyle,
     pub heading3: HeadingStyle,
+    /// 第 4 级及更深的标题。
+    pub heading4: HeadingStyle,
     pub blockquote: TextStyle,
     /// 代码块字号（字体固定为等宽）。
     pub code_block: f64,
@@ -79,6 +81,7 @@ impl Default for Theme {
             heading1: heading(FontId::Sans, 16.0, 1.4, 0.6),
             heading2: heading(FontId::Sans, 14.0, 1.2, 0.5),
             heading3: heading(FontId::Sans, 13.0, 1.0, 0.4),
+            heading4: heading(FontId::Sans, 13.0, 1.0, 0.4),
             blockquote: TextStyle {
                 font: FontId::Serif,
                 size: 12.0,
@@ -95,12 +98,37 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// 第 level 级标题（从 1 开始）的样式：第 3 级及更深使用 heading3。
+    /// PDF 的默认输出参数：正式交付的中文长文档（docs/pdf-layout.md 第 3.2 节）。
+    pub fn pdf() -> Self {
+        let word = Theme::default();
+        Theme {
+            body: BodyStyle {
+                line_height: 1.75,
+                // 段落以首行缩进区分，段间不额外留空。
+                paragraph_spacing: 0.0,
+                ..word.body
+            },
+            title: TextStyle {
+                font: FontId::Sans,
+                size: 26.0,
+            },
+            heading1: heading(FontId::Sans, 18.0, 1.4, 0.8),
+            heading2: heading(FontId::Sans, 15.0, 1.2, 0.5),
+            heading3: heading(FontId::Sans, 13.0, 1.0, 0.4),
+            heading4: heading(FontId::Sans, 12.0, 1.0, 0.4),
+            code_block: 9.5,
+            table: 10.5,
+            ..word
+        }
+    }
+
+    /// 第 level 级标题（从 1 开始）的样式：第 4 级及更深使用 heading4。
     pub fn heading(&self, level: usize) -> &HeadingStyle {
         match level {
             0 | 1 => &self.heading1,
             2 => &self.heading2,
-            _ => &self.heading3,
+            3 => &self.heading3,
+            _ => &self.heading4,
         }
     }
 }
@@ -110,10 +138,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deeper_headings_share_the_third_level_style() {
+    fn deeper_headings_share_the_fourth_level_style() {
+        let theme = Theme::pdf();
+        assert_eq!(theme.heading(1).size, 18.0);
+        assert_eq!(theme.heading(3).size, 13.0);
+        assert_eq!(theme.heading(4).size, 12.0);
+        assert_eq!(theme.heading(8), &theme.heading4);
+    }
+
+    #[test]
+    fn word_keeps_its_heading_sizes() {
         let theme = Theme::default();
         assert_eq!(theme.heading(1).size, 16.0);
-        assert_eq!(theme.heading(3).size, 13.0);
         assert_eq!(theme.heading(8), &theme.heading3);
     }
 }
