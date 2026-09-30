@@ -34,15 +34,40 @@ pub fn display_size_pt(width_px: u32, height_px: u32, bounds: Bounds) -> (f64, f
     (width * scale, height * scale)
 }
 
-/// 图注在页面上占用的高度估计（磅），用于从正文区高度中为图注预留空间。
-/// 按可用宽度估计折行：全角字符按 1em、其他字符按 0.6em 计，宁可多估也不让图注被挤出页面。
-pub fn caption_height_pt(caption: &str, font_size: f64, line_pitch: f64, width: f64) -> f64 {
-    let ems: f64 = caption
-        .chars()
-        .map(|c| if c.is_ascii() { 0.6 } else { 1.0 })
-        .sum();
-    let lines = (ems * font_size / width.max(1.0)).ceil().max(1.0);
-    lines * line_pitch
+/// 一段文字排版后占用的高度上限（磅），用于在无法测量排版结果的输出（Word）中预留空间。
+/// 按贪心折行模拟：每个字符（含空格）都按 1em 计（常见字体中没有更宽的字形），
+/// 连续的非空白、非中文字符是不可拆开的单词，中文逐字可断，超过一行宽的单词按字符拆开。
+/// 宁可多估：预留的空间偏大只会让图片略小，不会让文字被挤出页面。
+pub fn text_height_pt(text: &str, font_size: f64, line_pitch: f64, width: f64) -> f64 {
+    let per_line = (width / font_size).floor().max(1.0) as usize;
+    let mut lines = 1;
+    let mut used = 0; // 当前行已占用的 em
+    let mut word = 0; // 正在累积的单词长度（em）
+    let place_word = |word: usize, used: &mut usize, lines: &mut usize| {
+        if word == 0 {
+            return;
+        }
+        if *used + word > per_line && *used > 0 {
+            *lines += 1;
+            *used = 0;
+        }
+        *used += word;
+        while *used > per_line {
+            *lines += 1;
+            *used -= per_line;
+        }
+    };
+    for c in text.chars() {
+        if c.is_whitespace() || !c.is_ascii() {
+            place_word(word, &mut used, &mut lines);
+            word = 0;
+            place_word(1, &mut used, &mut lines);
+        } else {
+            word += 1;
+        }
+    }
+    place_word(word, &mut used, &mut lines);
+    lines as f64 * line_pitch
 }
 
 pub struct DocxImage {
@@ -151,10 +176,15 @@ pub mod tests {
     }
 
     #[test]
-    fn caption_height_grows_with_wrapped_lines() {
-        assert_eq!(caption_height_pt("图 1", 10.0, 18.0, 400.0), 18.0);
-        let long = "很长的图注".repeat(20); // 100 个全角字符 × 10 磅 = 1000 磅 → 3 行
-        assert_eq!(caption_height_pt(&long, 10.0, 18.0, 400.0), 54.0);
+    fn text_height_is_an_upper_bound_for_wrapped_lines() {
+        assert_eq!(text_height_pt("图 1", 10.0, 18.0, 400.0), 18.0);
+        // 100 个全角字符 × 10 磅 = 1000 磅，每行 40 字 → 3 行。
+        assert_eq!(text_height_pt(&"很长的图注".repeat(20), 10.0, 18.0, 400.0), 54.0);
+        // 按单词折行：每个 30 字符的单词占 300 磅，两个放不进 451 磅的一行 → 4 行。
+        let words = vec!["W".repeat(30); 4].join(" ");
+        assert_eq!(text_height_pt(&words, 10.0, 18.0, 451.0), 72.0);
+        // 超过一行宽的单词按字符拆开。
+        assert_eq!(text_height_pt(&"a".repeat(100), 10.0, 18.0, 400.0), 54.0);
     }
 
     #[test]

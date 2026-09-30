@@ -23,7 +23,7 @@ use typst_kit::fonts::FontStore;
 use typst_layout::PagedDocument;
 
 use super::fonts::{bundled_font_dirs, families, FontFamily, CJK_PROBE};
-use super::images::{caption_height_pt, display_size_pt, load_for_docx, Bounds};
+use super::images::{display_size_pt, load_for_docx, Bounds};
 use super::theme::{HeadingStyle, Theme};
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{plain_text, Align, Block, Inline};
@@ -157,6 +157,22 @@ fn available_families(book: &FontBook, family: FontFamily) -> Vec<&'static str> 
         .collect()
 }
 
+/// 图片所在的容器：宽度上限（磅）与高度上限（Typst 长度表达式）。
+struct Container {
+    width: f64,
+    max_height: String,
+}
+
+impl Container {
+    /// 正文中的段落与标题：完整正文区。
+    fn text_area() -> Self {
+        Container {
+            width: TEXT_WIDTH_PT,
+            max_height: format!("{}pt", num(TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK)),
+        }
+    }
+}
+
 struct Writer<'a> {
     theme: Theme,
     root: &'a Path,
@@ -233,7 +249,8 @@ impl Writer<'_> {
              #show table.cell.where(y: 0): set text(weight: \"bold\")\n\
              #set figure(numbering: none)\n\
              #show figure: set block(above: {figure}em, below: {figure}em)\n\
-             #show figure.caption: set text(font: {caption_font}, size: {caption}pt, fill: luma(100))\n\
+             #let writer-caption = (font: {caption_font}, size: {caption}pt)\n\
+             #show figure.caption: set text(..writer-caption, fill: luma(100))\n\
              #show link: set text(fill: rgb(\"#2563eb\"))\n",
             inline_code = num(body.size * 0.9),
             inset = num(TABLE_INSET_PT),
@@ -274,19 +291,17 @@ impl Writer<'_> {
     fn block(&mut self, block: &Block, section: &Section) -> String {
         if let Some((src, alt)) = block.as_figure() {
             // 尺寸上限是完整正文区扣除图注及其间距，与图片落在页上的位置无关；
+            // 图注高度在排版时按实际字体、宽度与折行测量，不做估算。
             // figure 不跨页拆分，当前页放不下时连同图注整体移到下一页。
-            let theme = &self.theme;
-            let mut height = TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK;
+            let mut max_height = format!("{}pt", num(TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK));
             if !alt.is_empty() {
-                let pitch = theme.caption.size * theme.body.line_height;
-                height -= FIGURE_GAP_EM * theme.body.size
-                    + caption_height_pt(alt, theme.caption.size, pitch, TEXT_WIDTH_PT);
+                max_height = format!(
+                    "{max_height} - {gap}pt - measure(block(width: size.width, text(..writer-caption)[#{caption}])).height",
+                    gap = num(FIGURE_GAP_EM * self.theme.body.size),
+                    caption = string(alt),
+                );
             }
-            let bounds = Bounds {
-                width: TEXT_WIDTH_PT,
-                height,
-            };
-            let image = self.image(src, alt, bounds);
+            let image = self.image(src, alt, TEXT_WIDTH_PT, &max_height);
             return if alt.is_empty() {
                 format!("#figure({image})")
             } else {
@@ -297,9 +312,9 @@ impl Writer<'_> {
             Block::Heading { level, inlines } => format!(
                 "#heading(level: {})[{}]",
                 section.body_heading_depth(*level),
-                self.inlines(inlines, TEXT_WIDTH_PT)
+                self.inlines(inlines, &Container::text_area())
             ),
-            Block::Paragraph(inlines) => self.inlines(inlines, TEXT_WIDTH_PT),
+            Block::Paragraph(inlines) => self.inlines(inlines, &Container::text_area()),
             Block::List { ordered, start, items } => {
                 let items: Vec<String> = items.iter().map(|item| format!("[{}]", self.blocks(item, section))).collect();
                 if *ordered {
@@ -332,20 +347,34 @@ impl Writer<'_> {
                 let mut cells = Vec::new();
                 // 列宽由内容决定；单元格中的图片不超过按列数等分正文宽度、去掉左右内边距后的宽度，
                 // 避免一张图片把整列撑到正文宽度（与 Word 的等宽列一致）。
+                // 高度：含图片的行不能跨页拆开，而表头在每页重复，因此正文行中的图片不超过正文区减去
+                // 排版时实际测得的表头高度与单元格上下内边距。
                 let cell_width = TEXT_WIDTH_PT / columns as f64 - 2.0 * TABLE_INSET_PT;
-                let row = |writer: &mut Self, row: &[Vec<Inline>]| -> Vec<String> {
+                let cell_limit = num(TEXT_HEIGHT_PT - 2.0 * TABLE_INSET_PT - IMAGE_HEIGHT_SLACK);
+                // 表头在每页重复，其中的图片不超过正文区高度的四分之一（与 Word 相同），不能占满页面。
+                let head_cell = Container {
+                    width: cell_width,
+                    max_height: format!("{}pt", num(TEXT_HEIGHT_PT / 4.0)),
+                };
+                let body_cell = Container {
+                    width: cell_width,
+                    max_height: format!("{cell_limit}pt - writer-table-head"),
+                };
+                let row = |writer: &mut Self, row: &[Vec<Inline>], cell: &Container| -> Vec<String> {
                     (0..columns)
-                        .map(|i| format!("[{}]", writer.inlines(row.get(i).map_or(&[][..], Vec::as_slice), cell_width)))
+                        .map(|i| format!("[{}]", writer.inlines(row.get(i).map_or(&[][..], Vec::as_slice), cell)))
                         .collect()
                 };
-                let head = row(self, header).join(", ");
+                let head = row(self, header, &head_cell).join(", ");
                 for r in rows {
-                    cells.extend(row(self, r));
+                    cells.extend(row(self, r, &body_cell));
                 }
+                let align = align.join(", ");
                 format!(
-                    "#table(columns: {columns}, align: ({},), table.header({head}), {})",
-                    align.join(", "),
-                    cells.join(", ")
+                    "#context {{\nlet writer-table-head = measure(block(width: {width}pt, table(columns: {columns}, align: ({align},), table.header({head})))).height\n\
+                     table(columns: {columns}, align: ({align},), table.header({head}), {cells})\n}}",
+                    width = num(TEXT_WIDTH_PT),
+                    cells = cells.join(", ")
                 )
             }
             Block::Rule => "#line(length: 100%, stroke: 0.5pt + luma(180))".to_owned(),
@@ -360,8 +389,8 @@ impl Writer<'_> {
             .join("\n\n")
     }
 
-    /// 行内内容；width 是按正文区计算的容器宽度上限（磅），限制其中的图片。
-    fn inlines(&mut self, inlines: &[Inline], width: f64) -> String {
+    /// 行内内容；container 给出其中图片的宽度与高度上限。
+    fn inlines(&mut self, inlines: &[Inline], container: &Container) -> String {
         let mut out = String::new();
         for inline in inlines {
             match inline {
@@ -370,17 +399,17 @@ impl Writer<'_> {
                     out.push_str(&string(&breakable(text)));
                 }
                 Inline::Strong(children) => {
-                    out.push_str(&format!("#strong[{}]", self.inlines(children, width)))
+                    out.push_str(&format!("#strong[{}]", self.inlines(children, container)))
                 }
                 Inline::Emphasis(children) => {
-                    out.push_str(&format!("#emph[{}]", self.inlines(children, width)))
+                    out.push_str(&format!("#emph[{}]", self.inlines(children, container)))
                 }
                 Inline::Strike(children) => {
-                    out.push_str(&format!("#strike[{}]", self.inlines(children, width)))
+                    out.push_str(&format!("#strike[{}]", self.inlines(children, container)))
                 }
                 Inline::Code(code) => out.push_str(&format!("#raw({})", string(&breakable(code)))),
                 Inline::Link { url, children } => {
-                    let content = self.inlines(children, width);
+                    let content = self.inlines(children, container);
                     if is_safe_url(url) {
                         out.push_str(&format!("#link({})[{content}]", string(url)));
                     } else {
@@ -388,12 +417,8 @@ impl Writer<'_> {
                     }
                 }
                 Inline::Image { src, alt } => {
-                    // 与文字同段的图片（含表格单元格中的）：不超过所在容器的宽度，高度不超过正文区。
-                    let bounds = Bounds {
-                        width,
-                        height: TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK,
-                    };
-                    let image = self.image(src, alt, bounds);
+                    // 与文字同段的图片（含表格单元格中的）：不超过所在容器的宽度与高度上限。
+                    let image = self.image(src, alt, container.width, &container.max_height);
                     out.push_str(&format!("#box({image})"));
                 }
                 Inline::SoftBreak => out.push_str("#\" \""),
@@ -404,9 +429,10 @@ impl Writer<'_> {
     }
 
     /// 图片表达式；无法加载时返回红色占位文字并记入报告。
-    /// bounds 是按正文区计算的上限；实际宽度在排版时再受所在容器（列表、引用、表格单元格）的宽度限制，
+    /// 保持比例、不放大；宽度不超过 max_width 与排版时所在容器（列表、引用、表格单元格）的实际宽度，
+    /// 高度不超过 max_height（Typst 长度表达式，可以引用排版时测得的尺寸与 layout 的 size）。
     /// 只给出宽度，高度按比例得到。
-    fn image(&mut self, src: &str, alt: &str, bounds: Bounds) -> String {
+    fn image(&mut self, src: &str, alt: &str, max_width: f64, max_height: &str) -> String {
         let Some(image) = resolve_image(self.root, src).and_then(|path| load_for_docx(&path))
         else {
             self.report.missing_images.push(src.to_owned());
@@ -418,9 +444,14 @@ impl Writer<'_> {
         };
         let index = self.images.len();
         self.images.push(Bytes::new(image.png));
-        let (width, _) = display_size_pt(image.width, image.height, bounds);
+        let bounds = Bounds {
+            width: max_width,
+            height: f64::INFINITY,
+        };
+        let (width, height) = display_size_pt(image.width, image.height, bounds);
         format!(
-            "layout(size => image(\"/img/{index}.png\", width: calc.min({width:.2}pt, size.width)))"
+            "layout(size => image(\"/img/{index}.png\", width: calc.max(1pt, calc.min({width:.2}pt, size.width, ({max_height}) * {ratio:.6}))))",
+            ratio = width / height,
         )
     }
 }
@@ -868,8 +899,8 @@ mod tests {
         let (page, _, y, width, height) = images[0];
         // 标题与正文之后放不下：整体移到第二页，而不是缩小后塞进第一页的剩余空间。
         assert_eq!(page, 1);
-        // 高度按完整正文区扣除一行图注与间距计算，比例不变。
-        let expected = TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK - FIGURE_GAP_EM * 12.0 - 10.0 * 1.8;
+        // 高度按完整正文区扣除实际测得的一行图注（10 磅字号、1em 行框）与间距计算，比例不变。
+        let expected = TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK - FIGURE_GAP_EM * 12.0 - 10.0;
         assert!((height - expected).abs() < 0.5, "{height} vs {expected}");
         assert!((width / height - 0.25).abs() < 1e-3);
         // 图片与图注在同一页，且都在正文区内，不占用页脚。
@@ -897,6 +928,89 @@ mod tests {
         assert!(x > MARGIN_PT + 5.0, "{x}");
         assert!(x + width <= MARGIN_PT + TEXT_WIDTH_PT + 0.5, "{x} + {width}");
         assert!((width / height - 4.0).abs() < 0.01);
+    }
+
+    /// 所有页面上的图片底边与文字基线都在正文区内（不进入页脚页码区域）。
+    fn assert_inside_text_area(paged: &PagedDocument) {
+        let page_height = paged.pages()[0].frame.height().to_pt();
+        let bottom = page_height - MARGIN_PT + 0.5;
+        for item in placed(paged) {
+            match item {
+                Placed::Image { page, y, height, .. } => {
+                    assert!(y + height <= bottom, "page {page}: image bottom {} > {bottom}", y + height)
+                }
+                Placed::Text { page, y, text, .. } if text.trim() != (page + 1).to_string() => {
+                    assert!(y <= bottom, "page {page}: text {text:?} baseline {y} > {bottom}")
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[test]
+    fn tall_image_in_a_table_cell_stays_inside_the_text_area() {
+        let dir = project();
+        write_image(&dir.path().join("assets/长.png"), 200, 4000, ImageFormat::Png);
+        let document = build(&request(
+            "",
+            &[(
+                "a",
+                vec![1],
+                "表",
+                "| 图 | 说明 |\n| --- | --- |\n| ![长](../assets/长.png) | 很长的图 |",
+            )],
+        ));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert_eq!(images(&paged).len(), 1);
+        assert_inside_text_area(&paged);
+    }
+
+    #[test]
+    fn images_in_the_repeating_table_header_are_limited_to_a_quarter_page() {
+        let dir = project();
+        write_image(&dir.path().join("assets/长.png"), 200, 4000, ImageFormat::Png);
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "表", "| ![长](../assets/长.png) | 说明 |\n| --- | --- |\n| 1 | 2 |")],
+        ));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (_, _, _, _, height) = images(&paged)[0];
+        assert!((height - TEXT_HEIGHT_PT / 4.0).abs() < 0.5, "{height}");
+        assert_inside_text_area(&paged);
+    }
+
+    #[test]
+    fn tall_image_in_a_paragraph_stays_inside_the_text_area() {
+        let dir = project();
+        write_image(&dir.path().join("assets/长.png"), 200, 4000, ImageFormat::Png);
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "段", "文字 ![长](../assets/长.png) 文字")],
+        ));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert_inside_text_area(&paged);
+    }
+
+    #[test]
+    fn long_wrapped_caption_under_a_tall_figure_stays_above_the_footer() {
+        let dir = project();
+        write_image(&dir.path().join("assets/竖图.png"), 400, 1600, ImageFormat::Png);
+        let caption = vec!["W".repeat(30); 4].join(" ");
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "图", &format!("![{caption}](../assets/竖图.png)"))],
+        ));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert_inside_text_area(&paged);
+        // 图片与整段图注在同一页。
+        let image_page = images(&paged)[0].0;
+        for item in placed(&paged) {
+            if let Placed::Text { page, text, .. } = item {
+                if text.contains('W') {
+                    assert_eq!(page, image_page, "caption line on another page");
+                }
+            }
+        }
     }
 
     #[test]

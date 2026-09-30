@@ -22,7 +22,7 @@ use docx_rs::{
 };
 
 use super::fonts::{docx_fonts, FontFamily};
-use super::images::{caption_height_pt, display_size_pt, load_for_docx, Bounds};
+use super::images::{display_size_pt, load_for_docx, text_height_pt, Bounds};
 use super::theme::Theme;
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{Align, Block, Inline};
@@ -38,6 +38,10 @@ const TEXT_HEIGHT: u32 = PAGE_HEIGHT - 2 * MARGIN as u32;
 const CELL_MARGIN: u32 = 108;
 /// 图片高度上限再留出的余量（磅），吸收行高取整等差异，保证图片不会被挤出页面。
 const IMAGE_HEIGHT_SLACK: f64 = 4.0;
+/// 表格文字（TableText）段前段后各 40 twip。
+const TABLE_TEXT_SPACING_PT: f64 = 4.0;
+/// 表头中的图片不超过正文区高度的这个比例：表头在每页重复，不能占满页面。
+const HEADER_IMAGE_SHARE: f64 = 0.25;
 /// 1 磅 = 12700 EMU。
 const EMU_PER_PT: f64 = 12700.0;
 const LIST_INDENT: i32 = 420;
@@ -160,12 +164,12 @@ impl Writer<'_> {
         match block {
             Block::Heading { level, inlines } => {
                 let level = section.body_heading_depth(*level).clamp(1, MAX_HEADING);
-                let p = self.inlines(heading(level), inlines, RunStyle::default(), text_width_pt());
+                let p = self.inlines(heading(level), inlines, RunStyle::default(), text_bounds(text_width_pt()));
                 self.items.push(Item::Paragraph(p));
             }
             Block::Paragraph(inlines) => {
                 let p = self.paragraph_for(context);
-                let p = self.inlines(p, inlines, RunStyle::default(), content_width_pt(context, 0));
+                let p = self.inlines(p, inlines, RunStyle::default(), text_bounds(content_width_pt(context, 0)));
                 self.items.push(Item::Paragraph(p));
             }
             Block::List {
@@ -276,8 +280,8 @@ impl Writer<'_> {
                         if context.quote_level > 0 {
                             p = p.style("Quote");
                         }
-                        let width = content_width_pt(context, level + 1);
-                        let p = self.inlines(p, inlines, RunStyle::default(), width);
+                        let bounds = text_bounds(content_width_pt(context, level + 1));
+                        let p = self.inlines(p, inlines, RunStyle::default(), bounds);
                         self.items.push(Item::Paragraph(p));
                     }
                     Block::List { .. } => {
@@ -310,6 +314,28 @@ impl Writer<'_> {
         let width = TEXT_WIDTH as usize / columns;
         // 单元格中的图片不超过单元格去掉左右内边距后的宽度（各列等宽）。
         let cell_width = f64::from((width as u32).saturating_sub(2 * CELL_MARGIN)) / 20.0;
+        // 高度：含图片的行不能跨页拆开，而表头在每页重复。Word 的排版结果无法在导出时测量，
+        // 因此按表头文字折行的上限估计表头高度（表头中的图片另有上限），正文行中的图片不超过
+        // 正文区减去表头与单元格段落间距。
+        let text_height = f64::from(TEXT_HEIGHT) / 20.0;
+        let head_bounds = Bounds {
+            width: cell_width,
+            height: text_height * HEADER_IMAGE_SHARE,
+        };
+        let table_size = self.theme.table;
+        let head_height = header
+            .iter()
+            .map(|cell| {
+                let text = crate::render::markdown::plain_text(cell);
+                let image = if has_image(cell) { head_bounds.height } else { 0.0 };
+                text_height_pt(&text, table_size, table_size * 1.5, cell_width) + image
+            })
+            .fold(0.0, f64::max)
+            + TABLE_TEXT_SPACING_PT;
+        let body_bounds = Bounds {
+            width: cell_width,
+            height: text_height - head_height - TABLE_TEXT_SPACING_PT - IMAGE_HEIGHT_SLACK,
+        };
         let bold = RunStyle {
             bold: true,
             ..RunStyle::default()
@@ -325,7 +351,8 @@ impl Writer<'_> {
                             _ => p,
                         };
                         let inlines = cells.get(i).map_or(&[][..], Vec::as_slice);
-                        let p = writer.inlines(p, inlines, style, cell_width);
+                        let bounds = if is_header { head_bounds } else { body_bounds };
+                        let p = writer.inlines(p, inlines, style, bounds);
                         let cell = TableCell::new()
                             .add_paragraph(p)
                             .width(width, WidthType::Dxa);
@@ -364,9 +391,9 @@ impl Writer<'_> {
         let width = content_width_pt(context, 0);
         let mut reserved = spacing_pt * 2.0 + IMAGE_HEIGHT_SLACK;
         if !alt.is_empty() {
-            // 图注段落沿用正文的"最小行距"，每行至少一个正文行距。
-            let pitch = (theme.body.size * theme.body.line_height).max(theme.caption.size * 1.2);
-            reserved += caption_height_pt(alt, theme.caption.size, pitch, width);
+            // 图注段落沿用正文的"最小行距"，每行至少一个正文行距；Word 中无法测量，按折行上限预留。
+            let pitch = (theme.body.size * theme.body.line_height).max(theme.caption.size * 1.5);
+            reserved += text_height_pt(alt, theme.caption.size, pitch, width);
         }
         let bounds = Bounds {
             width,
@@ -407,13 +434,13 @@ impl Writer<'_> {
         Run::new().add_image(pic)
     }
 
-    /// 行内内容；width 是所在容器（段落、表格单元格）的可用宽度（磅），限制其中图片的宽度。
+    /// 行内内容；bounds 是所在容器（段落、表格单元格）中图片的宽度与高度上限（磅）。
     fn inlines(
         &mut self,
         mut p: Paragraph,
         inlines: &[Inline],
         style: RunStyle,
-        width: f64,
+        bounds: Bounds,
     ) -> Paragraph {
         for inline in inlines {
             p = match inline {
@@ -425,7 +452,7 @@ impl Writer<'_> {
                         bold: true,
                         ..style
                     },
-                    width,
+                    bounds,
                 ),
                 Inline::Emphasis(children) => self.inlines(
                     p,
@@ -434,7 +461,7 @@ impl Writer<'_> {
                         italic: true,
                         ..style
                     },
-                    width,
+                    bounds,
                 ),
                 Inline::Strike(children) => self.inlines(
                     p,
@@ -443,7 +470,7 @@ impl Writer<'_> {
                         strike: true,
                         ..style
                     },
-                    width,
+                    bounds,
                 ),
                 Inline::Code(code) => p.add_run(styled(
                     Run::new().add_text(xml_safe(code)),
@@ -466,11 +493,7 @@ impl Writer<'_> {
                     }
                 }
                 Inline::Image { src, alt } => {
-                    // 与文字同段的图片：不超过所在容器的宽度，高度不超过正文区。
-                    let bounds = Bounds {
-                        width,
-                        height: f64::from(TEXT_HEIGHT) / 20.0 - IMAGE_HEIGHT_SLACK,
-                    };
+                    // 与文字同段的图片：不超过所在容器的宽度与高度上限。
                     let run = self.image_run(src, alt, bounds);
                     p.add_run(run)
                 }
@@ -689,6 +712,23 @@ fn mark_header_rows(document: &[u8]) -> Vec<u8> {
     String::from_utf8_lossy(document)
         .replace("<w:cantSplit />", "<w:cantSplit /><w:tblHeader />")
         .into_bytes()
+}
+
+/// 正文中的段落与标题：给定宽度、完整正文区高度。
+fn text_bounds(width: f64) -> Bounds {
+    Bounds {
+        width,
+        height: f64::from(TEXT_HEIGHT) / 20.0 - IMAGE_HEIGHT_SLACK,
+    }
+}
+
+fn has_image(inlines: &[Inline]) -> bool {
+    inlines.iter().any(|inline| match inline {
+        Inline::Image { .. } => true,
+        Inline::Strong(c) | Inline::Emphasis(c) | Inline::Strike(c) => has_image(c),
+        Inline::Link { children, .. } => has_image(children),
+        _ => false,
+    })
 }
 
 fn text_width_pt() -> f64 {
@@ -1010,6 +1050,42 @@ mod tests {
         let figure = &figure[figure.rfind("<w:pPr>").unwrap()..];
         assert!(figure.contains(r#"<w:jc w:val="center" />"#), "{figure}");
         assert!(figure.contains("<w:keepNext />"), "{figure}");
+    }
+
+    #[test]
+    fn tall_image_in_a_table_cell_leaves_room_for_the_repeating_header() {
+        let dir = project();
+        write_image(&dir.path().join("assets/长.png"), 200, 4000, ImageFormat::Png);
+        let (bytes, _) = export_ok(
+            &dir,
+            &[(
+                "a",
+                vec![1],
+                "表",
+                "| 图 | 说明 |\n| --- | --- |\n| ![长](../assets/长.png) | 很长的图 |",
+            )],
+        );
+        let (cx, cy) = extents(&part(&bytes, "word/document.xml"))[0];
+        // 正文区 697.9 磅，减去表头（一行 11 磅表格文字按 1.5 倍行距上限 + 段落间距 4）、
+        // 本行段落间距 4 与余量 4。
+        let limit = 697.9 - (16.5 + 4.0) - 4.0 - 4.0;
+        assert!((cy / EMU_PER_PT - limit).abs() < 0.1, "{}", cy / EMU_PER_PT);
+        assert!((cy / cx - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn long_wrapped_caption_reserves_every_line() {
+        let dir = project();
+        write_image(&dir.path().join("assets/竖图.png"), 400, 1600, ImageFormat::Png);
+        let caption = vec!["W".repeat(30); 4].join(" ");
+        let (bytes, _) = export_ok(
+            &dir,
+            &[("a", vec![1], "图", &format!("![{caption}](../assets/竖图.png)"))],
+        );
+        let (_, cy) = extents(&part(&bytes, "word/document.xml"))[0];
+        // 四个 30 字符的单词按折行上限各占一行：4 × 21.6 磅（正文最小行距）。
+        let limit = 697.9 - 12.0 * 2.0 - 4.0 - 4.0 * 21.6;
+        assert!((cy / EMU_PER_PT - limit).abs() < 0.1, "{}", cy / EMU_PER_PT);
     }
 
     #[test]
