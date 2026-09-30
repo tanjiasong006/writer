@@ -1,7 +1,7 @@
 import type { AppMenu, Appearance, MenuEntry } from '../../application/desktop_shell.ts'
 import type { KeyboardMoveDirection } from '../../application/move_chapter.ts'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
-import { COMMAND_LABELS, commandEntry } from '../editor/editor_menu.ts'
+import { COMMAND_LABELS, LIST_COMMANDS, commandEntry } from '../editor/editor_menu.ts'
 import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 
 /**
@@ -33,7 +33,7 @@ export interface AppMenuContext {
 }
 
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'reveal', 'export-docx', 'export-pdf'] as const
-const EDIT_ACTIONS = ['undo', 'redo', 'context-menu'] as const
+const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
@@ -58,6 +58,7 @@ export type MenuItemId =
   | `appearance:${Appearance}`
   /** 子菜单本身（不对应命令）。 */
   | 'appearance'
+  | 'list'
 
 /** 菜单项要执行的命令。 */
 export type MenuCommand =
@@ -227,8 +228,15 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         editorItem('strike', { checkable: true }),
         editorItem('code', { checkable: true }),
         { separator: true },
-        editorItem('bullet-list', { checkable: true }),
-        editorItem('ordered-list', { checkable: true }),
+        {
+          id: 'list', label: '列表',
+          submenu: [
+            { id: 'edit:list-menu', label: '选择列表…', shortcut: SHORTCUTS.list,
+              disabled: !editing || !LIST_COMMANDS.some((command) => tools?.[command].enabled) },
+            { separator: true },
+            ...LIST_COMMANDS.map((command) => editorItem(command, { checkable: true })),
+          ],
+        },
         editorItem('quote', { checkable: true }),
         editorItem('code-block', { checkable: true }),
         { separator: true },
@@ -316,10 +324,14 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
 /** 菜单中所有可用、带快捷键的项。 */
 function shortcutItems(menus: readonly WorkspaceMenu[]): Array<{ readonly id: MenuItemId; readonly shortcut: string }> {
   const found: Array<{ id: MenuItemId; shortcut: string }> = []
-  for (const entry of menus.flatMap((menu) => menu.items)) {
-    if ('separator' in entry || 'role' in entry) continue
-    if (entry.shortcut && !entry.disabled) found.push({ id: entry.id, shortcut: entry.shortcut })
+  const visit = (entries: readonly WorkspaceMenuEntry[]) => {
+    for (const entry of entries) {
+      if ('separator' in entry || 'role' in entry || entry.disabled) continue
+      if (entry.submenu) visit(entry.submenu)
+      if (entry.shortcut) found.push({ id: entry.id, shortcut: entry.shortcut })
+    }
   }
+  for (const menu of menus) visit(menu.items)
   return found
 }
 

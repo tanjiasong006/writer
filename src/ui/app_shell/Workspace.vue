@@ -341,7 +341,9 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       }
       return
     case 'edit':
-      if (command.action === 'context-menu') {
+      if (command.action === 'list-menu') {
+        if (focusRegion.value === 'editor') void editor.value?.openListMenu()
+      } else if (command.action === 'context-menu') {
         if (focusRegion.value === 'tree') chapters.value?.openChapterMenu()
         else void editor.value?.openMenuAtCaret()
       } else if (focusRegion.value === 'editor') {

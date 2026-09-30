@@ -6,6 +6,7 @@ import type { EditorView } from 'prosemirror-view'
 import { CellSelection } from 'prosemirror-tables'
 import ChapterEditor from './ChapterEditor.vue'
 import { FONT_STACKS } from './editor_theme.ts'
+import { IS_MAC } from '../common/shortcuts.ts'
 
 const mounted: VueWrapper[] = []
 
@@ -43,6 +44,43 @@ function type(view: EditorView, text: string): void {
 function scroller(wrapper: VueWrapper): HTMLElement {
   return wrapper.find('.chapter-editor__scroller').element as HTMLElement
 }
+
+test('任务列表可勾选、取消并独立撤销重做，保留正文与选区', () => {
+  const original = '* [ ] 待办\n* [x] 完成\n* 普通列表\n'
+  const wrapper = mountEditor({ chapterId: 'a', content: original })
+  const view = viewOf(wrapper)
+  const boxes = () => [...view.dom.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+  expect(boxes().map((box) => box.checked)).toEqual([false, true])
+  expect(wrapper.emitted('change')).toBeUndefined()
+  const selection = view.state.selection
+  boxes()[0]!.focus()
+  boxes()[0]!.click()
+  expect(document.activeElement).toBe(boxes()[0])
+  expect(view.state.selection.eq(selection)).toBe(true)
+  expect(boxes().map((box) => box.checked)).toEqual([true, true])
+  boxes()[1]!.click()
+  expect(boxes().map((box) => box.checked)).toEqual([true, false])
+  expect(wrapper.emitted('change')?.at(-1)).toEqual(['a', '- [x] 待办\n- [ ] 完成\n- 普通列表\n'])
+  undo(view.state, view.dispatch)
+  expect(boxes().map((box) => box.checked)).toEqual([true, true])
+  undo(view.state, view.dispatch)
+  expect(boxes().map((box) => box.checked)).toEqual([false, true])
+  expect(wrapper.emitted('change')?.at(-1)).toEqual(['a', original])
+  redo(view.state, view.dispatch)
+  expect(boxes().map((box) => box.checked)).toEqual([true, true])
+})
+
+test('嵌套与有序任务在正文位置变化后仍修改正确项目，切换章节不会写错正文', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '- 普通项目\n  - [ ] 嵌套任务\n\n1. [x] 有序任务\n' })
+  const view = viewOf(wrapper)
+  view.dispatch(view.state.tr.insertText('新增', 3))
+  const nested = view.dom.querySelector<HTMLInputElement>('input[aria-label="嵌套任务"]')!
+  nested.click()
+  expect(wrapper.emitted('change')?.at(-1)).toEqual(['a', '- 新增普通项目\n  - [x] 嵌套任务\n\n1. [x] 有序任务\n'])
+  await wrapper.setProps({ chapterId: 'b', content: '- [ ] 另一章节\n' })
+  view.dom.querySelector<HTMLInputElement>('input')!.click()
+  expect(wrapper.emitted('change')?.at(-1)).toEqual(['b', '- [x] 另一章节\n'])
+})
 
 test('显示章节编号与标题，正文按结构进入编辑器', () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '引言**正文**', number: '2.1', title: '实验设计' })
@@ -280,6 +318,45 @@ test('openMenuAtCaret（⌘/，由菜单栏调用）在光标处打开同一个�
   const first = wrapper.find('[role="menu"] button')
   expect(first.find('.popup-menu__label').text()).toBe('在上方插入行')
   expect(document.activeElement).toBe(first.element)
+})
+
+test('列表快捷键在光标处打开三种列表选择，选择任务列表后正文可继续输入', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '待办' })
+  const view = viewOf(wrapper)
+  view.coordsAtPos = () => ({ left: 10, right: 10, top: 0, bottom: 20 })
+  view.focus()
+  await wrapper.find('.chapter-editor__mount').trigger('keydown', {
+    key: '8', code: 'Digit8', ...(IS_MAC ? { metaKey: true } : { ctrlKey: true }),
+  })
+  expect(wrapper.findAll('[role="menu"] .popup-menu__label').map((item) => item.text())).toEqual(['无序列表', '有序列表', '任务列表'])
+  expect(wrapper.emitted('change')).toBeUndefined()
+  expect(document.activeElement).toBe(wrapper.find('[role="menu"] button').element)
+  await chooseFromContextMenu(wrapper, '任务列表')
+  expect(wrapper.emitted('change')?.at(-1)).toEqual(['a', '- [ ] 待办'])
+  expect(view.hasFocus()).toBe(true)
+})
+
+test('列表菜单 Esc 取消不改变正文和选区，焦点回到正文', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '待办' })
+  const view = viewOf(wrapper)
+  view.coordsAtPos = () => ({ left: 10, right: 10, top: 0, bottom: 20 })
+  view.focus()
+  const selection = view.state.selection
+  void (wrapper.vm as unknown as { openListMenu(): Promise<void> }).openListMenu()
+  await flushPromises()
+  await wrapper.find('[role="menu"]').trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  expect(wrapper.emitted('change')).toBeUndefined()
+  expect(view.state.selection.eq(selection)).toBe(true)
+  expect(view.hasFocus()).toBe(true)
+})
+
+test('已勾选任务按 Enter 后新项默认未勾选', () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '- [x] 完成\n' })
+  const view = viewOf(wrapper)
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
+  view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }))
+  expect(view.state.doc.firstChild?.child(1).attrs.checked).toBe(false)
 })
 
 test('图片按项目资源显示；无法解析的引用显示占位，引用不变', () => {

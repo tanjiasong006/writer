@@ -11,6 +11,7 @@ import {
   toggleCodeBlock,
   toggleItalic,
   toggleOrderedList,
+  toggleTaskList,
   toggleQuote,
   commandState,
   editorCommands,
@@ -69,6 +70,27 @@ describe('行内格式', () => {
 })
 
 describe('列表与引用', () => {
+  test('空段落与多段正文转成任务列表，支持撤销与再次移出', () => {
+    const empty = run(stateOf(''), toggleTaskList)
+    expect(empty.doc.firstChild?.firstChild?.attrs.checked).toBe(false)
+    const state = stateOf('甲\n\n乙\n')
+    const all = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1, state.doc.content.size - 1)))
+    const tasks = run(all, toggleTaskList)
+    expect(markdown(tasks)).toBe('- [ ] 甲\n- [ ] 乙\n')
+    expect(commandState(tasks)['task-list'].active).toBe(true)
+    expect(commandState(tasks)['bullet-list'].active).toBe(false)
+    expect(markdown(run(tasks, undo))).toBe('甲\n\n乙\n')
+    expect(markdown(run(run(stateOf('甲'), toggleTaskList), toggleTaskList))).toBe('甲\n')
+  })
+
+  test('列表类型转换只改变当前层，保留嵌套内容与已完成状态', () => {
+    const state = stateOf('1. 甲\n   - [x] 子任务\n2. [x] 乙\n', { cursorBefore: '甲' })
+    const tasks = run(state, toggleTaskList)
+    expect(markdown(tasks)).toBe('- [ ] 甲\n  - [x] 子任务\n- [x] 乙\n')
+    const bullets = run(tasks, toggleBulletList)
+    expect(markdown(bullets)).toBe('- 甲\n  - [x] 子任务\n- 乙\n')
+    expect(markdown(run(tasks, toggleOrderedList))).toBe('1. 甲\n   - [x] 子任务\n2. 乙\n')
+  })
   test('无序列表：包成列表、再次点击移出列表', () => {
     const listed = run(stateOf('第一项', { cursorAfter: '第一' }), toggleBulletList)
     expect(markdown(listed)).toBe('- 第一项\n')

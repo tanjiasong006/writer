@@ -20,6 +20,26 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/** 鼠标勾选 / 取消；Esc 后 Tab 聚焦复选框，Space 切换；正文撤销可恢复状态。 */
+export const Checklist: Story = {
+  args: {
+    chapterId: 'checklist',
+    number: '1',
+    title: '任务清单',
+    content: '- [ ] 待完成的任务\n- [x] 已完成的任务\n- 普通列表项\n  - [ ] 嵌套任务\n  - [x] 嵌套已完成任务\n\n1. [ ] 有序任务\n2. [x] 已完成的有序任务\n',
+  },
+}
+
+/** 聚焦正文后按 ⌘8 / Ctrl+8，↑↓ 选择列表类型，Enter 执行，Esc 取消。右键菜单中列表归组。 */
+export const ListInsertion: Story = {
+  args: {
+    chapterId: 'list-insertion',
+    number: '1',
+    title: '插入列表',
+    content: '点击此段后按列表快捷键，可以把它转换成列表。\n\n- 普通列表\n- 另一个项目\n\n- [ ] 待办任务\n- [x] 已完成任务\n',
+  },
+}
+
 /** 常见结构：强调、列表（含嵌套与任务列表）、引用、表格、代码、分隔线（正文不支持标题）。 */
 export const Markdown: Story = {
   args: {

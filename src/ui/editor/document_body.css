@@ -91,7 +91,8 @@
 }
 
 /* 任务方框自绘（☐ / ☑ 字符的样子取决于字体），在第一行中垂直居中。 */
-.document-body li[data-task]::before {
+.document-body li[data-task]::before,
+.document-body .editor-task__checkbox {
   position: absolute;
   top: calc((var(--doc-line-height) * 1em - 0.82em) / 2);
   left: -1.45em;
@@ -107,10 +108,28 @@
   color: var(--color-doc-muted);
 }
 
-.document-body li[data-task='done']::before {
+.document-body li[data-task='done']::before,
+.document-body .editor-task__checkbox:checked {
   border-color: var(--color-doc-muted);
   background: var(--color-doc-muted) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 6.3l2.2 2.2 4.6-4.9' fill='none' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     center / 100% no-repeat;
+}
+
+.document-body li.editor-task::before {
+  content: none;
+}
+
+.document-body .editor-task__checkbox {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.document-body .editor-task__checkbox:hover {
+  border-color: var(--color-doc-text);
 }
 
 .document-body pre {

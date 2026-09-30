@@ -20,10 +20,11 @@ test('正文中：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当�
   expect(labels(entries)).toEqual([
     'cut', 'copy', 'paste', '-',
     '粗体', '斜体', '删除线', '行内代码', '-',
-    '无序列表', '有序列表', '引用', '代码块', '-',
+    '列表', '引用', '代码块', '-',
     '插入表格', '插入图片…',
   ])
-  const bullet = entries.find((entry) => 'label' in entry && entry.label === '无序列表')
+  expect(labels(submenuOf(entries, '列表'))).toEqual(['无序列表', '有序列表', '任务列表'])
+  const bullet = submenuOf(entries, '列表').find((entry) => 'label' in entry && entry.label === '无序列表')
   expect(bullet && 'checked' in bullet && bullet.checked).toBe(true)
 })
 

@@ -24,8 +24,9 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   italic: { label: '斜体', shortcut: SHORTCUTS.italic },
   strike: { label: '删除线', shortcut: SHORTCUTS.strike },
   code: { label: '行内代码', shortcut: SHORTCUTS.inlineCode },
-  'bullet-list': { label: '无序列表', shortcut: SHORTCUTS.bulletList },
-  'ordered-list': { label: '有序列表', shortcut: SHORTCUTS.orderedList },
+  'bullet-list': { label: '无序列表' },
+  'ordered-list': { label: '有序列表' },
+  'task-list': { label: '任务列表' },
   quote: { label: '引用', shortcut: SHORTCUTS.quote },
   'code-block': { label: '代码块', shortcut: SHORTCUTS.codeBlock },
   indent: { label: '增加缩进', shortcut: SHORTCUTS.indent },
@@ -56,6 +57,12 @@ export function commandEntry(
     disabled: item ? !item.enabled : true,
     checked: options.checkable ? (item?.active ?? false) : undefined,
   }
+}
+
+export const LIST_COMMANDS = ['bullet-list', 'ordered-list', 'task-list'] as const
+
+export function listEntries(state: CommandState | null): MenuEntry[] {
+  return LIST_COMMANDS.map((command) => commandEntry(command, state, { checkable: true }))
 }
 
 /** 代码语言子菜单：自动识别、常用语言；手写的其他语言名也列出并打勾，选择其他项时替换它。 */
@@ -123,8 +130,7 @@ export function editorContextMenu(
   if (!inTable) {
     entries.push(
       { separator: true },
-      commandEntry('bullet-list', state, { checkable: true }),
-      commandEntry('ordered-list', state, { checkable: true }),
+      { id: 'list', label: '列表', submenu: listEntries(state) },
       commandEntry('quote', state, { checkable: true }),
       commandEntry('code-block', state, { checkable: true }),
       { separator: true },

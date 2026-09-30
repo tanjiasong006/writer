@@ -8,7 +8,8 @@ import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { ChapterDocuments } from './chapter_documents.ts'
 import { commandState, editorCommands, insertImage, setCodeLanguage, type CommandState, type EditorCommand } from './commands.ts'
 import { fenceLanguage } from './code_highlight.ts'
-import { editorContextMenu } from './editor_menu.ts'
+import { editorContextMenu, listEntries } from './editor_menu.ts'
+import { SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import { useMenu } from '../common/use_menu.ts'
@@ -181,6 +182,11 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
 /** Shift+F10 / 菜单键：在光标处打开右键菜单（与章节树相同）。⌘/ 经菜单栏调用 openMenuAtCaret。 */
 function onKeydown(event: KeyboardEvent): void {
   if (isCaption(event.target)) return
+  if (matchesShortcut(event, SHORTCUTS.list)) {
+    event.preventDefault()
+    void openListMenu()
+    return
+  }
   if (!(event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey))) return
   event.preventDefault()
   void openMenuAtCaret()
@@ -191,6 +197,16 @@ async function openMenuAtCaret(): Promise<void> {
   if (!view) return
   const caret = view.coordsAtPos(view.state.selection.head)
   await showContextMenu({ x: caret.left, y: caret.bottom }, true)
+}
+
+/** 列表快捷键：在光标下方选择类型，打开与取消菜单均不改变正文。 */
+async function openListMenu(): Promise<void> {
+  if (!view) return
+  const chapterId = currentId
+  const caret = view.coordsAtPos(view.state.selection.head)
+  focus()
+  const chosen = await menu.open(listEntries(commandState(view.state)), { x: caret.left, y: caret.bottom }, true)
+  if (chosen !== null && currentId === chapterId) runMenuItem(chosen)
 }
 
 async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<void> {
@@ -291,6 +307,7 @@ defineExpose({
   insertImage: insertImageAt,
   runCommand,
   openMenuAtCaret,
+  openListMenu,
   /** 当前的 EditorView（测试与调试用）。 */
   getView: (): EditorView | null => view,
   focus,

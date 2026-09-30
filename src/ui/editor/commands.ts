@@ -34,6 +34,7 @@ export type EditorCommand =
   | 'code'
   | 'bullet-list'
   | 'ordered-list'
+  | 'task-list'
   | 'quote'
   | 'code-block'
   | 'indent'
@@ -91,14 +92,20 @@ export const outdentListItem: Command = liftListItem(nodes.list_item)
 /**
  * 列表：不在列表中 → 包成列表；已在同类列表中 → 移出列表；在另一类列表中 → 改变列表类型。
  */
-function toggleList(type: NodeType): Command {
+function toggleList(type: NodeType, task = false): Command {
   return (state, dispatch) => {
     const list = nearestList(state.selection.$from)
-    if (!list) return wrapInList(type)(state, dispatch)
-    if (list.node.type === type) return liftListItem(nodes.list_item)(state, dispatch)
+    if (!list) return wrapInList(type)(state, dispatch && ((tr) => {
+      if (task) setTaskItems(tr, true)
+      dispatch(tr)
+    }))
+    const isTask = taskItem(state.selection.$from)?.attrs.checked != null
+    if (list.node.type === type && isTask === task) return liftListItem(nodes.list_item)(state, dispatch)
     if (dispatch) {
       const pos = state.selection.$from.before(list.depth)
-      dispatch(state.tr.setNodeMarkup(pos, type, { ...list.node.attrs }).scrollIntoView())
+      const tr = state.tr.setNodeMarkup(pos, type, { ...list.node.attrs })
+      setTaskItems(tr, task)
+      dispatch(tr.scrollIntoView())
     }
     return true
   }
@@ -106,6 +113,24 @@ function toggleList(type: NodeType): Command {
 
 export const toggleBulletList = toggleList(nodes.bullet_list)
 export const toggleOrderedList = toggleList(nodes.ordered_list)
+export const toggleTaskList = toggleList(nodes.bullet_list, true)
+
+function taskItem($pos: ResolvedPos): Node | null {
+  for (let depth = $pos.depth; depth > 0; depth--) {
+    if ($pos.node(depth).type === nodes.list_item) return $pos.node(depth)
+  }
+  return null
+}
+
+/** 只转换当前这一层列表，保留嵌套列表自己的类型和任务状态。 */
+function setTaskItems(tr: Transaction, task: boolean): void {
+  const list = nearestList(tr.selection.$from)
+  if (!list) return
+  const start = tr.selection.$from.before(list.depth) + 1
+  list.node.forEach((item, offset) => {
+    tr.setNodeAttribute(start + offset, 'checked', task ? (item.attrs.checked ?? false) : null)
+  })
+}
 
 /** 引用：在引用中 → 移出；否则包成引用。 */
 export const toggleQuote: Command = (state, dispatch) => {
@@ -302,6 +327,7 @@ export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image'>, Co
   code: toggleCode,
   'bullet-list': toggleBulletList,
   'ordered-list': toggleOrderedList,
+  'task-list': toggleTaskList,
   quote: toggleQuote,
   'code-block': toggleCodeBlock,
   indent: indentListItem,
@@ -320,6 +346,7 @@ export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image'>, Co
 export function commandState(state: EditorState): CommandState {
   const { $from } = state.selection
   const list = nearestList($from)
+  const task = taskItem($from)?.attrs.checked != null
   const can = (command: Command) => command(state)
   const plain = (command: Command): CommandItemState => ({ enabled: can(command), active: false })
   return {
@@ -329,8 +356,9 @@ export function commandState(state: EditorState): CommandState {
     italic: { enabled: can(toggleItalic), active: markActive(state, marks.em) },
     strike: { enabled: can(toggleStrike), active: markActive(state, marks.strike) },
     code: { enabled: can(toggleCode), active: markActive(state, marks.code) },
-    'bullet-list': { enabled: can(toggleBulletList), active: list?.node.type === nodes.bullet_list },
-    'ordered-list': { enabled: can(toggleOrderedList), active: list?.node.type === nodes.ordered_list },
+    'bullet-list': { enabled: can(toggleBulletList), active: list?.node.type === nodes.bullet_list && !task },
+    'ordered-list': { enabled: can(toggleOrderedList), active: list?.node.type === nodes.ordered_list && !task },
+    'task-list': { enabled: can(toggleTaskList), active: task },
     quote: { enabled: can(toggleQuote), active: hasAncestor($from, nodes.blockquote) },
     'code-block': { enabled: can(toggleCodeBlock), active: $from.parent.type === nodes.code_block },
     indent: plain(indentListItem),

@@ -28,6 +28,7 @@ import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { drawCaret } from './caret.ts'
 import { drawSelection } from './selection.ts'
 import { codeHighlight } from './code_highlight.ts'
+import { taskList } from './task_list.ts'
 import { figureEditing, newParagraphAtBlock, selectFigureBackward, selectFigureForward } from './figure_editing.ts'
 
 /**
@@ -239,7 +240,12 @@ const editingKeymap = keymap({
   Backspace: chainCommands(undoInputRule, selectFigureBackward, deleteEmptyFirstBlock),
   Delete: selectFigureForward,
   Escape: selectParentNode,
-  Enter: chainCommands(exitCodeAfterBlankLines, newlineInCode, enterInCell, newParagraphAtBlock, splitListItem(nodes.list_item)),
+  Enter: chainCommands(exitCodeAfterBlankLines, newlineInCode, enterInCell, newParagraphAtBlock,
+    (state, dispatch) => {
+      const { $from } = state.selection
+      const item = $from.depth >= 2 ? $from.node(-1) : null
+      return splitListItem(nodes.list_item, item?.type === nodes.list_item && item.attrs.checked !== null ? { checked: false } : undefined)(state, dispatch)
+    }),
   'Shift-Enter': chainCommands(exitCode, insertHardBreak),
   ArrowDown: chainCommands(arrowOutOfCode('down'), arrowOutOfTable('down')),
   ArrowUp: chainCommands(arrowOutOfCode('up'), arrowOutOfTable('up')),
@@ -433,6 +439,7 @@ export const editorPlugins: readonly Plugin[] = [
   tableEditing(),
   headerCellEnd(),
   activeTable(),
+  taskList(),
   codeHighlight(),
   placeholder('开始写作…'),
   continueBelow(),

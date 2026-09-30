@@ -166,7 +166,10 @@ describe('快捷键', () => {
       .filter((menu) => menu.label === '格式' || menu.label === '插入')
       .flatMap((menu) => menu.items)
       .filter((entry) => 'id' in entry)
-    for (const entry of entries) expect(entry.shortcut, entry.id).toBeDefined()
+    for (const entry of entries) {
+      if (entry.submenu) expect(shortcuts([{ label: entry.label, items: entry.submenu }]).length).toBeGreaterThan(0)
+      else expect(entry.shortcut, entry.id).toBeDefined()
+    }
   })
 
   test('同一时刻可用的快捷键互不重复', () => {
@@ -240,7 +243,7 @@ describe('快捷键', () => {
     const inEditor = workspaceMenus(context())
     expect(menuItemForKey(inEditor, key({ ...deleteKey, ...mod }))).toBeNull()
     expect(menuItemForKey(inEditor, key({ key: 't', code: 'KeyT', ...mod }))).toBe('editor:table')
-    expect(menuItemForKey(inEditor, key({ key: '8', code: 'Digit8', ...mod }))).toBe('editor:bullet-list')
+    expect(menuItemForKey(inEditor, key({ key: '8', code: 'Digit8', ...mod }))).toBe('edit:list-menu')
     expect(menuItemForKey(inEditor, key({ key: 'l', code: 'KeyL', ...mod }))).toBeNull() // 没有文档样式
     const inInput = workspaceMenus(context({ focus: 'text-input' }))
     expect(menuItemForKey(inInput, key({ key: 'z', code: 'KeyZ', ...mod }))).toBeNull()

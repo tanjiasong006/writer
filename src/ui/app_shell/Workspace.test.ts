@@ -481,6 +481,26 @@ test('菜单栏反映编辑器状态：在代码块中粗体不可用，代码�
   expect(appMenuItem(services, 'editor:code-block').checked).toBe(true)
 })
 
+test('菜单栏的列表选择入口打开编辑区菜单，任务列表写入项目正文', async () => {
+  const services = seededServices()
+  services.shell.enableAppMenu()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  const view = editorView(wrapper)
+  view.coordsAtPos = () => ({ left: 10, right: 10, top: 0, bottom: 20 })
+  view.focus()
+  await flushPromises()
+  expect(appMenuItem(services, 'edit:list-menu').disabled).toBe(false)
+  services.shell.chooseMenuItem('edit:list-menu')
+  await flushPromises()
+  const tasks = wrapper.findAll('[role="menu"] button').find((item) => item.text().includes('任务列表'))!
+  await tasks.trigger('click')
+  await flushPromises()
+  expect(view.state.doc.firstChild?.firstChild?.attrs.checked).toBe(false)
+  expect(appMenuItem(services, 'editor:task-list').checked).toBe(true)
+  expect(view.hasFocus()).toBe(true)
+})
+
 test('隐藏侧栏：焦点在侧栏中时交给正文；快捷键与菜单栏切换同一个状态，并记住偏好', async () => {
   const services = seededServices()
   services.shell.enableAppMenu()
