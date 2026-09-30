@@ -95,10 +95,11 @@ mod tests {
         assert!(!nested.join(STATE_TMP).exists());
     }
 
+    // cargo test 默认是 debug 构建：开发环境（release 构建的测试不包含这一项）。
     #[test]
+    #[cfg(debug_assertions)]
     fn debug_builds_are_development() {
-        // cargo test 是 debug 构建：开发环境。
-        assert!(DEVELOPMENT);
+        const { assert!(DEVELOPMENT) };
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(snapshot(dir.path(), "Writer Dev".into()).environment, "development");
     }
