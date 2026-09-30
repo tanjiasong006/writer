@@ -28,6 +28,12 @@ const root = ref<HTMLElement | null>(null)
 
 function resolveImages(): void {
   for (const image of root.value?.querySelectorAll<HTMLImageElement>('img[data-writer-src]') ?? []) {
+    image.addEventListener('error', () => {
+      const placeholder = document.createElement('span')
+      placeholder.className = 'missing-image'
+      placeholder.textContent = `图片无法显示：${image.alt || image.dataset.writerSrc || ''}`
+      image.replaceWith(placeholder)
+    }, { once: true })
     image.src = props.toDisplayUrl(image.dataset.writerSrc ?? '')
   }
 }

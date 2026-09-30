@@ -362,3 +362,30 @@ test('releaseSession：保存失败且用户确认丢弃 → 释放', async () =
   expect(await releaseSession(session, async () => true)).toBe(true)
   expect(storage.committed(PATH)!.contents.get('a')).toBe('引言')
 })
+
+test.each([false, true])('releaseSession：确认丢弃时等待重试保存，停止排队请求（有排队请求：%s）', async (queueSave) => {
+  const { storage, session } = setup({ autosaveDelayMs: 1000, retryDelayMs: 10_000 })
+  session.setContent('a', '修改')
+  storage.failNext({ code: 'io', operation: 'write', path: 'x', message: 'x' })
+  let answer!: (discard: boolean) => void
+  const confirm = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve }))
+  const releasing = releaseSession(session, confirm)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(confirm).toHaveBeenCalledOnce()
+
+  storage.hold()
+  await vi.advanceTimersByTimeAsync(10_000)
+  expect(storage.saves).toHaveLength(2)
+  const queued = queueSave ? session.save() : null
+  answer(true)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(storage.closed).toEqual([])
+  expect(await session.save()).toBe(false)
+
+  storage.release()
+  expect(await releasing).toBe(true)
+  if (queued) expect(await queued).toBe(false)
+  expect(storage.closed).toEqual([PATH])
+  await vi.advanceTimersByTimeAsync(30_000)
+  expect(storage.saves).toHaveLength(2)
+})

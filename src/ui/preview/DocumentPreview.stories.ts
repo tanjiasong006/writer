@@ -42,6 +42,22 @@ export const Default: Story = {
   args: { html: sample, activeChapterId: null, toDisplayUrl },
 }
 
+/** 实际触发浏览器解码失败：块级 / 行内占位、图注及正常图片共同显示。 */
+export const BrokenImages: Story = {
+  args: {
+    html: [
+      '<h1 class="doc-title">图片加载失败</h1>',
+      '<section class="chapter" data-chapter-id="a"><h2 class="chapter-heading"><span class="chapter-number">1</span>实验记录</h2>',
+      '<p>正常图片：</p><figure data-size="small" data-align="center"><img data-writer-src="figure" alt="实验装置"><figcaption>实验装置</figcaption></figure>',
+      '<p>损坏图片：</p><figure data-size="small" data-align="center"><img data-writer-src="broken" alt="损坏的实验装置"><figcaption>图注保留</figcaption></figure>',
+      '<p>行内图片 <img data-writer-src="broken" alt="曲线">，正文继续显示。</p>',
+      '<p>无替代文字：<img data-writer-src="broken" alt=""></p></section>',
+    ].join(''),
+    activeChapterId: null,
+    toDisplayUrl: (path: string) => path === 'figure' ? figureImage : 'data:image/png;base64,AAAA',
+  },
+}
+
 /** 技术文档主题：黑体、紧凑；与编辑器、Word、PDF 使用同一套语义样式。 */
 export const TechnicalTheme: Story = {
   args: { html: sample, activeChapterId: null, toDisplayUrl, theme: THEMES.technical },

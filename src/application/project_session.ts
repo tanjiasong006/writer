@@ -143,9 +143,10 @@ export class ProjectSession {
     this.commit(setStyle(this.current, setImageLayout(this.current.style, key, layout)))
   }
 
-  /** 释放存储层为本项目持有的资源（如独占锁）。 */
-  releaseStorage(): Promise<void> {
-    return this.storage.close(this.path)
+  /** 会话关闭 / 放弃后，等已开始的保存结束再释放存储资源（如独占锁）。 */
+  async releaseStorage(): Promise<void> {
+    await (this.queued ?? this.inFlight)
+    await this.storage.close(this.path)
   }
 
   /** 正文中资源引用对应的项目内文件路径；项目外或无法解析时返回 null。 */
@@ -163,6 +164,7 @@ export class ProjectSession {
    * 没有未保存的修改时直接成功。
    */
   save(): Promise<boolean> {
+    if (this.closed) return Promise.resolve(false)
     this.cancelTimer()
     if (!this.inFlight) return this.startSave()
     // 正在保存：合并为紧随其后的一次保存，它会带上期间的所有修改。
@@ -200,6 +202,8 @@ export class ProjectSession {
   }
 
   private startSave(): Promise<boolean> {
+    // dispose 后不允许启动新保存，包括此前排队、尚未开始的请求。
+    if (this.closed) return Promise.resolve(false)
     const run = this.runSave()
     this.inFlight = run
     void run.finally(() => {

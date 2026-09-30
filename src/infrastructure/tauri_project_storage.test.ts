@@ -75,6 +75,31 @@ test('Rust 返回的结构化错误原样传递', async () => {
     ok: false,
     error: { code: 'content-missing', chapterId: 'b', file: 'ch_2.md' },
   })
+  expect(invokeMock).toHaveBeenCalledTimes(1)
+})
+
+test('open：前端校验失败时先释放后端项目锁，再返回校验错误', async () => {
+  invokeMock.mockResolvedValueOnce({ manifest: { ...manifest, title: 12 }, contents: {} })
+  let unlock!: () => void
+  invokeMock.mockImplementationOnce(() => new Promise<void>((resolve) => { unlock = resolve }))
+  let returned = false
+  const opening = createTauriProjectStorage().open('/p/论文').then((result) => {
+    returned = true
+    return result
+  })
+  await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith('project_close', { path: '/p/论文' }))
+  expect(returned).toBe(false)
+  unlock()
+  expect(await opening).toEqual({ ok: false, error: { code: 'manifest-invalid', detail: 'title-invalid' } })
+})
+
+test('open：释放失败仍保留原始校验错误', async () => {
+  invokeMock.mockResolvedValueOnce({ manifest, contents: { a: 'A' } })
+  invokeMock.mockRejectedValueOnce('IPC failure')
+  expect(await createTauriProjectStorage().open('/p')).toEqual({
+    ok: false, error: { code: 'manifest-invalid', detail: 'content-missing' },
+  })
+  expect(invokeMock).toHaveBeenLastCalledWith('project_close', { path: '/p' })
 })
 
 test('未知错误归为 unknown，不会被当成成功', async () => {

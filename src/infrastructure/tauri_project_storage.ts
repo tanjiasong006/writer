@@ -30,7 +30,13 @@ export function createTauriProjectStorage(): ProjectStorage {
     async open(path) {
       const result = await call(() => invoke<unknown>('project_open', { path }))
       if (!result.ok) return result
-      return decodeOpened(result.value)
+      const decoded = decodeOpened(result.value)
+      if (!decoded.ok) {
+        // Rust 已持有项目锁；前端拒绝这份数据时也必须结束后端的打开流程。
+        // 释放失败仍返回原始校验错误，进程退出时操作系统会释放锁。
+        await call(() => invoke<void>('project_close', { path }))
+      }
+      return decoded
     },
 
     async save(path, document, changed) {

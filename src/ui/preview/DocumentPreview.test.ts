@@ -18,6 +18,46 @@ test('图片路径经 toDisplayUrl 转换', async () => {
   expect(wrapper.find('img').attributes('src')).toBe('asset:///项目/assets/图.png')
 })
 
+test('损坏图片加载失败时显示文字占位，保留图注与章节选择', async () => {
+  const wrapper = mount(DocumentPreview, {
+    props: {
+      html: html.replace('</figure>', '<figcaption>图注</figcaption></figure>'),
+      toDisplayUrl: (path: string) => `asset://${path}`,
+    },
+  })
+  await nextTick()
+  await wrapper.find('img').trigger('error')
+  expect(wrapper.find('img').exists()).toBe(false)
+  expect(wrapper.find('.missing-image').text()).toBe('图片无法显示：图')
+  expect(wrapper.find('figcaption').text()).toBe('图注')
+  await wrapper.find('.missing-image').trigger('click')
+  expect(wrapper.emitted('select')).toEqual([['a']])
+
+  await wrapper.setProps({ html: html + '<p>更新</p>' })
+  await nextTick()
+  expect(wrapper.find('.missing-image').exists()).toBe(false)
+  expect(wrapper.find('img').attributes('src')).toBe('asset:///项目/assets/图.png')
+  wrapper.unmount()
+})
+
+test('行内图片失败时按纯文本显示替代文字，无替代文字时显示路径', async () => {
+  const wrapper = mount(DocumentPreview, {
+    props: {
+      html: '<p>正文<img data-writer-src="/图.png" alt="&lt;script&gt;alert(1)&lt;/script&gt;"><img data-writer-src="/空.png" alt=""></p>',
+      toDisplayUrl: (path: string) => path,
+    },
+  })
+  await nextTick()
+  for (const image of wrapper.findAll('img')) await image.trigger('error')
+  expect(wrapper.findAll('.missing-image').map((node) => node.text())).toEqual([
+    '图片无法显示：<script>alert(1)</script>',
+    '图片无法显示：/空.png',
+  ])
+  expect(wrapper.find('script').exists()).toBe(false)
+  expect(wrapper.find('p').text()).toContain('正文')
+  wrapper.unmount()
+})
+
 test('点击章节内容发出 select', async () => {
   const wrapper = mount(DocumentPreview, { props: { html, toDisplayUrl: (p: string) => p } })
   await wrapper.find('section[data-chapter-id="b"] p').trigger('click')
