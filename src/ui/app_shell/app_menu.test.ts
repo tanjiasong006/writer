@@ -203,7 +203,7 @@ describe('快捷键', () => {
     expect(menuItemForKey(inEditor, key({ ...deleteKey, ...mod }))).toBeNull()
     expect(menuItemForKey(inEditor, key({ key: 't', code: 'KeyT', ...mod }))).toBe('editor:table')
     expect(menuItemForKey(inEditor, key({ key: '8', code: 'Digit8', ...mod }))).toBe('editor:bullet-list')
-    expect(menuItemForKey(inEditor, key({ key: 'l', code: 'KeyL', ...mod }))).toBe('format:style')
+    expect(menuItemForKey(inEditor, key({ key: 'l', code: 'KeyL', ...mod }))).toBeNull() // 没有文档样式
     const inInput = workspaceMenus(context({ focus: 'text-input' }))
     expect(menuItemForKey(inInput, key({ key: 'z', code: 'KeyZ', ...mod }))).toBeNull()
   })

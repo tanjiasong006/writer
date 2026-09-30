@@ -37,8 +37,6 @@ export const SHORTCUTS = {
   /** 列表项增加 / 减少缩进（与 Pages、Word 的 ⌘] / ⌘[ 一致）。 */
   indent: 'CmdOrCtrl+]',
   outdent: 'CmdOrCtrl+[',
-  /** 文档样式（版式，Layout）。 */
-  documentStyle: 'CmdOrCtrl+L',
   insertTable: 'CmdOrCtrl+T',
   /** 插入图片（graphic）。 */
   insertImage: 'CmdOrCtrl+G',

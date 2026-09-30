@@ -29,14 +29,12 @@ export interface AppMenuContext {
 
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'reveal', 'export-docx', 'export-pdf'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu'] as const
-const FORMAT_ACTIONS = ['style'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
 
 type FileAction = (typeof FILE_ACTIONS)[number]
 type EditAction = (typeof EDIT_ACTIONS)[number]
-type FormatAction = (typeof FORMAT_ACTIONS)[number]
 type ChapterAction = (typeof CHAPTER_ACTIONS)[number]
 type ViewAction = (typeof VIEW_ACTIONS)[number]
 
@@ -48,7 +46,6 @@ export type MenuItemId =
   | `file:${FileAction}`
   | `edit:${EditAction}`
   | `editor:${EditorCommand}`
-  | `format:${FormatAction}`
   | `chapter:${ChapterAction}`
   | `chapter:move-${KeyboardMoveDirection}`
   | `view:${ViewAction}`
@@ -59,7 +56,6 @@ export type MenuCommand =
   | { readonly group: 'edit'; readonly action: EditAction }
   /** 正文编辑命令（格式、插入、表格）。 */
   | { readonly group: 'editor'; readonly command: EditorCommand }
-  | { readonly group: 'format'; readonly action: FormatAction }
   | { readonly group: 'chapter'; readonly action: ChapterAction }
   | { readonly group: 'move-chapter'; readonly direction: KeyboardMoveDirection }
   | { readonly group: 'view'; readonly action: ViewAction }
@@ -85,8 +81,6 @@ export function parseMenuItemId(id: string): MenuCommand | null {
       return oneOf(EDIT_ACTIONS, name) ? { group: 'edit', action: name } : null
     case 'editor':
       return isEditorCommand(name) ? { group: 'editor', command: name } : null
-    case 'format':
-      return oneOf(FORMAT_ACTIONS, name) ? { group: 'format', action: name } : null
     case 'chapter': {
       if (!name.startsWith('move-')) return oneOf(CHAPTER_ACTIONS, name) ? { group: 'chapter', action: name } : null
       const direction = name.slice('move-'.length)
@@ -209,8 +203,6 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         { separator: true },
         editorItem('indent'),
         editorItem('outdent'),
-        { separator: true },
-        { id: 'format:style', label: '文档样式…', shortcut: SHORTCUTS.documentStyle },
       ],
     },
     {

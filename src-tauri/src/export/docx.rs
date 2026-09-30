@@ -5,8 +5,10 @@
 //! - 正文内的 `#` 标题叠加在章节层级之下，不带编号。
 //! - 所有写入 XML 的文本先去掉 XML 1.0 不允许的控制字符，否则 Word 会拒绝打开整个文件。
 //! - 图片缺失或损坏时输出占位文字并记录在报告中，绝不 panic。
-//! - 排版来自文档主题（`render::theme`）：字体族、字号、行距、段距、各级标题、引用、代码、表格、
-//!   图注写入对应的段落样式；独立成段的图片按其布局决定宽度与对齐。
+//! - 排版使用 Word 的默认输出参数（`export::theme`）：正文写入 Normal（文档默认），标题、图注使用内置样式
+//!   （Heading 1..9、Caption），接收者可以统一修改样式、使用导航窗格与生成目录。
+//! - 图片按统一规则确定尺寸（`export::images`）：保持比例、不放大，不超过所在容器的宽度与正文区高度；
+//!   独立成段的图片居中，为图注预留空间并与图注保持在同一页，实际分页由 Word / WPS 完成。
 
 use std::io::Cursor;
 use std::path::Path;
@@ -20,10 +22,10 @@ use docx_rs::{
 };
 
 use super::fonts::{docx_fonts, FontFamily};
-use super::images::{display_size_pt, load_for_docx};
+use super::images::{caption_height_pt, display_size_pt, load_for_docx, Bounds};
+use super::theme::Theme;
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{Align, Block, Inline};
-use crate::render::theme::{ImageAlign, ImageSize, Theme};
 use crate::render::{resolve_image, Document, Section};
 
 /// A4，单位 twip（1/20 磅）。
@@ -31,6 +33,11 @@ const PAGE_WIDTH: u32 = 11906;
 const PAGE_HEIGHT: u32 = 16838;
 const MARGIN: i32 = 1440;
 const TEXT_WIDTH: u32 = PAGE_WIDTH - 2 * MARGIN as u32;
+const TEXT_HEIGHT: u32 = PAGE_HEIGHT - 2 * MARGIN as u32;
+/// Word 表格单元格默认的左右内边距（twip）；docx-rs 不写 tblCellMar，Word / WPS 使用这个默认值。
+const CELL_MARGIN: u32 = 108;
+/// 图片高度上限再留出的余量（磅），吸收行高取整等差异，保证图片不会被挤出页面。
+const IMAGE_HEIGHT_SLACK: f64 = 4.0;
 /// 1 磅 = 12700 EMU。
 const EMU_PER_PT: f64 = 12700.0;
 const LIST_INDENT: i32 = 420;
@@ -56,7 +63,7 @@ pub fn export(
     project_root: &Path,
 ) -> Result<(Vec<u8>, ExportReport), ExportError> {
     let mut writer = Writer {
-        document,
+        theme: Theme::default(),
         root: project_root,
         report: ExportReport::default(),
         next_numbering: FIRST_LIST_NUMBERING,
@@ -75,7 +82,7 @@ pub fn export(
         writer.section(section);
     }
 
-    let mut docx = base_document(&document.theme);
+    let mut docx = base_document(&writer.theme);
     for numbering in writer.numberings.drain(..) {
         docx = docx.add_numbering(numbering);
     }
@@ -104,7 +111,7 @@ enum Item {
 }
 
 struct Writer<'a> {
-    document: &'a Document,
+    theme: Theme,
     root: &'a Path,
     report: ExportReport,
     next_numbering: usize,
@@ -153,12 +160,12 @@ impl Writer<'_> {
         match block {
             Block::Heading { level, inlines } => {
                 let level = section.body_heading_depth(*level).clamp(1, MAX_HEADING);
-                let p = self.inlines(heading(level), inlines, RunStyle::default());
+                let p = self.inlines(heading(level), inlines, RunStyle::default(), text_width_pt());
                 self.items.push(Item::Paragraph(p));
             }
             Block::Paragraph(inlines) => {
                 let p = self.paragraph_for(context);
-                let p = self.inlines(p, inlines, RunStyle::default());
+                let p = self.inlines(p, inlines, RunStyle::default(), content_width_pt(context, 0));
                 self.items.push(Item::Paragraph(p));
             }
             Block::List {
@@ -178,7 +185,7 @@ impl Writer<'_> {
             Block::Code { text, .. } => {
                 let mut run = Run::new()
                     .fonts(fonts(FontFamily::Mono))
-                    .size(half_points(self.document.theme.code_block.size));
+                    .size(half_points(self.theme.code_block));
                 for (i, line) in text.split('\n').enumerate() {
                     if i > 0 {
                         run = run.add_break(BreakType::TextWrapping);
@@ -269,7 +276,8 @@ impl Writer<'_> {
                         if context.quote_level > 0 {
                             p = p.style("Quote");
                         }
-                        let p = self.inlines(p, inlines, RunStyle::default());
+                        let width = content_width_pt(context, level + 1);
+                        let p = self.inlines(p, inlines, RunStyle::default(), width);
                         self.items.push(Item::Paragraph(p));
                     }
                     Block::List { .. } => {
@@ -300,6 +308,8 @@ impl Writer<'_> {
             .max(rows.iter().map(Vec::len).max().unwrap_or(0))
             .max(1);
         let width = TEXT_WIDTH as usize / columns;
+        // 单元格中的图片不超过单元格去掉左右内边距后的宽度（各列等宽）。
+        let cell_width = f64::from((width as u32).saturating_sub(2 * CELL_MARGIN)) / 20.0;
         let bold = RunStyle {
             bold: true,
             ..RunStyle::default()
@@ -314,8 +324,8 @@ impl Writer<'_> {
                             Some(Align::Right) => p.align(AlignmentType::Right),
                             _ => p,
                         };
-                        let p =
-                            writer.inlines(p, cells.get(i).map_or(&[][..], Vec::as_slice), style);
+                        let inlines = cells.get(i).map_or(&[][..], Vec::as_slice);
+                        let p = writer.inlines(p, inlines, style, cell_width);
                         let cell = TableCell::new()
                             .add_paragraph(p)
                             .width(width, WidthType::Dxa);
@@ -345,39 +355,44 @@ impl Writer<'_> {
         self.items.push(Item::Paragraph(Paragraph::new()));
     }
 
+    /// 独立成段的图片：居中；有图注时图注紧随其后，两者保持在同一页。
+    /// 尺寸上限是完整正文区（不是当前页剩余空间）扣除图片前后间距与图注占用的高度。
     fn figure(&mut self, src: &str, alt: &str, context: BlockContext) {
-        let layout = self.document.figure_layout(src);
-        let align = match layout.align {
-            ImageAlign::Left => AlignmentType::Left,
-            ImageAlign::Center => AlignmentType::Center,
-            ImageAlign::Right => AlignmentType::Right,
+        let theme = &self.theme;
+        let spacing_pt = theme.image_spacing * theme.body.size;
+        let spacing = twips(spacing_pt);
+        let width = content_width_pt(context, 0);
+        let mut reserved = spacing_pt * 2.0 + IMAGE_HEIGHT_SLACK;
+        if !alt.is_empty() {
+            // 图注段落沿用正文的"最小行距"，每行至少一个正文行距。
+            let pitch = (theme.body.size * theme.body.line_height).max(theme.caption.size * 1.2);
+            reserved += caption_height_pt(alt, theme.caption.size, pitch, width);
+        }
+        let bounds = Bounds {
+            width,
+            height: f64::from(TEXT_HEIGHT) / 20.0 - reserved,
         };
-        let theme = &self.document.theme;
-        let spacing = twips(theme.image.spacing * theme.body.size);
-        let image_spacing =
-            LineSpacing::new()
-                .before(spacing)
-                .after(if alt.is_empty() { spacing } else { 0 });
+        let image_spacing = LineSpacing::new()
+            .before(spacing)
+            .after(if alt.is_empty() { spacing } else { 0 });
         let p = self
-            .indent(Paragraph::new().align(align), context)
+            .indent(Paragraph::new().align(AlignmentType::Center), context)
             .line_spacing(image_spacing);
         // 图片与下面的图注留在同一页。
         let p = p
             .keep_next(!alt.is_empty())
-            .add_run(self.image_run(src, alt, layout.size));
+            .add_run(self.image_run(src, alt, bounds));
         self.items.push(Item::Paragraph(p));
         if !alt.is_empty() {
-            self.items.push(Item::Paragraph(
-                Paragraph::new()
-                    .style("Caption")
-                    .align(align)
-                    .line_spacing(LineSpacing::new().after(spacing))
-                    .add_run(Run::new().add_text(xml_safe(alt))),
-            ));
+            let caption = self
+                .indent(Paragraph::new().style("Caption"), context)
+                .line_spacing(LineSpacing::new().after(spacing))
+                .add_run(Run::new().add_text(xml_safe(alt)));
+            self.items.push(Item::Paragraph(caption));
         }
     }
 
-    fn image_run(&mut self, src: &str, alt: &str, size: ImageSize) -> Run {
+    fn image_run(&mut self, src: &str, alt: &str, bounds: Bounds) -> Run {
         let image = resolve_image(self.root, src).and_then(|path| load_for_docx(&path));
         let Some(image) = image else {
             self.report.missing_images.push(src.to_owned());
@@ -386,18 +401,20 @@ impl Writer<'_> {
                 .color("B91C1C")
                 .add_text(xml_safe(&format!("[图片无法显示：{label}]")));
         };
-        let (width, height) = display_size_pt(
-            image.width,
-            image.height,
-            f64::from(TEXT_WIDTH) / 20.0,
-            size,
-        );
+        let (width, height) = display_size_pt(image.width, image.height, bounds);
         let pic = Pic::new_with_dimensions(image.png, image.width, image.height)
             .size(pt_to_emu(width), pt_to_emu(height));
         Run::new().add_image(pic)
     }
 
-    fn inlines(&mut self, mut p: Paragraph, inlines: &[Inline], style: RunStyle) -> Paragraph {
+    /// 行内内容；width 是所在容器（段落、表格单元格）的可用宽度（磅），限制其中图片的宽度。
+    fn inlines(
+        &mut self,
+        mut p: Paragraph,
+        inlines: &[Inline],
+        style: RunStyle,
+        width: f64,
+    ) -> Paragraph {
         for inline in inlines {
             p = match inline {
                 Inline::Text(text) => p.add_run(styled(Run::new().add_text(xml_safe(text)), style)),
@@ -408,6 +425,7 @@ impl Writer<'_> {
                         bold: true,
                         ..style
                     },
+                    width,
                 ),
                 Inline::Emphasis(children) => self.inlines(
                     p,
@@ -416,6 +434,7 @@ impl Writer<'_> {
                         italic: true,
                         ..style
                     },
+                    width,
                 ),
                 Inline::Strike(children) => self.inlines(
                     p,
@@ -424,6 +443,7 @@ impl Writer<'_> {
                         strike: true,
                         ..style
                     },
+                    width,
                 ),
                 Inline::Code(code) => p.add_run(styled(
                     Run::new().add_text(xml_safe(code)),
@@ -446,8 +466,12 @@ impl Writer<'_> {
                     }
                 }
                 Inline::Image { src, alt } => {
-                    // 与文字同段的图片没有布局，按原始尺寸（不超过正文宽度）。
-                    let run = self.image_run(src, alt, ImageSize::Original);
+                    // 与文字同段的图片：不超过所在容器的宽度，高度不超过正文区。
+                    let bounds = Bounds {
+                        width,
+                        height: f64::from(TEXT_HEIGHT) / 20.0 - IMAGE_HEIGHT_SLACK,
+                    };
+                    let run = self.image_run(src, alt, bounds);
                     p.add_run(run)
                 }
                 Inline::SoftBreak => p.add_run(styled(Run::new().add_text(" "), style)),
@@ -548,7 +572,7 @@ fn base_document(theme: &Theme) -> Docx {
                 .name("Code")
                 .based_on("Normal")
                 .fonts(fonts(FontFamily::Mono))
-                .size(half_points(theme.code_block.size))
+                .size(half_points(theme.code_block))
                 .line_spacing(
                     LineSpacing::new()
                         .line_rule(LineSpacingType::Auto)
@@ -569,7 +593,7 @@ fn base_document(theme: &Theme) -> Docx {
             Style::new("TableText", StyleType::Paragraph)
                 .name("Table Text")
                 .based_on("Normal")
-                .size(half_points(theme.table.size))
+                .size(half_points(theme.table))
                 .line_spacing(
                     LineSpacing::new()
                         .line_rule(LineSpacingType::Auto)
@@ -667,6 +691,17 @@ fn mark_header_rows(document: &[u8]) -> Vec<u8> {
         .into_bytes()
 }
 
+fn text_width_pt() -> f64 {
+    f64::from(TEXT_WIDTH) / 20.0
+}
+
+/// 块内容的可用宽度（磅）：正文宽度减去引用与列表的缩进。list_level 是内容所在的列表缩进层数。
+fn content_width_pt(context: BlockContext, list_level: usize) -> f64 {
+    let levels = list_level.max(context.list_level) + context.quote_level;
+    let indent = f64::from(LIST_INDENT) * levels as f64;
+    ((f64::from(TEXT_WIDTH) - indent) / 20.0).max(1.0)
+}
+
 fn pt_to_emu(pt: f64) -> u32 {
     (pt * EMU_PER_PT).round() as u32
 }
@@ -684,8 +719,6 @@ mod tests {
     fn request(chapters: &[(&str, Vec<u32>, &str, &str)]) -> RenderRequest {
         RenderRequest {
             title: "示例论文".into(),
-            theme: crate::render::theme::test_theme(),
-            images: Default::default(),
             chapters: chapters
                 .iter()
                 .map(|(id, number, title, markdown)| RenderChapter {
@@ -875,12 +908,31 @@ mod tests {
         let xml = part(&bytes, "word/document.xml");
         assert!(xml.contains("[图片无法显示：丢]"));
         assert!(xml.contains(r#"<w:pStyle w:val="Caption" />"#));
-        // 100×50 像素 = 952500×476250 EMU。
+        // 小图不放大：100×50 像素 = 952500×476250 EMU。
         assert!(xml.contains(r#"cx="952500" cy="476250""#));
         // 宽图缩放到正文宽度（9026 twip × 635 = 5731510 EMU）。
         assert!(xml.contains(r#"cx="5731510" cy="2865755""#));
-        // 竖长图按高度上限（420 磅）缩小，不会超出页面：105×420 磅。
-        assert!(xml.contains(r#"cx="1333500" cy="5334000""#));
+        // 竖长图按完整正文区高度（697.9 磅）扣除前后间距、余量与一行图注后缩小，比例不变。
+        let (cx, cy) = extents(&xml)[2];
+        let limit = 697.9 - 12.0 * 2.0 - 4.0 - 21.6;
+        assert!((cy / EMU_PER_PT - limit).abs() < 0.1, "{cy}");
+        assert!((cx / cy - 0.25).abs() < 1e-3);
+    }
+
+    /// document.xml 中各图片的显示尺寸（EMU），按出现顺序。
+    fn extents(xml: &str) -> Vec<(f64, f64)> {
+        xml.split("<wp:extent ")
+            .skip(1)
+            .map(|rest| {
+                let value = |name: &str| -> f64 {
+                    let start = rest.find(&format!(r#"{name}=""#)).unwrap() + name.len() + 2;
+                    rest[start..start + rest[start..].find('"').unwrap()]
+                        .parse()
+                        .unwrap()
+                };
+                (value("cx"), value("cy"))
+            })
+            .collect()
     }
 
     /// styles.xml 中某个样式定义的 XML 片段。
@@ -893,44 +945,37 @@ mod tests {
     }
 
     #[test]
-    fn theme_maps_to_word_styles() {
-        use crate::render::theme::FontId;
+    fn default_output_styles_use_builtin_word_styles() {
         let dir = project();
-        let mut request = request(&[(
-            "a",
-            vec![1],
-            "绪论",
-            "正文\n\n> 引用\n\n| a |\n| - |\n| 1 |",
-        )]);
-        request.theme.body.font = FontId::Sans;
-        request.theme.body.size = 10.5;
-        request.theme.body.line_height = 2.0;
-        request.theme.body.paragraph_spacing = 0.5;
-        request.theme.heading1.font = FontId::Serif;
-        request.theme.heading1.size = 18.0;
-        request.theme.heading1.spacing_before = 1.0;
-        request.theme.table.size = 9.0;
-        request.theme.caption.size = 9.5;
-        let (bytes, _) = export(&build(&request), dir.path()).unwrap();
-        docx_rs::read_docx(&bytes).expect("generated docx must be readable");
+        write_image(&dir.path().join("assets/图.png"), 100, 50, ImageFormat::Png);
+        let (bytes, _) = export_ok(
+            &dir,
+            &[(
+                "a",
+                vec![1],
+                "绪论",
+                "正文\n\n> 引用\n\n| a |\n| - |\n| 1 |\n\n![图注](../assets/图.png)",
+            )],
+        );
         let styles = part(&bytes, "word/styles.xml");
 
-        // 默认（正文）：黑体类字体、10.5 磅（半磅 21）、行距至少 21 磅（420 twip）、段后 5.25 磅。
+        // 正文（Normal / 文档默认）：宋体类字体、12 磅（半磅 24）、行距至少 21.6 磅（432 twip）、段后 6 磅。
         let defaults = &styles
             [styles.find("<w:docDefaults>").unwrap()..styles.find("</w:docDefaults>").unwrap()];
-        assert!(defaults.contains(r#"w:ascii="Arial""#), "{defaults}");
-        assert!(defaults.contains(r#"w:eastAsia="SimHei""#));
-        assert!(defaults.contains(r#"<w:sz w:val="21" />"#));
+        assert!(defaults.contains(r#"w:ascii="Times New Roman""#), "{defaults}");
+        assert!(defaults.contains(r#"w:eastAsia="SimSun""#));
+        assert!(defaults.contains(r#"<w:sz w:val="24" />"#));
         assert!(
-            defaults.contains(r#"w:line="420""#) && defaults.contains(r#"w:lineRule="atLeast""#)
+            defaults.contains(r#"w:line="432""#) && defaults.contains(r#"w:lineRule="atLeast""#)
         );
-        assert!(defaults.contains(r#"w:after="105""#));
+        assert!(defaults.contains(r#"w:after="120""#));
 
+        // 标题：内置 Heading 1..9（名称 heading N），带大纲级别；第 3 级之后沿用第 3 级的字号与间距。
         let h1 = style_xml(&styles, "Heading1");
-        assert!(h1.contains(r#"w:eastAsia="SimSun""#), "{h1}");
-        assert!(h1.contains(r#"<w:sz w:val="36" />"#));
-        assert!(h1.contains(r#"w:before="360""#));
-        // 第 3 级之后沿用第 3 级样式。
+        assert!(h1.contains(r#"w:val="heading 1""#), "{h1}");
+        assert!(h1.contains(r#"w:eastAsia="SimHei""#));
+        assert!(h1.contains(r#"<w:sz w:val="32" />"#));
+        assert!(h1.contains(r#"<w:outlineLvl w:val="0" />"#));
         let h3 = style_xml(&styles, "Heading3");
         let h7 = style_xml(&styles, "Heading7");
         assert_eq!(
@@ -941,44 +986,50 @@ mod tests {
                 .replace("heading 7", "x")
                 .replace("w:val=\"6\"", "L")
         );
-        assert!(style_xml(&styles, "TableText").contains(r#"<w:sz w:val="18" />"#));
-        assert!(style_xml(&styles, "Caption").contains(r#"<w:sz w:val="19" />"#));
+        // 图注：内置 Caption（名称 caption），居中。
+        let caption = style_xml(&styles, "Caption");
+        assert!(caption.contains(r#"w:val="caption""#), "{caption}");
+        assert!(caption.contains(r#"<w:sz w:val="20" />"#));
+        assert!(style_xml(&styles, "TableText").contains(r#"<w:sz w:val="22" />"#));
+
         let xml = part(&bytes, "word/document.xml");
         assert!(xml.contains(r#"<w:pStyle w:val="TableText" />"#));
+        assert!(xml.contains(r#"<w:pStyle w:val="Caption" />"#));
+        // 正文段落不写逐段的字体与字号：由 Normal 决定，接收者可以统一修改。
+        let body = &xml[xml.find("正文").unwrap().saturating_sub(300)..xml.find("正文").unwrap()];
+        assert!(!body.contains("<w:rFonts") && !body.contains("<w:sz "), "{body}");
     }
 
     #[test]
-    fn figure_layout_sets_width_and_alignment() {
-        use crate::render::theme::{ImageAlign, ImageOverride, ImageSize};
+    fn figures_are_centered_and_kept_with_their_caption() {
         let dir = project();
         write_image(&dir.path().join("assets/图.png"), 100, 50, ImageFormat::Png);
-        write_image(&dir.path().join("assets/另.png"), 100, 50, ImageFormat::Png);
-        let mut request = request(&[(
-            "a",
-            vec![1],
-            "图",
-            "![图注](../assets/图.png)\n\n![](../assets/另.png)",
-        )]);
-        request.images.insert(
-            "assets/图.png".into(),
-            ImageOverride {
-                size: Some(ImageSize::Full),
-                align: Some(ImageAlign::Right),
-            },
-        );
-        let (bytes, _) = export(&build(&request), dir.path()).unwrap();
+        let (bytes, _) = export_ok(&dir, &[("a", vec![1], "图", "![图注](../assets/图.png)")]);
         let xml = part(&bytes, "word/document.xml");
-        // 通栏：正文宽度 5731510 EMU（小图被放大），高度按比例。
-        assert!(xml.contains(r#"cx="5731510" cy="2865755""#), "{xml}");
-        // 未设置的图片跟随主题：原始尺寸。
-        assert!(xml.contains(r#"cx="952500" cy="476250""#));
-        // 图片与图注都靠右。
-        let figure = &xml[..xml.find(r#"cx="5731510""#).unwrap()];
+        let figure = &xml[..xml.find(r#"cx="952500""#).unwrap()];
         let figure = &figure[figure.rfind("<w:pPr>").unwrap()..];
-        assert!(figure.contains(r#"<w:jc w:val="right" />"#), "{figure}");
-        let caption =
-            &xml[xml.find("图注").unwrap().saturating_sub(600)..xml.find("图注").unwrap()];
-        assert!(caption.contains(r#"<w:jc w:val="right" />"#));
+        assert!(figure.contains(r#"<w:jc w:val="center" />"#), "{figure}");
+        assert!(figure.contains("<w:keepNext />"), "{figure}");
+    }
+
+    #[test]
+    fn images_in_table_cells_fit_the_cell_width() {
+        let dir = project();
+        write_image(&dir.path().join("assets/宽.png"), 1200, 600, ImageFormat::Png);
+        let (bytes, _) = export_ok(
+            &dir,
+            &[(
+                "a",
+                vec![1],
+                "表",
+                "| 甲 | 乙 | 丙 |\n| --- | --- | --- |\n| ![宽](../assets/宽.png) | 2 | 3 |",
+            )],
+        );
+        let xml = part(&bytes, "word/document.xml");
+        // 三列等宽：9026 / 3 = 3008 twip，减去左右内边距 2 × 108 → 2792 twip = 139.6 磅；保持比例。
+        let (cx, cy) = extents(&xml)[0];
+        assert!((cx / EMU_PER_PT - 139.6).abs() < 0.01, "{cx}");
+        assert!((cx / cy - 2.0).abs() < 1e-3);
     }
 
     #[test]
@@ -1075,11 +1126,11 @@ fn write_sample_docx() {
         320,
         image::ImageFormat::Png,
     );
-    // 第二张图设置了布局（小图、靠右），用于核对图片布局在导出中的效果。
+    // 竖长图用于核对完整正文区高度限制与图注预留。
     write_image(
         &root.join("assets/曲线.png"),
-        640,
         320,
+        1600,
         image::ImageFormat::Png,
     );
     let chapter = |id: &str, number: Vec<u32>, title: &str, markdown: &str| RenderChapter {
@@ -1090,19 +1141,10 @@ fn write_sample_docx() {
     };
     let request = RenderRequest {
         title: "Writer 示例文档".into(),
-        theme: crate::render::theme::test_theme(),
-        images: [(
-            "assets/曲线.png".to_owned(),
-            crate::render::theme::ImageOverride {
-                size: Some(crate::render::theme::ImageSize::Small),
-                align: Some(crate::render::theme::ImageAlign::Right),
-            },
-        )]
-        .into(),
         chapters: vec![
             chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
-            chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（小图靠右）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
+            chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
     };
     let (bytes, report) = export(&build(&request), &root).unwrap();

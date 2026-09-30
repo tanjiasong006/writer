@@ -1,7 +1,5 @@
 # editor
 
-> 本文件描述已确认的目标契约。现有文档主题绑定和图片布局控制尚待移除，不能作为后续扩展依据。
-
 ## 职责
 
 章节正文的结构化编辑（ProseMirror）。正文在应用中始终是 Markdown 字符串（Domain `WriterDocument.contents`），
@@ -21,6 +19,7 @@
 | `figure_editing.ts` | 独立成段的图片（figure 节点）的编辑：Enter、Backspace / Delete，以及把只剩一张图片的段落转成 figure。 |
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |
 | `image_view.ts` | 图片节点视图（figure 与行内图片）：按项目资源显示，无法显示时占位。 |
+| `editor_theme.ts` | 编辑环境的正文展示参数（目前只有默认值）→ CSS 变量；与 Word / PDF 的输出参数无关。 |
 | `ChapterEditor.vue` | 挂载 EditorView、响应章节切换、发出 change；右键菜单。编辑器没有自己的工具栏：它发出 `tools` 供工作区与菜单显示，通过 `runCommand` 接受内容编辑命令。 |
 
 ## 数据流
@@ -70,13 +69,11 @@ Vitest 用 `await expect(output).toMatchFileSnapshot(path)` 验证实际 `serial
 比较预期内容与结构，不要求内部节点类型或 Markdown 字节完全相同。
 这些验证在移除预览后继续保留，不引入自定义 Vue SFC 加载器，也无需运行时串联 TS 与 Rust。
 
-## 旧能力移除范围
+## 编辑环境主题
 
-移除 `image_layout.ts` 的局部布局插件、同步事务与 `ImageLayoutStep`，以及 `ImageLayoutControls.vue`、
-图片布局菜单、`changeFigureLayout`、布局 props / emits 和对应的旧 Story / 测试。
-保留图片节点视图、figure 内容编辑和资源安全解析；装饰机制可继续用于非布局的编辑反馈。
-主题入口调整为编辑环境设置，主题偏好由应用状态保存，不通过 `ProjectSession` 修改文档。
-可调整项与界面交互另行设计，实施时按 UI 准则更新 Story 并进行界面验收。
+旧的图片布局插件、布局按钮 / 菜单与文档主题绑定已移除。编辑环境主题的入口属于编辑环境设置，
+偏好由应用状态保存，不通过 `ProjectSession` 修改文档；可调整项与界面交互另行设计，
+实施时按 UI 准则更新 Story 并进行界面验收。
 
 ## 非目标
 

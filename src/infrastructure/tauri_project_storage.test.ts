@@ -1,7 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest'
 import { invoke } from '@tauri-apps/api/core'
-import { createDocument, setStyle } from '../domain/document/document.ts'
-import { defaultDocumentStyle, selectTheme, setImageLayout } from '../domain/document_style/document_style.ts'
+import { createDocument } from '../domain/document/document.ts'
 import { createTauriProjectStorage, decodeOpened, toFailure } from './tauri_project_storage.ts'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
@@ -129,22 +128,22 @@ test('decodeOpened：manifest 或正文不一致时拒绝', () => {
   })
 })
 
-test('样式随 manifest 保存，打开时恢复；只改样式的保存不携带正文', async () => {
-  const style = setImageLayout(selectTheme(defaultDocumentStyle(), 'classic'), 'assets/图.png', { size: 'full' })
-  invokeMock.mockResolvedValue(null)
-  await createTauriProjectStorage().save('/p/论文', setStyle(document, style), new Set())
-  const sent = invokeMock.mock.calls[0][1] as { request: { manifest: unknown; contents: unknown } }
-  expect(sent.request.contents).toEqual({})
-  expect(sent.request.manifest).toEqual({
-    ...manifest,
-    style: { theme: 'classic', images: { 'assets/图.png': { size: 'full' } } },
-  })
-
+test('旧项目的 style（已取消的文档样式）：打开时忽略，正文不受影响；下一次保存不再写出', async () => {
   const opened = decodeOpened({
-    manifest: JSON.parse(JSON.stringify(sent.request.manifest)),
+    manifest: {
+      ...manifest,
+      style: { theme: 'classic', overrides: { bodySize: 99 }, images: { 'assets/图.png': { size: 'full' } } },
+    },
     contents: { a: 'A', b: 'B', b1: 'B1' },
     orphanFiles: [],
   })
   if (!opened.ok) throw new Error('decode')
-  expect(opened.value.document.style).toEqual(style)
+  expect(Object.keys(opened.value.document).sort()).toEqual(['contents', 'title', 'tree'])
+  expect(opened.value.document.contents.get('b1')).toBe('B1')
+
+  invokeMock.mockResolvedValue(null)
+  await createTauriProjectStorage().save('/p/论文', opened.value.document, new Set())
+  const sent = invokeMock.mock.calls[0][1] as { request: { manifest: unknown; contents: unknown } }
+  expect(sent.request.contents).toEqual({})
+  expect(sent.request.manifest).toEqual(manifest)
 })

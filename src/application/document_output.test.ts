@@ -1,12 +1,5 @@
 import { expect, test } from 'vitest'
 import { createDocument } from '../domain/document/document.ts'
-import {
-  THEMES,
-  defaultDocumentStyle,
-  overrideStyle,
-  resolveTheme,
-  setImageLayout,
-} from '../domain/document_style/document_style.ts'
 import { buildRenderRequest } from './document_output.ts'
 
 test('buildRenderRequest：按阅读顺序展开，编号来自结构，正文原样', () => {
@@ -30,25 +23,20 @@ test('buildRenderRequest：按阅读顺序展开，编号来自结构，正文�
       { id: 'a1', number: [1, 1], title: '背景', markdown: 'A1\r\n' },
       { id: 'b', number: [2], title: '方法', markdown: '' },
     ],
-    theme: THEMES.book,
-    images: {},
   })
 })
 
-test('buildRenderRequest：携带解析后的主题与图片布局（正文不含排版信息）', () => {
-  let style = overrideStyle(defaultDocumentStyle(), { bodyFont: 'sans', bodySize: 14 })
-  style = setImageLayout(style, 'assets/图.png', { size: 'small', align: 'right' })
-  const result = createDocument('论文', [{ id: 'a', title: '绪论', children: [] }], new Map([['a', '![图](../assets/图.png)']]), style)
+test('buildRenderRequest：只携带内容与结构，不携带任何排版参数', () => {
+  const result = createDocument('论文', [{ id: 'a', title: '绪论', children: [] }], new Map([['a', '![图](../assets/图.png)']]))
   if (!result.ok) throw new Error('fixture')
   const request = buildRenderRequest(result.document)
-  expect(request.theme).toEqual(resolveTheme(style))
-  expect(request.theme.body.size).toBe(14)
-  expect(request.images).toEqual({ 'assets/图.png': { size: 'small', align: 'right' } })
+  expect(Object.keys(request).sort()).toEqual(['chapters', 'title'])
+  expect(Object.keys(request.chapters[0]).sort()).toEqual(['id', 'markdown', 'number', 'title'])
   expect(request.chapters[0].markdown).toBe('![图](../assets/图.png)')
 })
 
 test('buildRenderRequest：空文档', () => {
   const result = createDocument('空', [], new Map())
   if (!result.ok) throw new Error('fixture')
-  expect(buildRenderRequest(result.document)).toEqual({ title: '空', chapters: [], theme: THEMES.book, images: {} })
+  expect(buildRenderRequest(result.document)).toEqual({ title: '空', chapters: [] })
 })

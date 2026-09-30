@@ -1,33 +1,17 @@
 import type { MenuEntry } from '../../application/desktop_shell.ts'
-import type { ImageAlign, ImageSize } from '../../domain/document_style/document_style.ts'
 import type { CommandState, EditorCommand } from './commands.ts'
-import type { SelectedFigure } from './image_layout.ts'
 import { SHORTCUTS } from '../common/shortcuts.ts'
 
 /**
  * 正文的右键菜单：只列出与点击处直接相关的操作。
  *
- * - 选中的图片：尺寸与对齐（与图片旁的布局按钮相同）、剪切 / 拷贝。
+ * - 选中的图片：剪切 / 拷贝（图片没有单独的尺寸或对齐设置）。
  * - 表格中：插入 / 删除行与列、删除表格，放在最前面。
  * - 其余：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当前所在结构打勾）、插入表格与图片。
  *
- * 菜单项 id：`command:<EditorCommand>`、`image-size:<ImageSize>`、`image-align:<ImageAlign>`。
+ * 菜单项 id：`command:<EditorCommand>`。
  * 快捷键与菜单栏一致，只作显示（右键菜单打开期间才生效）。
  */
-
-export const IMAGE_SIZES: ReadonlyArray<{ readonly value: ImageSize; readonly label: string; readonly title: string }> = [
-  { value: 'original', label: '原始大小', title: '原始大小（不超过正文宽度）' },
-  { value: 'small', label: '小', title: '正文宽度的 40%' },
-  { value: 'medium', label: '中', title: '正文宽度的 65%' },
-  { value: 'large', label: '大', title: '正文宽度的 85%' },
-  { value: 'full', label: '通栏', title: '与正文同宽' },
-]
-
-export const IMAGE_ALIGNS: ReadonlyArray<{ readonly value: ImageAlign; readonly label: string }> = [
-  { value: 'left', label: '靠左' },
-  { value: 'center', label: '居中' },
-  { value: 'right', label: '靠右' },
-]
 
 /** 编辑命令在菜单中的名称与快捷键（菜单栏与右键菜单共用；快捷键来自 common/shortcuts.ts）。 */
 export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: string; readonly shortcut?: string }>> = {
@@ -72,33 +56,9 @@ export function commandEntry(
   }
 }
 
-export function imageLayoutEntries(figure: SelectedFigure): MenuEntry[] {
-  return [
-    {
-      id: 'image-size',
-      label: '尺寸',
-      submenu: IMAGE_SIZES.map((size) => ({
-        id: `image-size:${size.value}`,
-        label: size.label,
-        checked: figure.layout.size === size.value,
-      })),
-    },
-    {
-      id: 'image-align',
-      label: '对齐',
-      submenu: IMAGE_ALIGNS.map((align) => ({
-        id: `image-align:${align.value}`,
-        label: align.label,
-        checked: figure.layout.align === align.value,
-      })),
-    },
-  ]
-}
-
-export function editorContextMenu(state: CommandState, figure: SelectedFigure | null): MenuEntry[] {
-  if (figure) {
-    return [...imageLayoutEntries(figure), { separator: true }, { role: 'cut' }, { role: 'copy' }]
-  }
+/** figureSelected：选中了独立成段的图片。 */
+export function editorContextMenu(state: CommandState, figureSelected: boolean): MenuEntry[] {
+  if (figureSelected) return [{ role: 'cut' }, { role: 'copy' }]
   const entries: MenuEntry[] = []
   const inTable = state['row-after'].enabled
   if (inTable) {

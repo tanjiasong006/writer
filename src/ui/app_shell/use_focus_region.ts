@@ -1,13 +1,6 @@
 import { onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import type { FocusRegion } from './app_menu.ts'
 
-export interface FocusTracking {
-  /** 键盘焦点所在的区域：菜单栏按它决定哪些命令可用（app_menu.ts）。 */
-  readonly region: Readonly<Ref<FocusRegion>>
-  /** 最近一次获得焦点的元素（弹出面板以外）：从菜单栏打开的面板关闭后，焦点回到这里。 */
-  lastFocused(): HTMLElement | null
-}
-
 function regionOf(element: Element | null): FocusRegion {
   if (!(element instanceof HTMLElement)) return 'other'
   if (element.closest('.chapter-editor__content')) return 'editor'
@@ -17,19 +10,15 @@ function regionOf(element: Element | null): FocusRegion {
 }
 
 /**
- * 跟踪键盘焦点。focusin / focusout 覆盖所有焦点移动；焦点离开到页面之外时为 other。
- * popover() 返回的弹出面板中的焦点不记入 lastFocused。
+ * 跟踪键盘焦点所在的区域：菜单栏按它决定哪些命令可用（app_menu.ts）。
+ * focusin / focusout 覆盖所有焦点移动；焦点离开到页面之外时为 other。
  */
-export function useFocusRegion(popover: () => HTMLElement | null): FocusTracking {
+export function useFocusRegion(): Readonly<Ref<FocusRegion>> {
   const region = ref<FocusRegion>('other')
-  let last: HTMLElement | null = null
 
   function onFocusChange(event: FocusEvent): void {
     const target = event.type === 'focusin' ? event.target : event.relatedTarget
     region.value = regionOf(target instanceof Element ? target : null)
-    if (event.type === 'focusin' && target instanceof HTMLElement && !popover()?.contains(target)) {
-      last = target
-    }
   }
 
   onMounted(() => {
@@ -42,5 +31,5 @@ export function useFocusRegion(popover: () => HTMLElement | null): FocusTracking
     document.removeEventListener('focusout', onFocusChange)
   })
 
-  return { region, lastFocused: () => last }
+  return region
 }

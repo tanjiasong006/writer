@@ -738,3 +738,36 @@ fn bench_insert_at_top_of_500_chapters() {
     println!("rename 501 files: {rename_all:?}; single edit save: {single_edit:?}; open: {open:?}");
     assert_disk_is(&root, &edit);
 }
+
+/// 旧版项目的 `writer.json.style`（文档主题与图片布局，已取消）：打开时原样读出、不写盘；
+/// 存储层不解释 manifest 的其他字段，下一次正常保存写入前端生成的 manifest，其中不再有 style。
+#[test]
+fn legacy_style_field_is_left_alone_on_open_and_dropped_on_save() {
+    let dir = TempDir::new().unwrap();
+    let root = project_root(&dir);
+    let state = State::new("旧项目", &[("a", "ch_1.md", "正文")]);
+    state.write_to(&root);
+    let mut legacy = state.manifest();
+    legacy["style"] = json!({
+        "theme": "technical",
+        "overrides": { "bodySize": 99 },
+        "images": { "assets/图.png": { "size": "small", "align": "right" } },
+    });
+    fs::write(
+        root.join("writer.json"),
+        serde_json::to_vec_pretty(&legacy).unwrap(),
+    )
+    .unwrap();
+    let before = fs::read(root.join("writer.json")).unwrap();
+
+    let opened = open_project(&RealFs, &root).unwrap();
+    assert_eq!(opened.manifest["style"]["theme"], "technical");
+    assert_eq!(opened.contents, state.contents_map());
+    assert_eq!(fs::read(root.join("writer.json")).unwrap(), before);
+
+    save_project(&RealFs, &root, &state.request(&[])).unwrap();
+    assert_disk_is(&root, &state);
+    let saved: Value = serde_json::from_slice(&fs::read(root.join("writer.json")).unwrap()).unwrap();
+    assert!(saved.get("style").is_none());
+    assert_eq!(fs::read_to_string(root.join("content/ch_1.md")).unwrap(), "正文");
+}

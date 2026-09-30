@@ -1,8 +1,10 @@
 //! PDF 导出：把 `render::Document` 生成 Typst 源码，用内嵌的 Typst 排版为 PDF。
 //!
 //! - 用户文本一律以 Typst 字符串字面量（`#"..."`）注入，不存在"正文里的符号被当作 Typst 语法"的问题。
-//! - 排版来自文档主题（`render::theme`）：在 preamble 中翻译成 Typst 的 set / show 规则；
-//!   独立成段的图片按其布局决定宽度与对齐。
+//! - 排版使用 PDF 的默认输出参数（`export::theme`）：在 preamble 中翻译成 Typst 的 set / show 规则。
+//! - 图片按统一规则自动排版（`export::images`）：保持比例、不放大，不超过所在容器的宽度与完整正文区高度；
+//!   独立成段的图片居中，有图注时为图注预留空间。尺寸与图片落在页上的位置无关：当前页放不下时，
+//!   图片与图注作为一个整体移到下一页，不为塞进页底而缩小。
 //! - 字体来自 `fonts.rs` 的字体族 fallback 链；只保留本机实际存在的字体族，Typst 还会对缺字逐字形回退。
 //! - 文档含中文而本机没有任何能显示中文的字体时报 `NoCjkFont`，不静默输出缺字。
 //! - Typst 的文件 id 全局驻留且数量有上限，因此虚拟路径固定（/main.typ、/img/<序号>.png），
@@ -21,15 +23,22 @@ use typst_kit::fonts::FontStore;
 use typst_layout::PagedDocument;
 
 use super::fonts::{bundled_font_dirs, families, FontFamily, CJK_PROBE};
-use super::images::{display_size_pt, load_for_docx};
+use super::images::{caption_height_pt, display_size_pt, load_for_docx, Bounds};
+use super::theme::{HeadingStyle, Theme};
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{plain_text, Align, Block, Inline};
-use crate::render::theme::{HeadingStyle, ImageAlign, ImageSize};
 use crate::render::{resolve_image, Document, Section};
 
-/// A4 正文宽度（210mm − 2 × 25mm = 160mm）对应的磅数。
+/// A4 正文区（210mm × 297mm 减去四边 25mm 页边距 = 160mm × 247mm）对应的磅数。
 const TEXT_WIDTH_PT: f64 = 453.5;
-/// 标题的行高（字号的倍数），与编辑器 / 预览 CSS 中标题的 line-height 相同。
+const TEXT_HEIGHT_PT: f64 = 700.1;
+/// 图片高度上限再留出的余量（磅），吸收取整差异，保证图片与图注不会被挤出正文区。
+const IMAGE_HEIGHT_SLACK: f64 = 2.0;
+/// Typst figure 中图片与图注之间的默认间距（em，相对正文字号）。
+const FIGURE_GAP_EM: f64 = 0.65;
+/// 表格单元格的内边距（磅），与 preamble 中的 `table(inset: …)` 一致。
+const TABLE_INSET_PT: f64 = 6.0;
+/// 标题的行高（字号的倍数）。
 const HEADING_LINE_HEIGHT: f64 = 1.4;
 
 static FONTS: OnceLock<FontStore> = OnceLock::new();
@@ -61,7 +70,7 @@ fn layout(
     }
 
     let mut writer = Writer {
-        document,
+        theme: Theme::default(),
         root: project_root,
         out: String::new(),
         images: Vec::new(),
@@ -149,12 +158,12 @@ fn available_families(book: &FontBook, family: FontFamily) -> Vec<&'static str> 
 }
 
 struct Writer<'a> {
-    document: &'a Document,
+    theme: Theme,
     root: &'a Path,
     out: String,
     images: Vec<Bytes>,
     report: ExportReport,
-    /// 引用使用的字体列表（preamble 中按主题确定）。
+    /// 引用使用的字体列表（preamble 中按输出参数确定）。
     quote_font: String,
 }
 
@@ -176,12 +185,12 @@ impl Writer<'_> {
                 )
             }
         };
-        let theme = &document.theme;
+        let theme = self.theme;
         let body = &theme.body;
         let mono = font_list(FontFamily::Mono);
         let title = string(&document.title);
-        // CSS 中标题的外边距加在行框之外，行框本身含半个行距（标题行高 1.4、正文按主题行距）；
-        // 这里的排版框是 1em，因此把两侧的半个行距补进标题前后的间距，视觉间距与编辑器 / 预览一致。
+        // 标题前后的间距按"行框之外的外边距"定义，行框本身含半个行距（标题行高 1.4、正文按输出行距）；
+        // 这里的排版框是 1em，因此把两侧的半个行距补进标题前后的间距。
         let body_half_leading = (body.line_height - 1.0) / 2.0 * body.size;
         let heading_rules = |selector: &str, style: &HeadingStyle| {
             let half_leading = (HEADING_LINE_HEIGHT - 1.0) / 2.0 * style.size;
@@ -203,9 +212,9 @@ impl Writer<'_> {
             body_font = font_list(body.font.into()),
             body_size = num(body.size),
             // 每行的排版框固定为 1em（基线上 0.8em、下 0.2em）：相邻基线距离 = 1em + leading = 行距倍数，
-            // 与字体自身的度量无关，和编辑器 / 预览的 CSS line-height 含义一致。
+            // 与字体自身的度量无关。
             leading = num(body.line_height - 1.0),
-            // CSS 中段落外边距加在两行行框之间；这里段距同样在行距之外再加 paragraph_spacing。
+            // 段距在行距之外再加 paragraph_spacing。
             spacing = num(body.line_height - 1.0 + body.paragraph_spacing),
         ));
         // 第 3 级及更深的标题使用 heading3；第 1、2 级的规则在后，优先生效。
@@ -219,7 +228,7 @@ impl Writer<'_> {
             "#show raw: set text(font: {mono}, size: {inline_code}pt)\n\
              #show raw.where(block: true): set text(size: {code}pt)\n\
              #show raw.where(block: true): block.with(fill: luma(243), inset: 8pt, radius: 3pt, width: 100%)\n\
-             #set table(stroke: 0.5pt + luma(160), inset: 6pt)\n\
+             #set table(stroke: 0.5pt + luma(160), inset: {inset}pt)\n\
              #show table: set text(size: {table}pt)\n\
              #show table.cell.where(y: 0): set text(weight: \"bold\")\n\
              #set figure(numbering: none)\n\
@@ -227,9 +236,10 @@ impl Writer<'_> {
              #show figure.caption: set text(font: {caption_font}, size: {caption}pt, fill: luma(100))\n\
              #show link: set text(fill: rgb(\"#2563eb\"))\n",
             inline_code = num(body.size * 0.9),
-            code = num(theme.code_block.size),
-            table = num(theme.table.size),
-            figure = num(theme.image.spacing),
+            inset = num(TABLE_INSET_PT),
+            code = num(theme.code_block),
+            table = num(theme.table),
+            figure = num(theme.image_spacing),
             caption_font = font_list(theme.caption.font.into()),
             caption = num(theme.caption.size),
         ));
@@ -263,27 +273,33 @@ impl Writer<'_> {
 
     fn block(&mut self, block: &Block, section: &Section) -> String {
         if let Some((src, alt)) = block.as_figure() {
-            let layout = self.document.figure_layout(src);
-            let image = self.image(src, alt, layout.size);
-            let figure = if alt.is_empty() {
+            // 尺寸上限是完整正文区扣除图注及其间距，与图片落在页上的位置无关；
+            // figure 不跨页拆分，当前页放不下时连同图注整体移到下一页。
+            let theme = &self.theme;
+            let mut height = TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK;
+            if !alt.is_empty() {
+                let pitch = theme.caption.size * theme.body.line_height;
+                height -= FIGURE_GAP_EM * theme.body.size
+                    + caption_height_pt(alt, theme.caption.size, pitch, TEXT_WIDTH_PT);
+            }
+            let bounds = Bounds {
+                width: TEXT_WIDTH_PT,
+                height,
+            };
+            let image = self.image(src, alt, bounds);
+            return if alt.is_empty() {
                 format!("#figure({image})")
             } else {
                 format!("#figure({image}, caption: [#{}])", string(alt))
-            };
-            // figure 默认居中；左右对齐时只在这张图的范围内改变对齐（图注随图片对齐）。
-            return match layout.align {
-                ImageAlign::Center => figure,
-                ImageAlign::Left => format!("#[#show figure: set align(left)\n{figure}]"),
-                ImageAlign::Right => format!("#[#show figure: set align(right)\n{figure}]"),
             };
         }
         match block {
             Block::Heading { level, inlines } => format!(
                 "#heading(level: {})[{}]",
                 section.body_heading_depth(*level),
-                self.inlines(inlines)
+                self.inlines(inlines, TEXT_WIDTH_PT)
             ),
-            Block::Paragraph(inlines) => self.inlines(inlines),
+            Block::Paragraph(inlines) => self.inlines(inlines, TEXT_WIDTH_PT),
             Block::List { ordered, start, items } => {
                 let items: Vec<String> = items.iter().map(|item| format!("[{}]", self.blocks(item, section))).collect();
                 if *ordered {
@@ -297,7 +313,7 @@ impl Writer<'_> {
                 format!(
                     "#block(inset: (left: 10pt, y: 2pt), stroke: (left: 2pt + luma(200)))[#set text(font: {}, size: {}pt, fill: luma(80))\n{content}]",
                     self.quote_font,
-                    num(self.document.theme.blockquote.size),
+                    num(self.theme.blockquote.size),
                 )
             }
             Block::Code { language, text } => match language.as_deref().filter(|l| is_identifier(l)) {
@@ -314,9 +330,12 @@ impl Writer<'_> {
                     })
                     .collect();
                 let mut cells = Vec::new();
+                // 列宽由内容决定；单元格中的图片不超过按列数等分正文宽度、去掉左右内边距后的宽度，
+                // 避免一张图片把整列撑到正文宽度（与 Word 的等宽列一致）。
+                let cell_width = TEXT_WIDTH_PT / columns as f64 - 2.0 * TABLE_INSET_PT;
                 let row = |writer: &mut Self, row: &[Vec<Inline>]| -> Vec<String> {
                     (0..columns)
-                        .map(|i| format!("[{}]", writer.inlines(row.get(i).map_or(&[][..], Vec::as_slice))))
+                        .map(|i| format!("[{}]", writer.inlines(row.get(i).map_or(&[][..], Vec::as_slice), cell_width)))
                         .collect()
                 };
                 let head = row(self, header).join(", ");
@@ -341,7 +360,8 @@ impl Writer<'_> {
             .join("\n\n")
     }
 
-    fn inlines(&mut self, inlines: &[Inline]) -> String {
+    /// 行内内容；width 是按正文区计算的容器宽度上限（磅），限制其中的图片。
+    fn inlines(&mut self, inlines: &[Inline], width: f64) -> String {
         let mut out = String::new();
         for inline in inlines {
             match inline {
@@ -350,17 +370,17 @@ impl Writer<'_> {
                     out.push_str(&string(&breakable(text)));
                 }
                 Inline::Strong(children) => {
-                    out.push_str(&format!("#strong[{}]", self.inlines(children)))
+                    out.push_str(&format!("#strong[{}]", self.inlines(children, width)))
                 }
                 Inline::Emphasis(children) => {
-                    out.push_str(&format!("#emph[{}]", self.inlines(children)))
+                    out.push_str(&format!("#emph[{}]", self.inlines(children, width)))
                 }
                 Inline::Strike(children) => {
-                    out.push_str(&format!("#strike[{}]", self.inlines(children)))
+                    out.push_str(&format!("#strike[{}]", self.inlines(children, width)))
                 }
                 Inline::Code(code) => out.push_str(&format!("#raw({})", string(&breakable(code)))),
                 Inline::Link { url, children } => {
-                    let content = self.inlines(children);
+                    let content = self.inlines(children, width);
                     if is_safe_url(url) {
                         out.push_str(&format!("#link({})[{content}]", string(url)));
                     } else {
@@ -368,8 +388,12 @@ impl Writer<'_> {
                     }
                 }
                 Inline::Image { src, alt } => {
-                    // 与文字同段的图片没有布局，按原始尺寸（不超过正文宽度）。
-                    let image = self.image(src, alt, ImageSize::Original);
+                    // 与文字同段的图片（含表格单元格中的）：不超过所在容器的宽度，高度不超过正文区。
+                    let bounds = Bounds {
+                        width,
+                        height: TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK,
+                    };
+                    let image = self.image(src, alt, bounds);
                     out.push_str(&format!("#box({image})"));
                 }
                 Inline::SoftBreak => out.push_str("#\" \""),
@@ -380,7 +404,9 @@ impl Writer<'_> {
     }
 
     /// 图片表达式；无法加载时返回红色占位文字并记入报告。
-    fn image(&mut self, src: &str, alt: &str, size: ImageSize) -> String {
+    /// bounds 是按正文区计算的上限；实际宽度在排版时再受所在容器（列表、引用、表格单元格）的宽度限制，
+    /// 只给出宽度，高度按比例得到。
+    fn image(&mut self, src: &str, alt: &str, bounds: Bounds) -> String {
         let Some(image) = resolve_image(self.root, src).and_then(|path| load_for_docx(&path))
         else {
             self.report.missing_images.push(src.to_owned());
@@ -392,12 +418,14 @@ impl Writer<'_> {
         };
         let index = self.images.len();
         self.images.push(Bytes::new(image.png));
-        let (width, height) = display_size_pt(image.width, image.height, TEXT_WIDTH_PT, size);
-        format!("image(\"/img/{index}.png\", width: {width:.2}pt, height: {height:.2}pt)")
+        let (width, _) = display_size_pt(image.width, image.height, bounds);
+        format!(
+            "layout(size => image(\"/img/{index}.png\", width: calc.min({width:.2}pt, size.width)))"
+        )
     }
 }
 
-/// Typst 数值字面量：最多保留两位小数（主题数值已限制在合法范围内，总是有限值）。
+/// Typst 数值字面量：最多保留两位小数（输出参数都是有限值）。
 fn num(value: f64) -> String {
     let text = format!("{value:.2}");
     text.trim_end_matches('0').trim_end_matches('.').to_owned()
@@ -551,8 +579,6 @@ mod tests {
     fn request(title: &str, chapters: &[(&str, Vec<u32>, &str, &str)]) -> RenderRequest {
         RenderRequest {
             title: title.into(),
-            theme: crate::render::theme::test_theme(),
-            images: Default::default(),
             chapters: chapters
                 .iter()
                 .map(|(id, number, title, markdown)| RenderChapter {
@@ -665,46 +691,76 @@ mod tests {
     #[derive(Debug)]
     enum Placed {
         Text {
+            page: usize,
             y: f64,
             size: f64,
             family: String,
             text: String,
         },
         Image {
+            page: usize,
             x: f64,
+            y: f64,
             width: f64,
+            height: f64,
         },
     }
 
     fn placed(paged: &PagedDocument) -> Vec<Placed> {
-        fn walk(frame: &typst::layout::Frame, offset: typst::layout::Point, out: &mut Vec<Placed>) {
+        fn walk(
+            page: usize,
+            frame: &typst::layout::Frame,
+            offset: typst::layout::Point,
+            out: &mut Vec<Placed>,
+        ) {
             use typst::layout::FrameItem;
             for (position, item) in frame.items() {
                 let at = offset + *position;
                 match item {
-                    FrameItem::Group(group) => walk(&group.frame, at, out),
+                    FrameItem::Group(group) => walk(page, &group.frame, at, out),
                     FrameItem::Text(text) => out.push(Placed::Text {
+                        page,
                         y: at.y.to_pt(),
                         size: text.size.to_pt(),
                         family: text.font.info().family.to_lowercase(),
                         text: text.text.to_string(),
                     }),
                     FrameItem::Image(_, size, _) => out.push(Placed::Image {
+                        page,
                         x: at.x.to_pt(),
+                        y: at.y.to_pt(),
                         width: size.x.to_pt(),
+                        height: size.y.to_pt(),
                     }),
                     _ => {}
                 }
             }
         }
         let mut out = Vec::new();
-        walk(
-            &paged.pages()[0].frame,
-            typst::layout::Point::zero(),
-            &mut out,
-        );
+        for (page, p) in paged.pages().iter().enumerate() {
+            walk(page, &p.frame, typst::layout::Point::zero(), &mut out);
+        }
         out
     }
+
+    /// 图片：(页, x, y, 宽, 高)。
+    fn images(paged: &PagedDocument) -> Vec<(usize, f64, f64, f64, f64)> {
+        placed(paged)
+            .into_iter()
+            .filter_map(|p| match p {
+                Placed::Image {
+                    page,
+                    x,
+                    y,
+                    width,
+                    height,
+                } => Some((page, x, y, width, height)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    const MARGIN_PT: f64 = 25.0 / 25.4 * 72.0;
 
     fn in_family(font: &str, family: FontFamily) -> bool {
         families(family)
@@ -713,19 +769,13 @@ mod tests {
     }
 
     #[test]
-    fn theme_controls_fonts_sizes_and_line_pitch() {
+    fn default_output_fonts_sizes_and_line_pitch() {
         let dir = project();
-        let mut request = request(
+        let request = request(
             "",
             &[("a", vec![1], "标题甲", &"正文段落用于测量行距。".repeat(40))],
         );
-        request.theme.body.font = crate::render::theme::FontId::Sans;
-        request.theme.body.size = 10.5;
-        request.theme.body.line_height = 2.0;
-        request.theme.heading1.font = crate::render::theme::FontId::Serif;
-        request.theme.heading1.size = 20.0;
-        let document = build(&request);
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&build(&request), dir.path(), system_fonts()).unwrap();
         let items = placed(&paged);
 
         let heading: Vec<_> = items
@@ -739,11 +789,8 @@ mod tests {
             .collect();
         assert!(!heading.is_empty());
         for (size, family) in &heading {
-            assert_eq!(*size, 20.0);
-            assert!(
-                in_family(family, FontFamily::Serif),
-                "heading font {family}"
-            );
+            assert_eq!(*size, 16.0);
+            assert!(in_family(family, FontFamily::Sans), "heading font {family}");
         }
 
         let mut body_lines: Vec<f64> = items
@@ -756,8 +803,8 @@ mod tests {
                     text,
                     ..
                 } if text.contains("正文") => {
-                    assert_eq!(*size, 10.5);
-                    assert!(in_family(family, FontFamily::Sans), "body font {family}");
+                    assert_eq!(*size, 12.0);
+                    assert!(in_family(family, FontFamily::Serif), "body font {family}");
                     Some(*y)
                 }
                 _ => None,
@@ -766,9 +813,9 @@ mod tests {
         body_lines.dedup_by(|a, b| (*a - *b).abs() < 0.01);
         assert!(body_lines.len() >= 3, "paragraph should wrap");
         for pair in body_lines.windows(2) {
-            // 相邻基线距离 = 字号 × 行距倍数（与 CSS line-height 相同的含义）。
+            // 相邻基线距离 = 字号 × 行距倍数（12 × 1.8）。
             assert!(
-                (pair[1] - pair[0] - 21.0).abs() < 0.05,
+                (pair[1] - pair[0] - 21.6).abs() < 0.05,
                 "line pitch {}",
                 pair[1] - pair[0]
             );
@@ -776,77 +823,109 @@ mod tests {
     }
 
     #[test]
-    fn figure_layout_controls_width_and_alignment() {
-        use crate::render::theme::{ImageAlign, ImageOverride, ImageSize};
+    fn figures_are_centered_and_never_enlarged() {
         let dir = project();
-        for name in ["左.png", "中.png", "右.png"] {
-            write_image(
-                &dir.path().join("assets").join(name),
-                200,
-                100,
-                ImageFormat::Png,
-            );
-        }
-        let mut request = request(
+        write_image(&dir.path().join("assets/小.png"), 200, 100, ImageFormat::Png);
+        write_image(&dir.path().join("assets/宽.png"), 2000, 500, ImageFormat::Png);
+        let document = build(&request(
             "",
             &[(
                 "a",
                 vec![1],
                 "图",
-                "![](../assets/左.png)\n\n![](../assets/中.png)\n\n![](../assets/右.png)",
+                "![](../assets/小.png)\n\n![宽图](../assets/宽.png)",
             )],
-        );
-        let layout_of = |size, align| ImageOverride {
-            size: Some(size),
-            align: Some(align),
-        };
-        request.images.insert(
-            "assets/左.png".into(),
-            layout_of(ImageSize::Small, ImageAlign::Left),
-        );
-        request.images.insert(
-            "assets/右.png".into(),
-            layout_of(ImageSize::Medium, ImageAlign::Right),
-        );
-        let document = build(&request);
+        ));
         let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
         let page_width = paged.pages()[0].frame.width().to_pt();
-        let margin = 25.0 / 25.4 * 72.0;
-        let images: Vec<(f64, f64)> = placed(&paged)
-            .into_iter()
-            .filter_map(|p| match p {
-                Placed::Image { x, width } => Some((x, width)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(images.len(), 3);
-        // 小图靠左：宽为正文宽度的 40%。
-        assert!((images[0].1 - TEXT_WIDTH_PT * 0.4).abs() < 0.1);
-        assert!((images[0].0 - margin).abs() < 0.5);
-        // 没有设置的图片跟随主题：原始尺寸（200px = 150pt）、居中。
-        assert!((images[1].1 - 150.0).abs() < 0.1);
-        assert!((images[1].0 + images[1].1 / 2.0 - page_width / 2.0).abs() < 0.5);
-        // 中图靠右。
-        assert!((images[2].1 - TEXT_WIDTH_PT * 0.65).abs() < 0.1);
-        assert!((images[2].0 + images[2].1 - (page_width - margin)).abs() < 0.5);
+        let images = images(&paged);
+        assert_eq!(images.len(), 2);
+        // 小图：原始尺寸（200px = 150pt），居中。
+        assert!((images[0].3 - 150.0).abs() < 0.1);
+        assert!((images[0].1 + images[0].3 / 2.0 - page_width / 2.0).abs() < 0.5);
+        // 宽图：缩小到正文宽度，比例不变。
+        assert!((images[1].3 - TEXT_WIDTH_PT).abs() < 0.5, "{images:?}");
+        assert!((images[1].3 / images[1].4 - 4.0).abs() < 0.01);
     }
 
     #[test]
-    fn tall_image_stays_on_the_page_with_its_heading() {
+    fn tall_figure_uses_the_full_text_area_and_moves_with_its_caption() {
         let dir = project();
-        write_image(
-            &dir.path().join("assets/竖图.png"),
-            400,
-            1600,
-            ImageFormat::Png,
-        );
+        write_image(&dir.path().join("assets/竖图.png"), 400, 1600, ImageFormat::Png);
         let document = build(&request(
             "",
-            &[("a", vec![1], "图片", "![竖图](../assets/竖图.png)")],
+            &[(
+                "a",
+                vec![1],
+                "图片",
+                &format!("{}\n\n![竖图的图注](../assets/竖图.png)", "正文。".repeat(30)),
+            )],
         ));
-        let (pdf, _) = export(&document, dir.path(), system_fonts()).unwrap();
-        // 按宽度缩放时这张图有 1200 磅高，会把标题单独留在第一页、图片挤到下一页。
-        assert_eq!(page_count(&pdf), 1);
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let page_height = paged.pages()[0].frame.height().to_pt();
+        let images = images(&paged);
+        assert_eq!(images.len(), 1);
+        let (page, _, y, width, height) = images[0];
+        // 标题与正文之后放不下：整体移到第二页，而不是缩小后塞进第一页的剩余空间。
+        assert_eq!(page, 1);
+        // 高度按完整正文区扣除一行图注与间距计算，比例不变。
+        let expected = TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK - FIGURE_GAP_EM * 12.0 - 10.0 * 1.8;
+        assert!((height - expected).abs() < 0.5, "{height} vs {expected}");
+        assert!((width / height - 0.25).abs() < 1e-3);
+        // 图片与图注在同一页，且都在正文区内，不占用页脚。
+        assert!(y >= MARGIN_PT - 0.5 && y + height <= page_height - MARGIN_PT + 0.5);
+        let caption = placed(&paged).into_iter().find_map(|p| match p {
+            Placed::Text { page, y, text, .. } if text.contains("图注") => Some((page, y)),
+            _ => None,
+        });
+        let (caption_page, caption_y) = caption.expect("caption");
+        assert_eq!(caption_page, 1);
+        assert!(caption_y <= page_height - MARGIN_PT + 0.5, "{caption_y}");
+    }
+
+    #[test]
+    fn figures_in_quotes_fit_the_quote_width() {
+        let dir = project();
+        write_image(&dir.path().join("assets/宽.png"), 2000, 500, ImageFormat::Png);
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "引", "> ![宽](../assets/宽.png)")],
+        ));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (_, x, _, width, height) = images(&paged)[0];
+        // 引用有左侧缩进：图片缩小到引用内的可用宽度，不越出正文区右边界。
+        assert!(x > MARGIN_PT + 5.0, "{x}");
+        assert!(x + width <= MARGIN_PT + TEXT_WIDTH_PT + 0.5, "{x} + {width}");
+        assert!((width / height - 4.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn inline_images_fit_their_container() {
+        let dir = project();
+        write_image(&dir.path().join("assets/宽.png"), 1200, 600, ImageFormat::Png);
+        write_image(&dir.path().join("assets/长.png"), 200, 4000, ImageFormat::Png);
+        let document = build(&request(
+            "",
+            &[(
+                "a",
+                vec![1],
+                "表",
+                "| 甲 | 乙 | 丙 |\n| --- | --- | --- |\n| ![宽](../assets/宽.png) | 2 | 3 |\n\n\
+                 文字 ![长](../assets/长.png) 文字",
+            )],
+        ));
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let images = images(&paged);
+        assert_eq!(images.len(), 2, "{images:?}");
+        // 表格单元格：按列数等分正文宽度、去掉内边距（453.5 / 3 − 12 磅），保持比例，不按文字行高压成小图。
+        let (_, x, _, width, height) = images[0];
+        assert!((width - (TEXT_WIDTH_PT / 3.0 - 12.0)).abs() < 0.1, "{width}");
+        assert!((width / height - 2.0).abs() < 0.01);
+        assert!(x + width <= MARGIN_PT + TEXT_WIDTH_PT / 3.0 + 0.5);
+        // 正文中的超长图：高度不超过正文区。
+        let (_, _, _, width, height) = images[1];
+        assert!(height <= TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK + 0.5, "{height}");
+        assert!((height / width - 20.0).abs() < 0.05);
     }
 
     #[test]
@@ -949,11 +1028,11 @@ fn write_sample_pdf() {
         320,
         image::ImageFormat::Png,
     );
-    // 第二张图设置了布局（小图、靠右），用于核对图片布局在导出中的效果。
+    // 竖长图用于核对完整正文区高度限制与图注预留。
     write_image(
         &root.join("assets/曲线.png"),
-        640,
         320,
+        1600,
         image::ImageFormat::Png,
     );
     let chapter = |id: &str, number: Vec<u32>, title: &str, markdown: &str| RenderChapter {
@@ -964,19 +1043,10 @@ fn write_sample_pdf() {
     };
     let request = RenderRequest {
         title: "Writer 示例文档".into(),
-        theme: crate::render::theme::test_theme(),
-        images: [(
-            "assets/曲线.png".to_owned(),
-            crate::render::theme::ImageOverride {
-                size: Some(crate::render::theme::ImageSize::Small),
-                align: Some(crate::render::theme::ImageAlign::Right),
-            },
-        )]
-        .into(),
         chapters: vec![
             chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二\n\n注入测试：\"]#panic(\"x\")[ $ x $ #strong[不应加粗]"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
-            chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（小图靠右）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
+            chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
     };
     let (bytes, report) = export(&build(&request), &root, font_store(None)).unwrap();

@@ -7,7 +7,7 @@ export type ImageResolver = (reference: string) => string | null
 /**
  * 编辑器中的图片：按项目资源显示；无法解析或加载失败时显示占位，引用本身不变。
  * 图片节点本身只保存正文中的引用，显示地址不进入文档。
- * 行内图片放在 span 中；独立成段的图（figure）放在块级的 div 中，布局装饰（is-figure、data-image-*）加在这个 div 上。
+ * 行内图片放在 span 中；独立成段的图（figure）放在块级的 div（.editor-figure）中。
  */
 class ImageView implements NodeView {
   readonly dom: HTMLElement

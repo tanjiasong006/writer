@@ -5,7 +5,6 @@ import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { findChapter } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { hasContent } from '../../domain/document/document.ts'
-import { resolveTheme } from '../../domain/document_style/document_style.ts'
 import { exportDocument } from '../../application/document_output.ts'
 import ChapterManager from '../chapter_tree/ChapterManager.vue'
 import SaveStatus from './SaveStatus.vue'
@@ -17,12 +16,9 @@ import { useUiState } from './use_ui_state.ts'
 import { useSidebar, SIDEBAR_DEFAULT, SIDEBAR_MIN } from './use_sidebar.ts'
 import { useExport } from './use_export.ts'
 import { useFocusRegion } from './use_focus_region.ts'
-import { useStylePanel } from './use_style_panel.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
-import DocumentStylePanel from '../document_style/DocumentStylePanel.vue'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
-import type { SelectedFigure } from '../editor/image_layout.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
 import Toast from '../common/Toast.vue'
 import Icon from '../common/Icon.vue'
@@ -35,12 +31,12 @@ import { menuItemForKey, parseMenuItemId, workspaceMenus, type MenuCommand } fro
  *
  * - 左侧栏：章节树；宽度可拖动调整，可以隐藏（显示 → 隐藏侧栏，或把分隔线拖到最窄处以外）。
  * - 右侧：一行工具栏 + 正文编辑器。工具栏开头是文档名（点击打开文档菜单），
- *   右边只放高频操作：插入表格 / 图片，以及文档样式、导出。其余命令在菜单栏、右键菜单与快捷键中。
+ *   右边只放高频操作：插入表格 / 图片，以及导出。其余命令在菜单栏、右键菜单与快捷键中。
  * - unified 窗口（macOS）：工具栏与标题栏合为一体，窗口按钮浮在侧栏左上角，工具栏空白处可以拖动窗口。
  * - 菜单栏与快捷键来自同一份菜单（app_menu.ts），可用状态随焦点所在区域变化。
  * - 两侧独立滚动（ui-spec §27）。提示浮在正文区底部，不挤压布局。文档修改一律经 ProjectSession。
  *
- * 各项相对独立的职责在同目录的 use_*.ts 中（界面状态、侧栏、导出、焦点区域、样式面板），
+ * 各项相对独立的职责在同目录的 use_*.ts 中（界面状态、侧栏、导出、焦点区域），
  * 这里负责把它们与菜单命令、章节树、编辑器连接起来。
  */
 const props = defineProps<{
@@ -79,20 +75,7 @@ const {
   onResizeKey,
 } = useSidebar(shell, () => editor.value?.focus())
 
-const {
-  open: stylePanelOpen,
-  button: styleButton,
-  panel: stylePanel,
-  show: openStylePanel,
-  toggle: toggleStylePanel,
-  close: closeStylePanel,
-} = useStylePanel({
-  lastFocused: () => focus.lastFocused(),
-  focusEditor: () => editor.value?.focus(),
-})
-
-const focus = useFocusRegion(() => stylePanel.value)
-const focusRegion = focus.region
+const focusRegion = useFocusRegion()
 
 /** 窗口标题显示当前文档名（窗口菜单、调度中心中可见）；离开工作区时恢复为应用名。 */
 watch(
@@ -221,27 +204,16 @@ async function openTitleMenu(rect: DOMRect, keyboard: boolean): Promise<void> {
   else if (chosen === 'reveal') void shell.revealFile(props.session.path)
 }
 
-/**
- * 文档样式（整本书的设置，不属于正文工具栏）。与 tree 一样只依赖样式对象：
- * 编辑正文时样式引用不变，主题不会重新解析，编辑器的样式也不会重算。
- */
-const documentStyle = computed(() => document.value.style)
-const theme = computed(() => resolveTheme(documentStyle.value))
-
-/** 编辑器报告的命令状态与选中的图片（工具栏与菜单栏据此显示可用 / 勾选状态）。 */
+/** 编辑器报告的命令状态（工具栏与菜单栏据此显示可用 / 勾选状态）。 */
 const tools = shallowRef<CommandState | null>(null)
-const figure = shallowRef<SelectedFigure | null>(null)
 
-function showTools(state: CommandState, selected: SelectedFigure | null): void {
+function showTools(state: CommandState): void {
   tools.value = state
-  figure.value = selected
 }
 
 /** 没有章节时编辑器不存在，它报告的状态随之失效。 */
 watch(selectedChapter, (chapter) => {
-  if (chapter) return
-  tools.value = null
-  figure.value = null
+  if (!chapter) tools.value = null
 })
 
 function runCommand(command: EditorCommand): void {
@@ -328,9 +300,6 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       } else {
         globalThis.document.execCommand(command.action)
       }
-      return
-    case 'format':
-      void openStylePanel()
       return
     case 'view':
       if (command.action === 'sidebar') void setSidebarVisible(!sidebarVisible.value)
@@ -508,38 +477,6 @@ async function createFirstChapter(): Promise<void> {
         </div>
 
         <div class="workspace__group" role="toolbar" aria-label="文档">
-          <div class="workspace__anchor">
-            <button
-              ref="styleButton"
-              type="button"
-              class="workspace__tool"
-              tabindex="0"
-              :class="{ 'workspace__tool--open': stylePanelOpen }"
-              aria-label="文档样式"
-              aria-haspopup="dialog"
-              :aria-expanded="stylePanelOpen"
-              title="文档样式：整本文档的主题、字体与字号"
-              @click="toggleStylePanel"
-            >
-              <Icon name="style" />
-            </button>
-            <div
-              v-if="stylePanelOpen"
-              ref="stylePanel"
-              class="workspace__popover"
-              role="dialog"
-              aria-label="文档样式"
-              tabindex="-1"
-              @keydown.esc="closeStylePanel"
-            >
-              <DocumentStylePanel
-                :document-style="documentStyle"
-                @select-theme="session.selectTheme($event)"
-                @override="session.overrideStyle($event)"
-                @reset="session.resetStyleOverrides()"
-              />
-            </div>
-          </div>
           <button
             type="button"
             class="workspace__tool"
@@ -566,11 +503,8 @@ async function createFirstChapter(): Promise<void> {
           :number="selectedNumber"
           :title="selectedChapter.title"
           :resolve-image="resolveImage"
-          :theme="theme"
-          :image-layouts="documentStyle.images"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
           @request-image="insertImage"
-          @image-layout="(key, layout) => session.setImageLayout(key, layout)"
           @tools="showTools"
         />
         <div v-else class="workspace__placeholder">
@@ -779,10 +713,6 @@ async function createFirstChapter(): Promise<void> {
   margin-left: var(--space-5);
 }
 
-.workspace__anchor {
-  position: relative;
-}
-
 /* 工具栏按钮：无边框的图标按钮，默认次级前景色；hover 出现浅底，打开时保持按下的样子。 */
 .workspace__tool {
   display: flex;
@@ -821,25 +751,6 @@ async function createFirstChapter(): Promise<void> {
 @keyframes workspace-busy {
   50% {
     opacity: 0.35;
-  }
-}
-
-.workspace__popover {
-  position: absolute;
-  top: calc(100% + var(--space-2));
-  right: 0;
-  z-index: calc(var(--z-popover) + 1);
-  border-radius: var(--radius-l);
-  background: var(--color-bg-raised);
-  box-shadow: var(--shadow-popover);
-  outline: none;
-  animation: workspace-popover-in var(--duration-fast) var(--ease-out);
-}
-
-@keyframes workspace-popover-in {
-  from {
-    opacity: 0;
-    transform: translateY(-2px);
   }
 }
 

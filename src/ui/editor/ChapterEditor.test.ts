@@ -5,15 +5,7 @@ import { undo, redo, undoDepth } from 'prosemirror-history'
 import type { EditorView } from 'prosemirror-view'
 import { CellSelection } from 'prosemirror-tables'
 import ChapterEditor from './ChapterEditor.vue'
-import {
-  THEMES,
-  defaultDocumentStyle,
-  overrideStyle,
-  resolveTheme,
-  selectTheme,
-  type DocumentTheme,
-  type ImageLayouts,
-} from '../../domain/document_style/document_style.ts'
+import { FONT_STACKS } from './editor_theme.ts'
 
 const mounted: VueWrapper[] = []
 
@@ -27,8 +19,6 @@ function mountEditor(props: {
   number?: string
   title?: string
   resolveImage?: (reference: string) => string | null
-  theme?: DocumentTheme
-  imageLayouts?: ImageLayouts
 }) {
   const wrapper = mount(ChapterEditor, {
     attachTo: document.body,
@@ -153,7 +143,7 @@ test('CRLF 正文编辑后仍是 CRLF', () => {
   expect(wrapper.emitted('change')).toEqual([['a', '一\r\n\r\n二三\r\n']])
 })
 
-type Tools = [import('./commands.ts').CommandState, unknown]
+type Tools = [import('./commands.ts').CommandState]
 
 function lastTools(wrapper: VueWrapper): Tools[0] {
   const emitted = wrapper.emitted('tools') as Tools[] | undefined
@@ -340,12 +330,11 @@ function rootVar(wrapper: VueWrapper, name: string): string {
   return (wrapper.find('.chapter-editor').element as HTMLElement).style.getPropertyValue(name)
 }
 
-test('主题通过 CSS 变量作用在编辑器外层：正文字体、字号、行距', () => {
-  const theme = resolveTheme(overrideStyle(defaultDocumentStyle(), { bodyFont: 'sans', bodySize: 10.5, lineHeight: 2 }))
-  const wrapper = mountEditor({ chapterId: 'a', content: '正文', theme })
-  expect(rootVar(wrapper, '--doc-body-size')).toBe('10.5pt')
-  expect(rootVar(wrapper, '--doc-line-height')).toBe('2')
-  expect(rootVar(wrapper, '--doc-body-font')).toContain('Arial')
+test('编辑环境的默认展示参数以 CSS 变量作用在编辑器外层，不来自项目数据', () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '正文' })
+  expect(rootVar(wrapper, '--doc-body-size')).toBe('12pt')
+  expect(rootVar(wrapper, '--doc-line-height')).toBe('1.8')
+  expect(rootVar(wrapper, '--doc-body-font')).toBe(FONT_STACKS.serif)
 })
 
 test('标题样式按章节层级映射：第 2 级章节的 # 是第 3 级标题', () => {
@@ -353,29 +342,6 @@ test('标题样式按章节层级映射：第 2 级章节的 # 是第 3 级标�
   expect(rootVar(wrapper, '--heading-size')).toBe('var(--doc-h2-size)')
   expect(rootVar(wrapper, '--md-h1-size')).toBe('var(--doc-h3-size)')
   expect(rootVar(wrapper, '--md-h6-font')).toBe('var(--doc-h3-font)')
-})
-
-test('修改主题：不产生 change、不进入撤销历史、不重建视图，选区与文档不变', async () => {
-  const wrapper = mountEditor({ chapterId: 'a', content: '引言正文' })
-  const view = viewOf(wrapper)
-  type(view, '，补充')
-  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2, 4)))
-  const { doc, selection } = view.state
-  const depth = undoDepth(view.state)
-  const changes = wrapper.emitted('change')!.length
-
-  await wrapper.setProps({ theme: resolveTheme(selectTheme(defaultDocumentStyle(), 'technical')) })
-  await wrapper.setProps({ theme: resolveTheme(overrideStyle(defaultDocumentStyle(), { bodySize: 14 })) })
-
-  expect(viewOf(wrapper)).toBe(view)
-  expect(view.state.doc).toBe(doc)
-  expect(view.state.selection.eq(selection)).toBe(true)
-  expect(undoDepth(view.state)).toBe(depth)
-  expect(wrapper.emitted('change')!.length).toBe(changes)
-  expect(rootVar(wrapper, '--doc-body-size')).toBe('14pt')
-  // 撤销仍然只撤销文字编辑。
-  undo(view.state, view.dispatch)
-  expect(view.state.doc.textContent).toBe('引言正文')
 })
 
 function selectFirstImage(view: EditorView): void {
@@ -388,54 +354,21 @@ function selectFirstImage(view: EditorView): void {
 
 const IMAGE_CHAPTER = '说明\n\n![装置](../assets/装置.png)\n'
 
-test('选中图片时显示布局按钮，当前布局按下；改变布局发出 image-layout 而不是 change', async () => {
+test('图片没有单张的布局设置：选中后不出现布局按钮，figure 不带尺寸 / 对齐；删除可撤销', async () => {
   const wrapper = mountEditor({ chapterId: 'a', content: IMAGE_CHAPTER })
   const view = viewOf(wrapper)
-  expect(wrapper.find('[aria-label="图片布局"]').exists()).toBe(false)
   selectFirstImage(view)
   await wrapper.vm.$nextTick()
-  const controls = wrapper.find('[aria-label="图片布局"]')
-  expect(controls.exists()).toBe(true)
-  expect(controls.find('button[aria-pressed="true"]').text()).toBe('原始')
-
-  await controls.findAll('button').find((b) => b.text() === '大')!.trigger('click')
-  expect(wrapper.emitted('image-layout')).toEqual([['assets/装置.png', { size: 'large' }]])
-  expect(wrapper.emitted('change')).toBeUndefined()
   expect(view.state.selection).toBeInstanceOf(NodeSelection)
-  expect(view.dom.querySelector('.is-figure')?.getAttribute('data-image-size')).toBe('large')
-
-  await wrapper.find('button[aria-label="靠右"]').trigger('click')
-  expect(wrapper.emitted('image-layout')!.at(-1)).toEqual(['assets/装置.png', { size: 'large', align: 'right' }])
-
-  // 上层写回布局（与编辑器已一致）：什么都不变。
-  const state = view.state
-  await wrapper.setProps({ imageLayouts: new Map([['assets/装置.png', { size: 'large', align: 'right' }]]) })
-  expect(view.state).toBe(state)
-
-  undo(view.state, view.dispatch)
-  expect(wrapper.emitted('image-layout')!.at(-1)).toEqual(['assets/装置.png', { size: 'large' }])
-  undo(view.state, view.dispatch)
-  expect(wrapper.emitted('image-layout')!.at(-1)).toEqual(['assets/装置.png', null])
-  expect(wrapper.emitted('change')).toBeUndefined()
-})
-
-test('图片默认布局来自主题；上层的布局变化同步到编辑器', async () => {
-  const wrapper = mountEditor({ chapterId: 'a', content: IMAGE_CHAPTER, theme: THEMES.technical })
-  const view = viewOf(wrapper)
-  const figure = () => view.dom.querySelector('.is-figure')!
-  expect(figure().getAttribute('data-image-size')).toBe('large')
-  await wrapper.setProps({ imageLayouts: new Map([['assets/装置.png', { size: 'small', align: 'left' }]]) })
-  expect(figure().getAttribute('data-image-size')).toBe('small')
-  expect(figure().getAttribute('data-image-align')).toBe('left')
+  expect(wrapper.find('[aria-label="图片布局"]').exists()).toBe(false)
+  const figure = view.dom.querySelector('.editor-figure')!
+  expect(figure.getAttribute('data-image-size')).toBeNull()
+  expect(figure.getAttribute('data-image-align')).toBeNull()
   expect(wrapper.emitted('image-layout')).toBeUndefined()
+
+  view.dispatch(view.state.tr.deleteSelection())
+  expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', '说明\n'])
+  undo(view.state, view.dispatch)
+  expect(wrapper.emitted('change')!.at(-1)).toEqual(['a', IMAGE_CHAPTER])
 })
 
-test('其他章节修改了同一图片文件的布局：切换回来时显示最新布局', async () => {
-  const wrapper = mountEditor({ chapterId: 'a', content: IMAGE_CHAPTER })
-  await wrapper.setProps({ chapterId: 'b', content: '![装置](../assets/装置.png)\n' })
-  await wrapper.setProps({ imageLayouts: new Map([['assets/装置.png', { size: 'full' }]]) })
-  await wrapper.setProps({ chapterId: 'a', content: IMAGE_CHAPTER })
-  const view = viewOf(wrapper)
-  expect(view.dom.querySelector('.is-figure')?.getAttribute('data-image-size')).toBe('full')
-  expect(wrapper.emitted('change')).toBeUndefined()
-})

@@ -2,19 +2,9 @@ import type { ChapterId, ChapterTree } from '../domain/chapter_tree/chapter_tree
 import {
   replaceTree,
   setContent,
-  setStyle,
   setTitle,
   type WriterDocument,
 } from '../domain/document/document.ts'
-import {
-  overrideStyle,
-  resetOverrides,
-  selectTheme,
-  setImageLayout,
-  type ImageOverride,
-  type StyleOverrides,
-  type ThemeId,
-} from '../domain/document_style/document_style.ts'
 import type {
   ImportedAsset,
   ProjectStorage,
@@ -119,28 +109,6 @@ export class ProjectSession {
 
   setTitle(title: string): void {
     this.commit(setTitle(this.current, title))
-  }
-
-  /**
-   * 文档样式的修改。样式保存在项目 manifest 中，随正常保存提交；
-   * 不改变任何章节正文，因此保存时不会重写正文文件。
-   */
-  selectTheme(theme: ThemeId): void {
-    this.commit(setStyle(this.current, selectTheme(this.current.style, theme)))
-  }
-
-  /** 在主题之上调整若干字段；值为 undefined 或与主题相同则恢复跟随主题。 */
-  overrideStyle(patch: StyleOverrides): void {
-    this.commit(setStyle(this.current, overrideStyle(this.current.style, patch)))
-  }
-
-  resetStyleOverrides(): void {
-    this.commit(setStyle(this.current, resetOverrides(this.current.style)))
-  }
-
-  /** 设置一张图片（按图片文件键 imageKey）的布局；null 表示跟随主题。 */
-  setImageLayout(key: string, layout: ImageOverride | null): void {
-    this.commit(setStyle(this.current, setImageLayout(this.current.style, key, layout)))
   }
 
   /** 会话关闭 / 放弃后，等已开始的保存结束再释放存储资源（如独占锁）。 */

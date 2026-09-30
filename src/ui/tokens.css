@@ -2,7 +2,7 @@
  * 界面 token（docs/ui-design-principles.md 第 5 节）。
  *
  * 所有界面组件的颜色、字号、间距、尺寸、圆角、阴影与动画都从这里取值；新增视觉参数前先看这里能否表达。
- * 文档主题（字体、字号、行距等排版语义）不在这里，见 ui/document_style/theme_css.ts。
+ * 编辑环境的正文展示参数（字体、字号、行距等）不在这里，见 ui/editor/editor_theme.ts。
  * MVP 只提供浅色外观。
  */
 :root {
@@ -59,7 +59,7 @@
   --color-danger-fill: #fdf1f0;
   --color-success-text: #2c6e3f;
 
-  /* 正文中非主题的中性色（引用线、代码底色、表格线、选区）。 */
+  /* 正文中与展示参数无关的中性色（引用线、代码底色、表格线、选区）。 */
   --color-doc-text: #1f1f21;
   --color-doc-muted: #55555a;
   --color-doc-rule: #d8d8d4;

@@ -26,13 +26,12 @@ import { isEmptyDocument, nodes, schema } from './schema.ts'
 import { toggleBold, toggleCode, toggleItalic, undo as undoCommand } from './commands.ts'
 import { SHORTCUTS, matchesShortcut, proseMirrorKey } from '../common/shortcuts.ts'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
-import { imageLayoutPlugin } from './image_layout.ts'
 import { drawCaret } from './caret.ts'
 import { drawSelection } from './selection.ts'
 import { figureEditing, newParagraphAtBlock, selectFigureBackward, selectFigureForward } from './figure_editing.ts'
 
 /**
- * 编辑器插件：快捷键、Markdown 输入规则、撤销历史、表格编辑、占位提示、图片布局与剪贴板的 Markdown 文本。
+ * 编辑器插件：快捷键、Markdown 输入规则、撤销历史、表格编辑、占位提示与剪贴板的 Markdown 文本。
  * 所有章节的 EditorState 共用同一组插件，切换章节时 EditorView 无需重新配置。
  *
  * 键盘写作的原则：任何结构（列表、引用、代码块、表格、图片）都能只用键盘进入和离开；
@@ -424,7 +423,6 @@ export const editorPlugins: readonly Plugin[] = [
   headerCellEnd(),
   placeholder('开始写作…'),
   continueBelow(),
-  imageLayoutPlugin(),
   markdownClipboard(),
   drawCaret(),
   drawSelection(),

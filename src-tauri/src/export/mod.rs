@@ -9,6 +9,7 @@ pub mod docx;
 pub mod fonts;
 pub mod images;
 pub mod pdf;
+pub mod theme;
 
 use std::fs::{self, File};
 use std::io::Write;
@@ -132,8 +133,6 @@ mod tests {
         }
         let request = RenderRequest {
             title: "压力样例".into(),
-            theme: crate::render::theme::test_theme(),
-            images: Default::default(),
             chapters: chapters
                 .into_iter()
                 .enumerate()
@@ -173,8 +172,6 @@ mod tests {
         let request = RenderRequest {
             title: "大文档".into(),
             chapters,
-            theme: crate::render::theme::test_theme(),
-            images: Default::default(),
         };
         let t = Instant::now();
         let document = build(&request);

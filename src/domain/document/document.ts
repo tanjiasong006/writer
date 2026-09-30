@@ -1,17 +1,16 @@
 import type { ChapterId, ChapterTree } from '../chapter_tree/chapter_tree.ts'
-import { defaultDocumentStyle, type DocumentStyle } from '../document_style/document_style.ts'
 
 /**
- * 一份文档：标题、章节树、每个章节的正文，以及整本文档的样式。
+ * 一份文档：标题、章节树、每个章节的正文。
  *
  * 不变量：contents 的 key 集合与 tree 中的 id 集合完全一致，每个章节恰好有一份正文（可为空串）。
- * 正文是章节内容本身，不包含章节标题与编号，也不包含任何排版信息（排版属于 style）。
+ * 正文是章节内容本身，不包含章节标题与编号，也不包含任何排版信息。编辑环境主题属于应用偏好，
+ * Word / PDF 的输出参数属于导出，都不是文档的一部分（docs/decisions.md 第 8 节）。
  */
 export interface WriterDocument {
   readonly title: string
   readonly tree: ChapterTree
   readonly contents: ReadonlyMap<ChapterId, string>
-  readonly style: DocumentStyle
 }
 
 export type CreateDocumentReason = 'content-missing' | 'content-orphan'
@@ -30,7 +29,6 @@ export function createDocument(
   title: string,
   tree: ChapterTree,
   contents: ReadonlyMap<ChapterId, string>,
-  style: DocumentStyle = defaultDocumentStyle(),
 ): CreateDocumentResult {
   const ids = collectIds(tree)
   for (const id of ids) {
@@ -39,12 +37,12 @@ export function createDocument(
   for (const id of contents.keys()) {
     if (!ids.has(id)) return { ok: false, reason: 'content-orphan', chapterId: id }
   }
-  return { ok: true, document: { title, tree, contents, style } }
+  return { ok: true, document: { title, tree, contents } }
 }
 
-/** 空文档：没有章节，使用默认样式。 */
+/** 空文档：没有章节。 */
 export function emptyDocument(title: string): WriterDocument {
-  return { title, tree: [], contents: new Map(), style: defaultDocumentStyle() }
+  return { title, tree: [], contents: new Map() }
 }
 
 /**
@@ -83,11 +81,6 @@ export function setContent(
 /** 修改文档标题。 */
 export function setTitle(document: WriterDocument, title: string): WriterDocument {
   return title === document.title ? document : { ...document, title }
-}
-
-/** 修改文档样式；样式不变（同一对象）时原样返回。 */
-export function setStyle(document: WriterDocument, style: DocumentStyle): WriterDocument {
-  return style === document.style ? document : { ...document, style }
 }
 
 /** 章节正文是否有实际内容（不只是空白字符）；找不到章节返回 false。 */

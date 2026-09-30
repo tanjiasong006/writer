@@ -1,12 +1,12 @@
 //! 导出字体配置：全项目唯一的字体来源（docs/decisions.md 第 6 节）。
 //!
-//! 字体按"字体族"配置：衬线（宋体类）、无衬线（黑体类）、等宽。主题（`render::theme`）为每类元素
+//! 字体按"字体族"配置：衬线（宋体类）、无衬线（黑体类）、等宽。输出参数（`export::theme`）为每类元素
 //! 选择衬线或无衬线；等宽只用于代码。每个字体族是一条有序的候选字体列表：拉丁字体在前、中文字体在后，
 //! 覆盖 macOS / Windows / Linux 的常见字体。排版引擎按顺序逐字形回退。
 //! 打包字体目录（`bundled_font_dirs`）始终参与查找，未来放入开源中文字体即可保证各平台一致。
-//! 前端编辑器 / 预览的 CSS 字体栈（`ui/document_style/theme_css.ts`）按同样的顺序排列。
+//! 编辑环境的字体栈独立配置，不以与这里一致为约束。
 
-use crate::render::theme::FontId;
+use super::theme::FontId;
 
 /// 字体族。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
