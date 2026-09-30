@@ -14,6 +14,7 @@ import { messageForStorageFailure } from './ui/app_shell/storage_messages.ts'
 import { useServices } from './ui/services.ts'
 import Toast from './ui/common/Toast.vue'
 import { menuItemForKey, welcomeMenus } from './ui/app_shell/app_menu.ts'
+import { blockReload, isHandled } from './ui/common/shortcuts.ts'
 import './ui/base.css'
 
 /**
@@ -54,14 +55,6 @@ function blockFileDrop(event: DragEvent): void {
   if (isFileDrag(event) && !event.defaultPrevented) event.preventDefault()
 }
 
-/**
- * 刷新页面（F5、Ctrl/Cmd+R；Windows 的 WebView2 默认响应）会绕过关闭时的保存流程，
- * 丢掉尚未自动保存的输入。桌面应用中没有需要刷新的场景，直接屏蔽。
- */
-function blockReload(event: KeyboardEvent): void {
-  const reload = event.key === 'F5' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r')
-  if (reload) event.preventDefault()
-}
 
 /**
  * 网页默认的右键菜单（重新载入、检查元素……）不属于桌面应用：界面中有意义的位置（章节、正文）有自己的右键菜单，
@@ -95,7 +88,7 @@ watch(
 )
 
 function onShortcut(event: KeyboardEvent): void {
-  if (event.defaultPrevented || view.value.kind === 'open') return
+  if (isHandled(event) || view.value.kind === 'open') return
   const id = menuItemForKey(WELCOME_MENUS, event)
   if (id === null) return
   event.preventDefault()
@@ -105,6 +98,8 @@ function onShortcut(event: KeyboardEvent): void {
 onMounted(() => {
   window.addEventListener('dragover', blockFileDragOver)
   window.addEventListener('drop', blockFileDrop)
+  // 刷新页面（F5、Ctrl/Cmd+R；Windows 的 WebView2 默认响应）会绕过关闭时的保存流程，
+  // 丢掉尚未自动保存的输入。桌面应用中没有需要刷新的场景，直接屏蔽（shortcuts.ts）。
   window.addEventListener('keydown', blockReload)
   window.addEventListener('keydown', onShortcut)
   window.addEventListener('contextmenu', blockPageContextMenu)

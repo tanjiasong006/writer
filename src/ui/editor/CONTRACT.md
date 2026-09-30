@@ -86,4 +86,5 @@ Vitest 用 `await expect(output).toMatchFileSnapshot(path)` 验证实际 `serial
 ## 非目标
 
 不支持 Markdown 无法保存的结构（合并单元格、单元格内多段落、列宽、文字颜色等）；不提供 Markdown 源码编辑模式。
-不提供应用内全文阅读或分页预览；移除预览不把其连续阅读与章节同步职责转移给单章编辑器。
+不提供分页预览。全文阅读是独立的只读视图（`ui/reader/`），与编辑器共用正文样式（`document_body.css`）；
+编辑器只为它提供阅读位置的读取与恢复（`readingPosition` / `revealPosition`），不承担连续阅读与章节同步。

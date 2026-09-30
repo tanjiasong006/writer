@@ -25,12 +25,16 @@ export interface AppMenuContext {
   readonly moves: Readonly<Record<KeyboardMoveDirection, boolean>>
   readonly sidebarVisible: boolean
   readonly exporting: boolean
+  /** 文档是否有章节（没有章节时不能全文阅读）。 */
+  readonly hasChapters: boolean
+  /** 是否在全文阅读中。 */
+  readonly reading: boolean
 }
 
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'reveal', 'export-docx', 'export-pdf'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
-const VIEW_ACTIONS = ['sidebar', 'switch-focus'] as const
+const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
 
 type FileAction = (typeof FILE_ACTIONS)[number]
@@ -260,6 +264,14 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
           label: context.sidebarVisible ? '隐藏侧栏' : '显示侧栏',
           shortcut: SHORTCUTS.toggleSidebar,
         },
+        {
+          id: 'view:reader',
+          label: '全文阅读',
+          shortcut: SHORTCUTS.reader,
+          checked: context.reading,
+          disabled: !context.hasChapters,
+        },
+        { separator: true },
         // 在章节树与正文之间切换；名称说明这次按下会去哪里。输入框（重命名）中不可用，先确认或放弃输入。
         {
           id: 'view:switch-focus',

@@ -6,6 +6,7 @@ import type { EditorView } from 'prosemirror-view'
 import { createMemoryServices } from '../../testing/memory_services.ts'
 import { createDocument } from '../../domain/document/document.ts'
 import ChapterEditor from '../editor/ChapterEditor.vue'
+import DocumentReader from '../reader/DocumentReader.vue'
 import {
   PATH,
   MOD,
@@ -603,4 +604,109 @@ test('章节树中 ⌘N 新建章节、⌘↩ 重命名；正文中 ⌘N、⌘�
   await label('b').trigger('keydown', { key: 'Enter', code: 'Enter', ...MOD })
   await flushPromises()
   expect(wrapper.find<HTMLInputElement>('.chapter-tree__rename-input').element.value).toBe('方法')
+})
+
+test('全文阅读：工具栏按钮打开，连续显示所有章节；编辑器保留在下面不可操作；Esc 回到编辑，撤销历史仍在', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.enableAppMenu()
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  typeAtEnd(editorView(wrapper), '！')
+
+  await button(wrapper, '全文阅读').trigger('click')
+  await flushPromises()
+  const reader = wrapper.find('.document-reader')
+  expect(reader.findAll('.document-reader__heading').map((heading) => heading.text())).toEqual([
+    '1绪论',
+    '1.1背景',
+    '2方法',
+  ])
+  expect(reader.text()).toContain('引言！')
+  expect(document.activeElement).toBe(reader.element)
+  expect(wrapper.find('.chapter-editor').attributes('inert')).toBeDefined()
+  expect(wrapper.find('[aria-label="插入表格"]').exists()).toBe(false)
+  expect(button(wrapper, '全文阅读').attributes('aria-pressed')).toBe('true')
+  expect(appMenuItem(services, 'view:reader').checked).toBe(true)
+
+  await reader.trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  expect(wrapper.find('.document-reader').exists()).toBe(false)
+  expect(wrapper.find('.chapter-editor').attributes('inert')).toBeUndefined()
+  expect(editorView(wrapper).hasFocus()).toBe(true)
+  expect(appMenuItem(services, 'view:reader').checked).toBe(false)
+  // 测试环境没有排版，阅读位置可能落在别的章节；回到绪论检查它的撤销历史。
+  await wrapper.findAll('.chapter-tree__row')[0].trigger('click')
+  expect(editorText(wrapper)).toBe('引言！')
+  expect(undoDepth(editorView(wrapper).state)).toBe(1)
+})
+
+test('全文阅读：⇧⌘R 打开与关闭；阅读中滚动到的章节在章节树中选中，回到编辑时编辑该章节', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  // 与真实按键一样可取消：App 屏蔽刷新页面时会先取消 ⌘R 类按键的默认行为，快捷键仍要响应。
+  const shortcut = () =>
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'R', code: 'KeyR', shiftKey: true, cancelable: true, ...MOD }),
+    )
+
+  shortcut()
+  await flushPromises()
+  wrapper.findComponent(DocumentReader).vm.$emit('select', 'b')
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('2方法')
+
+  shortcut()
+  await flushPromises()
+  expect(wrapper.find('.document-reader').exists()).toBe(false)
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('2方法')
+  expect(editorView(wrapper).hasFocus()).toBe(true)
+})
+
+test('全文阅读：章节树中点选章节后按 Enter，回到编辑该章节；⌘J 在章节树与阅读区之间切换', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  const label = (id: string) => wrapper.find(`.chapter-tree__label[data-chapter-id="${id}"]`)
+
+  await button(wrapper, '全文阅读').trigger('click')
+  await flushPromises()
+  await label('a').trigger('keydown', { key: 'End' })
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('2方法')
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', ...MOD }))
+  await flushPromises()
+  expect(document.activeElement).toBe(wrapper.find('.document-reader').element)
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', ...MOD }))
+  await flushPromises()
+  expect(focusedChapter()).toBe('b')
+
+  await label('b').trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(wrapper.find('.document-reader').exists()).toBe(false)
+  expect(wrapper.find('.chapter-editor__heading').text()).toBe('2方法')
+  expect(editorView(wrapper).hasFocus()).toBe(true)
+})
+
+test('全文阅读：删除所有章节后回到空文档的提示', async () => {
+  const services = createMemoryServices()
+  const document = createDocument('短文', [{ id: 'x', title: '唯一', children: [] }], new Map([['x', '']]))
+  if (!document.ok) throw new Error('fixture')
+  services.storage.seed(PATH, document.document)
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  await button(wrapper, '全文阅读').trigger('click')
+  await flushPromises()
+  await wrapper.find('.chapter-tree__row .chapter-tree__more').trigger('click')
+  await button(wrapper, '删除').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.document-reader').exists()).toBe(false)
+  expect(wrapper.find('.workspace__placeholder').text()).toContain('还没有章节')
+  expect(button(wrapper, '全文阅读').attributes('disabled')).toBeDefined()
 })

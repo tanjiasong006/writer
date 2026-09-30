@@ -25,6 +25,7 @@
   编辑器使用 `ui/editor/editor_theme.ts` 的默认展示参数，Word / PDF 使用 `export::theme` 的默认输出参数。
 - 应用内预览已移除（见“导出能力边界与排版职责”的实施记录）。下文关于全文预览、预览同步与相关界面的既往记录
   仅描述历史实现，不作为后续功能或验收要求；导出所需内容解析与资源能力保留。
+- 全文阅读（编辑环境的连续只读展示）已实现，见“全文阅读”一节与 decisions 第 8 节。
 
 ## 状态总览
 
@@ -37,7 +38,7 @@
 | S4 | 应用外壳：两栏布局、新建/打开/保存、快捷键、关闭保护、界面状态恢复 | ✅ 完成 |
 | S5 | 正文编辑（初版 CodeMirror，后迁移到 ProseMirror，见"正文编辑器迁移"） | ✅ 完成 |
 | S6 | 插入内容：工具栏、图片资源导入、表格等 | ✅ 完成 |
-| S7 | 全文预览（历史实现） | 已移除 |
+| S7 | 全文预览（历史实现） | 已移除；由全文阅读（编辑环境）取代 |
 | S8 | Word 导出（docx-rs） | ✅ 完成 |
 | S9 | PDF 导出（Typst）+ 字体 fallback | ✅ 完成 |
 | S10 | 加固：大文档、深层嵌套、极端输入、回归 | ✅ 完成（自动化部分） |
@@ -560,6 +561,21 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   清理预览移除的过渡说明，不保留“定位待确认”或“HTML 临时默认参数”的待办。
 
 长期约束见 `docs/decisions.md` 第 5、6、8 节；之前“文档样式系统”的记录描述现有实现，不能视为新方向已经完成。
+
+## 全文阅读
+
+- `ui/reader/DocumentReader.vue`：连续显示所有章节；`chapter_body.ts` 用编辑器的解析与 schema 生成只读 DOM
+  （图片与编辑器相同的结构，`image_view.staticImageDOM`）；只有正文变化的章节重新生成。
+- 正文展示样式从 `ChapterEditor.vue` 移到共享的 `ui/editor/document_body.css`，编辑器只保留编辑才有的状态
+  （光标、选区、占位、表格格线提示、选中图片、图注文本框）。两处滚动区都 `scrollbar-gutter: stable`，
+  切换时版心不左右移动。
+- 位置对齐：`ui/editor/block_position.ts`（视口顶端所在的顶层块与偏移）；编辑器提供 `readingPosition` /
+  `revealPosition`，阅读区提供 `position()` 与 `initialPosition`。在 Storybook 中核对过同一正文两处的块位置一致。
+- 工作区：阅读区盖在编辑器上，编辑器 `inert`；插入按钮在阅读中隐藏；菜单 `view:reader`（勾选）与 ⇧⌘R；
+  删除全部章节时自动结束阅读。
+- 测试：`block_position`、`chapter_body`、`DocumentReader`（滚动联动、定位、Esc / Enter、局部更新）、
+  `app_menu` 与 `Workspace`（开关、撤销历史保留、章节树 Enter / ⌘J、空文档）。Story：`UI/Reader/DocumentReader`。
+- 未在 Tauri（WKWebView）窗口中目视检查；大文档打开耗时只在 Chrome 中测过。
 
 ## 后续（MVP 之外，按价值排序）
 

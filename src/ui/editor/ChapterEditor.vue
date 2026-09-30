@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { EditorView } from 'prosemirror-view'
-import { NodeSelection, TextSelection, type EditorState, type Selection, type Transaction } from 'prosemirror-state'
+import { NodeSelection, Selection, TextSelection, type EditorState, type Transaction } from 'prosemirror-state'
 import 'prosemirror-view/style/prosemirror.css'
 import 'prosemirror-gapcursor/style/gapcursor.css'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
@@ -13,6 +13,8 @@ import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import { useMenu } from '../common/use_menu.ts'
 import { editSelectedCaption, figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
 import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from './editor_theme.ts'
+import { topBlock, type BlockPosition } from './block_position.ts'
+import './document_body.css'
 
 /**
  * 章节正文编辑器：ProseMirror 结构化编辑，正文仍以 Markdown 保存（docs/decisions.md 第 2 节）。
@@ -48,6 +50,7 @@ const emit = defineEmits<{
 
 /** 滚动容器（每个章节记住自己的滚动位置）。 */
 const scroller = ref<HTMLElement | null>(null)
+const heading = ref<HTMLElement | null>(null)
 const mountPoint = ref<HTMLElement | null>(null)
 const tools = shallowRef<CommandState | null>(null)
 
@@ -101,7 +104,7 @@ onMounted(() => {
     scrollThreshold: CARET_MARGIN,
     scrollMargin: CARET_MARGIN,
     nodeViews: { image: imageNodeView(resolveImage), figure: figureNodeView(resolveImage) },
-    attributes: { class: 'chapter-editor__content', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '正文' },
+    attributes: { class: 'chapter-editor__content document-body', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '正文' },
   })
   showState(state)
 })
@@ -232,7 +235,49 @@ function focus(): void {
   scroller.value.scrollTop = top
 }
 
+/** 正文顶层块的 DOM（与文档中的顶层节点一一对应）。 */
+function blockElements(editorView: EditorView): Element[] {
+  const elements: Element[] = []
+  editorView.state.doc.forEach((_node, offset) => {
+    const dom = editorView.nodeDOM(offset)
+    if (dom instanceof Element) elements.push(dom)
+  })
+  return elements
+}
+
+/** 视口顶端所在的位置（进入全文阅读时从这里接着显示）。 */
+function readingPosition(): BlockPosition {
+  if (!view || !scroller.value || !heading.value) return { block: -1, offset: 0 }
+  const top = scroller.value.getBoundingClientRect().top
+  const title = heading.value.getBoundingClientRect()
+  if (title.bottom > top) return { block: -1, offset: title.top - top }
+  return topBlock(blockElements(view), top) ?? { block: -1, offset: 0 }
+}
+
+/**
+ * 从全文阅读回来：把该位置滚到与阅读时相同的高度，光标放在视口中第一个完整显示的块的开头，
+ * 接着输入时正文不会跳到别处。
+ */
+function revealPosition(position: BlockPosition): void {
+  if (!view || !scroller.value) return
+  const blocks = blockElements(view)
+  const target = position.block < 0 ? heading.value : blocks[Math.min(position.block, blocks.length - 1)]
+  if (!target) return
+  const top = scroller.value.getBoundingClientRect().top
+  scroller.value.scrollTop += target.getBoundingClientRect().top - top - position.offset
+  const viewportTop = scroller.value.getBoundingClientRect().top
+  const first = blocks.findIndex((block) => block.getBoundingClientRect().top >= viewportTop - 1)
+  if (first < 0) return
+  let start = 0
+  view.state.doc.forEach((node, offset, index) => {
+    if (index === first) start = offset
+  })
+  view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(start), 1)))
+}
+
 defineExpose({
+  readingPosition,
+  revealPosition,
   insertImage: insertImageAt,
   runCommand,
   openMenuAtCaret,
@@ -245,9 +290,9 @@ defineExpose({
 <template>
   <div class="chapter-editor" :style="themeStyle">
     <div ref="scroller" class="chapter-editor__scroller">
-      <h1 class="chapter-editor__heading">
-        <span class="chapter-editor__number">{{ number }}</span>
-        <span class="chapter-editor__title" :class="{ 'chapter-editor__title--untitled': !title }">
+      <h1 ref="heading" class="chapter-editor__heading document-heading">
+        <span class="document-heading__number">{{ number }}</span>
+        <span :class="{ 'document-heading__title--untitled': !title }">
           {{ title || '未命名章节' }}
         </span>
       </h1>
@@ -279,43 +324,26 @@ defineExpose({
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 总是为滚动条留位：与全文阅读切换时（一个有滚动条、一个没有）版心不左右移动。 */
+  scrollbar-gutter: stable;
 }
 
 /*
  * 章节标题是这一页的开头，随正文一起滚动，不占用固定的界面区域。
- * 它按在文档中的层级使用对应级别的标题样式，与正文共用版心。
+ * 它按在文档中的层级使用对应级别的标题样式（document_body.css），与正文共用版心。
  */
 .chapter-editor__heading {
   max-width: var(--doc-column);
   box-sizing: border-box;
   margin: 0 auto;
   padding: calc(var(--space-10) + var(--space-6)) var(--doc-gutter) var(--space-4);
-  font-family: var(--heading-font);
-  font-size: var(--heading-size);
-  font-weight: var(--weight-semibold);
-  line-height: 1.4;
-  text-wrap: balance;
-  color: var(--color-doc-text);
-  overflow-wrap: anywhere;
   /* 标题只能在章节树中修改，这里不可选中编辑，避免被误认为正文的一部分。 */
   -webkit-user-select: none;
   user-select: none;
 }
 
-.chapter-editor__number {
-  margin-right: 0.6em;
-  color: var(--color-text-tertiary);
-  font-weight: normal;
-  font-variant-numeric: tabular-nums;
-}
-
-.chapter-editor__title--untitled {
-  color: var(--color-text-tertiary);
-}
-
 /*
- * 正文展示：字体、字号、行距、段距、标题、引用、代码、表格、图注与图片间距
- * 都来自编辑环境展示参数的 CSS 变量（editor_theme.ts）。
+ * 正文的展示在 document_body.css（与全文阅读共用）；这里是版心与编辑才有的状态。
  * ProseMirror 生成的 DOM 不带 scoped 属性，因此用 :deep。
  */
 .chapter-editor__body :deep(.chapter-editor__content) {
@@ -324,24 +352,9 @@ defineExpose({
   margin: 0 auto;
   /* 下方留出大段空白：写到最后一段时仍可以把它滚到视线高度，而不是贴着窗口底边。 */
   padding: var(--space-7) var(--doc-gutter) 40vh;
-  font-family: var(--doc-body-font);
-  font-size: var(--doc-body-size);
-  line-height: var(--doc-line-height);
-  color: var(--color-doc-text);
-  /* 应用界面关闭了字体合成（App.vue）；正文要像 Word / PDF 一样为没有斜体、粗体字形的中文字体合成斜体与粗体。 */
-  font-synthesis: weight style;
-  /*
-   * 中文排版：中西文之间的间距、相邻标点挤压、严格避头尾、行尾标点悬挂。只影响显示，不往正文里插入空格；
-   * 不支持的 WebView 忽略这些属性。
-   */
-  text-autospace: normal;
-  text-spacing-trim: normal;
-  line-break: strict;
-  hanging-punctuation: allow-end;
   /* 文字光标由 caret.ts 自绘（WebKit 的原生光标在段落第二行起高度不对）；输入法组字期间用原生光标。 */
   caret-color: transparent;
   outline: none;
-  overflow-wrap: anywhere;
 }
 
 .chapter-editor__body :deep(.chapter-editor__content.is-composing) {
@@ -387,10 +400,6 @@ defineExpose({
   background: var(--color-doc-selection-inactive);
 }
 
-.chapter-editor__body :deep(p) {
-  margin: var(--doc-paragraph-spacing) 0;
-}
-
 .chapter-editor__body :deep(.is-empty::before) {
   content: attr(data-placeholder);
   float: left;
@@ -399,134 +408,13 @@ defineExpose({
   pointer-events: none;
 }
 
-.chapter-editor__body :deep(blockquote) {
-  margin: 1.2em 0;
-  padding: 0 0 0 1.2em;
-  border-left: 2px solid var(--color-doc-rule);
-  font-family: var(--doc-quote-font);
-  font-size: var(--doc-quote-size);
-}
-
-.chapter-editor__body :deep(ul),
-.chapter-editor__body :deep(ol) {
-  margin: 0.6em 0;
-  padding-left: 1.6em;
-}
-
-.chapter-editor__body :deep(ol) {
-  font-variant-numeric: tabular-nums;
-}
-
-.chapter-editor__body :deep(li::marker) {
-  color: var(--color-doc-muted);
-}
-
-.chapter-editor__body :deep(li > ul),
-.chapter-editor__body :deep(li > ol) {
-  margin: 0;
-}
-
-/* 紧凑列表：列表项之间没有段落间距（与 Markdown 渲染一致）。 */
-.chapter-editor__body :deep(ul:not([data-loose]) > li > p),
-.chapter-editor__body :deep(ol:not([data-loose]) > li > p) {
-  margin: 0;
-}
-
-.chapter-editor__body :deep(li[data-task]) {
-  position: relative;
-  list-style: none;
-}
-
-/* 任务方框自绘（☐ / ☑ 字符的样子取决于字体），在第一行中垂直居中。 */
-.chapter-editor__body :deep(li[data-task]::before) {
-  position: absolute;
-  top: calc((var(--doc-line-height) * 1em - 0.82em) / 2);
-  left: -1.45em;
-  box-sizing: border-box;
-  width: 0.82em;
-  height: 0.82em;
-  border: 1.5px solid var(--color-doc-rule);
-  border-radius: 3px;
-  content: '';
-}
-
-.chapter-editor__body :deep(li[data-task='done']) {
-  color: var(--color-doc-muted);
-}
-
-.chapter-editor__body :deep(li[data-task='done']::before) {
-  border-color: var(--color-doc-muted);
-  background: var(--color-doc-muted) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 6.3l2.2 2.2 4.6-4.9' fill='none' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-    center / 100% no-repeat;
-}
-
-.chapter-editor__body :deep(pre) {
-  overflow-x: auto;
-  padding: 12px 14px;
-  border-radius: var(--radius-m);
-  background: var(--color-doc-fill);
-  font-size: var(--doc-code-size);
-  line-height: 1.6;
-  white-space: pre;
-  overflow-wrap: normal;
-}
-
-.chapter-editor__body :deep(code) {
-  font-family: var(--font-mono);
-}
-
-.chapter-editor__body :deep(:not(pre) > code) {
-  font-size: 0.9em;
-}
-
-.chapter-editor__body :deep(:not(pre) > code) {
-  padding: 0.1em 0.3em;
-  border-radius: 3px;
-  background: var(--color-doc-fill);
-}
-
-.chapter-editor__body :deep(a[data-href]) {
-  color: var(--color-accent-text);
-  text-decoration: underline;
-  text-decoration-color: var(--color-accent-fill-strong);
-  text-underline-offset: 0.18em;
-}
-
-.chapter-editor__body :deep(hr) {
-  margin: 1.2em 0;
-  border: none;
-  border-top: 1px solid var(--color-doc-rule);
-}
-
-.chapter-editor__body :deep(table) {
-  width: 100%;
-  margin: 1em 0;
-  border-collapse: collapse;
-  table-layout: fixed;
-  border-top: 1.5px solid var(--color-doc-table-rule);
-  border-bottom: 1.5px solid var(--color-doc-table-rule);
-  font-size: var(--doc-table-size);
-}
-
 /*
- * 三线表：顶线、底线与表头下的线，不画单元格边界。
  * 指针移入或光标在表格中（is-active，plugins.ts）时用内阴影淡淡显示单元格边界，编辑时看得清格子；
- * 不用透明边框，它们在折叠边框的交点处留下断痕，也不改变布局。表格的第一行总是表头。
+ * 不用透明边框，它们在折叠边框的交点处留下断痕，也不改变布局。
  */
 .chapter-editor__body :deep(th),
 .chapter-editor__body :deep(td) {
-  position: relative;
-  padding: 7px 12px;
-  vertical-align: top;
   transition: box-shadow var(--duration-base) var(--ease-out);
-}
-
-.chapter-editor__body :deep(th) {
-  border-bottom: 1px solid var(--color-doc-table-rule);
-  /* 表头用标题的无衬线字体：它有真正的粗体字形，宋体类中文在表头中合成的粗体几乎看不出来。 */
-  font-family: var(--doc-h3-font);
-  font-weight: var(--weight-semibold);
-  text-align: left;
 }
 
 .chapter-editor__body :deep(table:is(:hover, .is-active) tr > * + *) {
@@ -552,27 +440,11 @@ defineExpose({
 }
 
 /*
- * 图片按统一规则适应编辑区域（没有单张图片的尺寸 / 对齐设置）：保持比例、不放大、不超过所在容器的宽度，
- * 高度不超过统一的展示上限（行内图片同样适用，超长图片不会无限撑高正文区）。
- * 独占一段的图片（figure 节点，块级的 .editor-figure）居中。
- */
-.chapter-editor__body :deep(.editor-figure) {
-  margin: var(--doc-image-spacing) 0;
-  text-align: center;
-}
-
-/*
- * 图注（image_view.ts）：紧贴图片、居中、小一号。它是一个随内容增高的文本框：隐藏的同内容 ::after
+ * 图注（image_view.ts）是一个随内容增高的文本框：隐藏的同内容 ::after
  * 与文本框放在同一网格格中撑开高度。没有图注时只在选中图片或编辑时显示“添加图注”。
  */
 .chapter-editor__body :deep(.editor-figure__caption) {
   display: grid;
-  max-width: 36em;
-  margin: var(--space-3) auto 0;
-  font-family: var(--doc-caption-font);
-  font-size: var(--doc-caption-size);
-  line-height: 1.6;
-  color: var(--color-doc-muted);
 }
 
 .chapter-editor__body :deep(.editor-figure:not(.has-caption, .ProseMirror-selectednode, .is-editing) .editor-figure__caption) {
@@ -622,13 +494,6 @@ defineExpose({
   background: var(--color-fill-hover);
 }
 
-.chapter-editor__body :deep(.editor-image img) {
-  max-width: 100%;
-  max-height: 560px;
-  vertical-align: bottom;
-  object-fit: contain;
-}
-
 /* 选中的图片只在图片本身外画一个框（不用 ProseMirror 默认画在外层容器上的框）。 */
 .chapter-editor__body :deep(.editor-image.ProseMirror-selectednode) {
   outline: none;
@@ -638,15 +503,5 @@ defineExpose({
 .chapter-editor__body :deep(.editor-image.ProseMirror-selectednode .editor-image__missing) {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-}
-
-.chapter-editor__body :deep(.editor-image__missing) {
-  display: inline-block;
-  padding: 8px 12px;
-  border: 1px dashed var(--color-danger);
-  border-radius: var(--radius-s);
-  color: var(--color-danger-text);
-  font-size: 14px;
-  line-height: 1.6;
 }
 </style>

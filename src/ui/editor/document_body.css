@@ -1,0 +1,211 @@
+/*
+ * 正文与章节标题的展示：编辑器（ChapterEditor.vue）与全文阅读（reader/DocumentReader.vue）共用，
+ * 两处看到的正文完全相同。字体、字号、行距、段距、引用、代码、表格、图注与图片间距
+ * 都来自编辑环境展示参数的 CSS 变量（editor_theme.ts），由外层元素提供。
+ *
+ * 这里只有展示；编辑才有的状态（光标、选区、占位提示、表格格线提示、选中的图片、图注文本框）留在编辑器中。
+ * 版心宽度与上下留白由各自的组件决定。
+ */
+
+/* 章节标题：按在文档中的层级使用对应级别的标题样式（--heading-*，见 editorHeadingVars）。 */
+.document-heading {
+  margin: 0;
+  font-family: var(--heading-font);
+  font-size: var(--heading-size);
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
+  text-wrap: balance;
+  color: var(--color-doc-text);
+  overflow-wrap: anywhere;
+}
+
+.document-heading__number {
+  margin-right: 0.6em;
+  color: var(--color-text-tertiary);
+  font-weight: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.document-heading__title--untitled {
+  color: var(--color-text-tertiary);
+}
+
+.document-body {
+  font-family: var(--doc-body-font);
+  font-size: var(--doc-body-size);
+  line-height: var(--doc-line-height);
+  color: var(--color-doc-text);
+  /* 应用界面关闭了字体合成（App.vue）；正文要像 Word / PDF 一样为没有斜体、粗体字形的中文字体合成斜体与粗体。 */
+  font-synthesis: weight style;
+  /*
+   * 中文排版：中西文之间的间距、相邻标点挤压、严格避头尾、行尾标点悬挂。只影响显示，不往正文里插入空格；
+   * 不支持的 WebView 忽略这些属性。
+   */
+  text-autospace: normal;
+  text-spacing-trim: normal;
+  line-break: strict;
+  hanging-punctuation: allow-end;
+  overflow-wrap: anywhere;
+}
+
+.document-body p {
+  margin: var(--doc-paragraph-spacing) 0;
+}
+
+.document-body blockquote {
+  margin: 1.2em 0;
+  padding: 0 0 0 1.2em;
+  border-left: 2px solid var(--color-doc-rule);
+  font-family: var(--doc-quote-font);
+  font-size: var(--doc-quote-size);
+}
+
+.document-body ul,
+.document-body ol {
+  margin: 0.6em 0;
+  padding-left: 1.6em;
+}
+
+.document-body ol {
+  font-variant-numeric: tabular-nums;
+}
+
+.document-body li::marker {
+  color: var(--color-doc-muted);
+}
+
+.document-body li > ul,
+.document-body li > ol {
+  margin: 0;
+}
+
+/* 紧凑列表：列表项之间没有段落间距（与 Markdown 渲染一致）。 */
+.document-body ul:not([data-loose]) > li > p,
+.document-body ol:not([data-loose]) > li > p {
+  margin: 0;
+}
+
+.document-body li[data-task] {
+  position: relative;
+  list-style: none;
+}
+
+/* 任务方框自绘（☐ / ☑ 字符的样子取决于字体），在第一行中垂直居中。 */
+.document-body li[data-task]::before {
+  position: absolute;
+  top: calc((var(--doc-line-height) * 1em - 0.82em) / 2);
+  left: -1.45em;
+  box-sizing: border-box;
+  width: 0.82em;
+  height: 0.82em;
+  border: 1.5px solid var(--color-doc-rule);
+  border-radius: 3px;
+  content: '';
+}
+
+.document-body li[data-task='done'] {
+  color: var(--color-doc-muted);
+}
+
+.document-body li[data-task='done']::before {
+  border-color: var(--color-doc-muted);
+  background: var(--color-doc-muted) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 6.3l2.2 2.2 4.6-4.9' fill='none' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 100% no-repeat;
+}
+
+.document-body pre {
+  overflow-x: auto;
+  padding: 12px 14px;
+  border-radius: var(--radius-m);
+  background: var(--color-doc-fill);
+  font-size: var(--doc-code-size);
+  line-height: 1.6;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.document-body code {
+  font-family: var(--font-mono);
+}
+
+.document-body :not(pre) > code {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--color-doc-fill);
+  font-size: 0.9em;
+}
+
+.document-body a[data-href] {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+  text-decoration-color: var(--color-accent-fill-strong);
+  text-underline-offset: 0.18em;
+}
+
+.document-body hr {
+  margin: 1.2em 0;
+  border: none;
+  border-top: 1px solid var(--color-doc-rule);
+}
+
+/* 三线表：顶线、底线与表头下的线，不画单元格边界。表格的第一行总是表头。 */
+.document-body table {
+  width: 100%;
+  margin: 1em 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  border-top: 1.5px solid var(--color-doc-table-rule);
+  border-bottom: 1.5px solid var(--color-doc-table-rule);
+  font-size: var(--doc-table-size);
+}
+
+.document-body th,
+.document-body td {
+  position: relative;
+  padding: 7px 12px;
+  vertical-align: top;
+}
+
+.document-body th {
+  border-bottom: 1px solid var(--color-doc-table-rule);
+  /* 表头用标题的无衬线字体：它有真正的粗体字形，宋体类中文在表头中合成的粗体几乎看不出来。 */
+  font-family: var(--doc-h3-font);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+}
+
+/*
+ * 图片按统一规则适应正文区域（没有单张图片的尺寸 / 对齐设置）：保持比例、不放大、不超过所在容器的宽度，
+ * 高度不超过统一的展示上限（行内图片同样适用，超长图片不会无限撑高正文区）。
+ * 独占一段的图片（.editor-figure）居中，下方是图注：紧贴图片、居中、小一号。
+ */
+.document-body .editor-figure {
+  margin: var(--doc-image-spacing) 0;
+  text-align: center;
+}
+
+.document-body .editor-figure__caption {
+  max-width: 36em;
+  margin: var(--space-3) auto 0;
+  font-family: var(--doc-caption-font);
+  font-size: var(--doc-caption-size);
+  line-height: 1.6;
+  color: var(--color-doc-muted);
+}
+
+.document-body .editor-image img {
+  max-width: 100%;
+  max-height: 560px;
+  vertical-align: bottom;
+  object-fit: contain;
+}
+
+.document-body .editor-image__missing {
+  display: inline-block;
+  padding: 8px 12px;
+  border: 1px dashed var(--color-danger);
+  border-radius: var(--radius-s);
+  color: var(--color-danger-text);
+  font-size: 14px;
+  line-height: 1.6;
+}

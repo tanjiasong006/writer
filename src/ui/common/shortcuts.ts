@@ -6,7 +6,7 @@
  *
  * 规则：Writer 自己定义的快捷键只用"⌘ + 一个键"（Windows / Linux：Ctrl + 一个键），不用单独的功能键。
  * 唯一的例外是文档级命令（新建文档、打开文档）用"⇧⌘ + 一个键"：它们离开当前文档，频率低，
- * 把 ⌘N 留给写作中高频的新建章节。格式与插入命令（格式菜单、插入菜单中的每一项）都有快捷键；章节树的操作（新建、重命名、
+ * 把 ⌘N 留给写作中高频的新建章节；面向整篇文档的全文阅读沿用 Safari 阅读器的 ⇧⌘R。格式与插入命令（格式菜单、插入菜单中的每一项）都有快捷键；章节树的操作（新建、重命名、
  * 移动、删除）与"在章节树和正文之间切换"也都有快捷键，整个写作过程可以只用键盘完成。
  * 其余命令找不到自然、好记、不与 macOS 惯例冲突的单键时宁可不设，命令仍在菜单栏、右键菜单或工具栏中。
  *
@@ -49,6 +49,8 @@ export const SHORTCUTS = {
   toggleSidebar: 'CmdOrCtrl+Y',
   /** 在章节树与正文之间切换焦点（jump）。侧栏隐藏时先显示。 */
   switchFocus: 'CmdOrCtrl+J',
+  /** 全文阅读（reader）：连续浏览整篇文档，再按一次回到编辑。与 Safari 的“阅读器”相同。 */
+  reader: 'CmdOrCtrl+Shift+R',
   /** 在焦点章节之后新建同级章节，随即进入标题编辑。只在章节树获得焦点时有效。 */
   newChapter: 'CmdOrCtrl+N',
   /** 重命名章节。只在章节树获得焦点时有效（单独的 Enter 进入正文）。 */
@@ -96,6 +98,24 @@ export function matchesShortcut(event: KeyboardEvent, shortcut: string, mac = IS
   if (/^\d$/.test(key)) return event.code === `Digit${key}`
   if (KEY_CODES[key]) return event.code === KEY_CODES[key]
   return event.key === key
+}
+
+/**
+ * 刷新页面的按键（F5、Ctrl/Cmd+R，含 Shift）一律取消默认行为（App.vue 屏蔽刷新），
+ * 但这只是屏蔽浏览器行为，不算“已被处理”：同一个按键若是 Writer 的快捷键（⇧⌘R 全文阅读），仍要响应。
+ */
+const reloadBlocked = new WeakSet<Event>()
+
+export function blockReload(event: KeyboardEvent): void {
+  const reload = event.key === 'F5' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r')
+  if (!reload || event.defaultPrevented) return
+  event.preventDefault()
+  reloadBlocked.add(event)
+}
+
+/** 按键是否已被焦点处（正文、章节树、输入框……）处理；只被屏蔽了刷新的按键不算。 */
+export function isHandled(event: KeyboardEvent): boolean {
+  return event.defaultPrevented && !reloadBlocked.has(event)
 }
 
 /** 加速键描述 → ProseMirror 按键表的写法（`CmdOrCtrl+B` → `Mod-b`）。 */

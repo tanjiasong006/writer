@@ -22,6 +22,8 @@ function context(patch: Partial<AppMenuContext> = {}): AppMenuContext {
     moves: { up: true, down: true, outdent: false, indent: true },
     sidebarVisible: true,
     exporting: false,
+    hasChapters: true,
+    reading: false,
     ...patch,
   }
 }
@@ -60,7 +62,7 @@ describe('可用状态随焦点变化（响应链）', () => {
     expect(item(workspaceMenus(context({ focus: 'other' })), 'edit:undo').disabled).toBe(true)
   })
 
-  test('没有章节时章节命令不可用；菜单中没有全文预览', () => {
+  test('没有章节时章节命令不可用；菜单中没有导出效果的预览', () => {
     expect(parseMenuItemId('view:preview')).toBeNull()
     const empty = workspaceMenus(context({ hasSelectedChapter: false, tools: null }))
     expect(item(empty, 'chapter:rename').disabled).toBe(true)
@@ -87,6 +89,22 @@ describe('可用状态随焦点变化（响应链）', () => {
     expect(menuItemForKey(workspaceMenus(context({ focus: 'other' })), slash)).toBeNull()
   })
 
+  test('全文阅读：任何焦点下都可以用 ⇧⌘R 打开或关闭，阅读中打勾；没有章节时不可用', () => {
+    const shortcut = key({
+      key: 'R',
+      code: 'KeyR',
+      shiftKey: true,
+      ...(IS_MAC ? { metaKey: true } : { ctrlKey: true }),
+    })
+    for (const focus of ['editor', 'tree', 'other'] as const) {
+      expect(menuItemForKey(workspaceMenus(context({ focus })), shortcut)).toBe('view:reader')
+    }
+    expect(parseMenuItemId('view:reader')).toEqual({ group: 'view', action: 'reader' })
+    expect(item(workspaceMenus(context()), 'view:reader').checked).toBe(false)
+    expect(item(workspaceMenus(context({ reading: true })), 'view:reader').checked).toBe(true)
+    expect(item(workspaceMenus(context({ hasChapters: false })), 'view:reader').disabled).toBe(true)
+  })
+
   test('导出进行中不能再次导出；侧栏项的名称随状态变化', () => {
     const menus = workspaceMenus(context({ exporting: true, sidebarVisible: false }))
     expect(item(menus, 'file:export-pdf').disabled).toBe(true)
@@ -109,14 +127,14 @@ function shortcuts(menus: readonly AppMenu[]): Array<[string, string]> {
 }
 
 describe('快捷键', () => {
-  test('Writer 自己的快捷键只用"⌘ + 一个键"；新建 / 打开文档例外，用"⇧⌘ + 一个键"', () => {
+  test('Writer 自己的快捷键只用"⌘ + 一个键"；新建 / 打开文档与全文阅读例外，用"⇧⌘ + 一个键"', () => {
     const all = [
       ...Object.values(SHORTCUTS),
       ...shortcuts(workspaceMenus(context())).map(([, shortcut]) => shortcut),
       ...shortcuts(workspaceMenus(context({ focus: 'tree' }))).map(([, shortcut]) => shortcut),
       ...shortcuts(welcomeMenus()).map(([, shortcut]) => shortcut),
     ]
-    const documentLevel = new Set<string>([SHORTCUTS.newDocument, SHORTCUTS.openDocument])
+    const documentLevel = new Set<string>([SHORTCUTS.newDocument, SHORTCUTS.openDocument, SHORTCUTS.reader])
     for (const shortcut of all) {
       const modifiers = documentLevel.has(shortcut) ? ['CmdOrCtrl', 'Shift'] : ['CmdOrCtrl']
       expect(shortcut.split('+').slice(0, -1), shortcut).toEqual(modifiers)

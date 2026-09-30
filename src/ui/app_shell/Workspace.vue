@@ -10,6 +10,7 @@ import ChapterManager from '../chapter_tree/ChapterManager.vue'
 import SaveStatus from './SaveStatus.vue'
 import DocumentTitle from './DocumentTitle.vue'
 import ChapterEditor from '../editor/ChapterEditor.vue'
+import DocumentReader, { type ReadingPosition } from '../reader/DocumentReader.vue'
 import { useServices } from '../services.ts'
 import { useSession } from './use_session.ts'
 import { useUiState } from './use_ui_state.ts'
@@ -23,15 +24,17 @@ import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.
 import Toast from '../common/Toast.vue'
 import Icon from '../common/Icon.vue'
 import { useMenu } from '../common/use_menu.ts'
-import { IS_MAC, SHORTCUTS } from '../common/shortcuts.ts'
+import { IS_MAC, SHORTCUTS, isHandled } from '../common/shortcuts.ts'
 import { menuItemForKey, parseMenuItemId, workspaceMenus, type MenuCommand } from './app_menu.ts'
 
 /**
  * 已打开项目的工作区。
  *
  * - 左侧栏：章节树；宽度可拖动调整，可以隐藏（显示 → 隐藏侧栏，或把分隔线拖到最窄处以外）。
- * - 右侧：一行工具栏 + 正文编辑器。工具栏开头是文档名（点击打开文档菜单），
- *   右边只放高频操作：插入表格 / 图片，以及导出。其余命令在菜单栏、右键菜单与快捷键中。
+ * - 右侧：一行工具栏 + 正文编辑器或全文阅读。工具栏开头是文档名（点击打开文档菜单），
+ *   右边只放高频操作：插入表格 / 图片，以及全文阅读、导出。其余命令在菜单栏、右键菜单与快捷键中。
+ * - 全文阅读盖在编辑器之上，编辑器保持挂载（各章节的撤销历史仍在）；阅读中滚动到的章节成为当前章节，
+ *   回到编辑时停在读到的位置。
  * - unified 窗口（macOS）：工具栏与标题栏合为一体，窗口按钮浮在侧栏左上角，工具栏空白处可以拖动窗口。
  * - 菜单栏与快捷键来自同一份菜单（app_menu.ts），可用状态随焦点所在区域变化。
  * - 两侧独立滚动（ui-spec §27）。提示浮在正文区底部，不挤压布局。文档修改一律经 ProjectSession。
@@ -60,6 +63,7 @@ const actionError = ref<string | null>(null)
 const editor = ref<InstanceType<typeof ChapterEditor> | null>(null)
 const chapters = ref<InstanceType<typeof ChapterManager> | null>(null)
 const documentTitle = ref<InstanceType<typeof DocumentTitle> | null>(null)
+const reader = ref<InstanceType<typeof DocumentReader> | null>(null)
 
 const { selectedId, collapsedIds } = useUiState(shell, props.session.path, () => document.value.tree)
 
@@ -148,8 +152,39 @@ function resolveImage(reference: string): string | null {
   return path === null ? null : shell.toDisplayUrl(path)
 }
 
-/** 章节树中按 Enter：把焦点交给正文编辑器。 */
+/** 全文阅读（docs/decisions.md 第 8 节）：编辑环境中的连续只读展示，不是导出效果预览。 */
+const reading = ref(false)
+/** 进入阅读时的位置：编辑器中正在看的地方。 */
+const readingStart = shallowRef<ReadingPosition | null>(null)
+
+function openReading(): void {
+  if (reading.value || tree.value.length === 0) return
+  const id = selectedId.value
+  readingStart.value = id !== null && editor.value ? { chapterId: id, ...editor.value.readingPosition() } : null
+  reading.value = true
+}
+
+/** 回到编辑：在读到的章节、读到的位置继续写。 */
+async function closeReading(position: ReadingPosition | null): Promise<void> {
+  if (!reading.value) return
+  if (position && position.chapterId !== selectedId.value) selectedId.value = position.chapterId
+  reading.value = false
+  await nextTick()
+  if (position) editor.value?.revealPosition(position)
+  editor.value?.focus()
+}
+
+function toggleReading(): void {
+  if (reading.value) void closeReading(reader.value?.position() ?? null)
+  else openReading()
+}
+
+/** 章节树中按 Enter：把焦点交给正文编辑器（全文阅读中则回到编辑）。 */
 async function openChapter(): Promise<void> {
+  if (reading.value) {
+    await closeReading(reader.value?.position() ?? null)
+    return
+  }
   await nextTick()
   editor.value?.focus()
 }
@@ -161,9 +196,10 @@ async function focusTree(): Promise<void> {
   chapters.value?.focusCurrent()
 }
 
-/** ⌘J：在章节树与正文之间切换；焦点在其他位置（如工具栏）时进入章节树。 */
+/** ⌘J：在章节树与正文（全文阅读中是阅读区）之间切换；焦点在其他位置（如工具栏）时进入章节树。 */
 function switchFocus(): void {
-  if (focusRegion.value === 'tree') void openChapter()
+  if (focusRegion.value === 'tree' && reading.value) reader.value?.focus()
+  else if (focusRegion.value === 'tree') void openChapter()
   else void focusTree()
 }
 
@@ -184,6 +220,14 @@ const selectedChapter = computed(() =>
 
 const selectedNumber = computed(() =>
   selectedId.value === null ? '' : (numbers.value.get(selectedId.value) ?? []).join('.'),
+)
+
+/** 所有章节都被删除后没有可读的内容。 */
+watch(
+  () => tree.value.length === 0,
+  (empty) => {
+    if (empty) reading.value = false
+  },
 )
 
 /** 文档名：重命名、新建 / 打开其他文档、在访达中显示项目文件夹。 */
@@ -225,7 +269,7 @@ const scrolled = ref(false)
 
 function onMainScroll(event: Event): void {
   const target = event.target as HTMLElement
-  if (target.classList?.contains('chapter-editor__scroller')) {
+  if (target.classList?.contains('chapter-editor__scroller') || target.classList?.contains('document-reader')) {
     scrolled.value = target.scrollTop > 0
   }
 }
@@ -249,6 +293,8 @@ const menus = computed(() =>
         : NO_MOVES,
     sidebarVisible: sidebarVisible.value,
     exporting: exporting.value !== null,
+    hasChapters: tree.value.length > 0,
+    reading: reading.value,
   }),
 )
 
@@ -303,6 +349,7 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       return
     case 'view':
       if (command.action === 'sidebar') void setSidebarVisible(!sidebarVisible.value)
+      else if (command.action === 'reader') toggleReading()
       else switchFocus()
       return
     case 'chapter':
@@ -339,7 +386,7 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
  * macOS 上系统菜单栏会先于或代替这里响应，同一次按键只执行一次。
  */
 function onKeydown(event: KeyboardEvent): void {
-  if (event.defaultPrevented) return
+  if (isHandled(event)) return
   const id = menuItemForKey(menus.value, event)
   if (id !== null) {
     event.preventDefault()
@@ -449,7 +496,7 @@ async function createFirstChapter(): Promise<void> {
 
         <div class="workspace__spacer" data-tauri-drag-region></div>
 
-        <div v-if="selectedChapter" class="workspace__group" role="toolbar" aria-label="插入">
+        <div v-if="selectedChapter && !reading" class="workspace__group" role="toolbar" aria-label="插入">
           <button
             type="button"
             class="workspace__tool"
@@ -481,6 +528,19 @@ async function createFirstChapter(): Promise<void> {
             type="button"
             class="workspace__tool"
             tabindex="0"
+            :class="{ 'workspace__tool--on': reading }"
+            aria-label="全文阅读"
+            :aria-pressed="reading"
+            :disabled="document.tree.length === 0"
+            :title="reading ? '回到编辑（Esc）' : '全文阅读'"
+            @click="toggleReading"
+          >
+            <Icon name="reader" />
+          </button>
+          <button
+            type="button"
+            class="workspace__tool"
+            tabindex="0"
             :class="{ 'workspace__tool--open': openMenuButton === 'export', 'workspace__tool--busy': exporting }"
             aria-label="导出"
             aria-haspopup="menu"
@@ -498,6 +558,7 @@ async function createFirstChapter(): Promise<void> {
         <ChapterEditor
           v-if="selectedChapter && selectedId !== null"
           ref="editor"
+          :inert="reading || undefined"
           :chapter-id="selectedId"
           :content="document.contents.get(selectedId) ?? ''"
           :number="selectedNumber"
@@ -507,7 +568,7 @@ async function createFirstChapter(): Promise<void> {
           @request-image="insertImage"
           @tools="showTools"
         />
-        <div v-else class="workspace__placeholder">
+        <div v-else class="workspace__placeholder" :inert="reading || undefined">
           <template v-if="document.tree.length === 0">
             <p>这份文档还没有章节。</p>
             <!-- 侧栏中已有"新建第一个章节"；侧栏隐藏时才在这里给出同样的操作。 -->
@@ -517,6 +578,18 @@ async function createFirstChapter(): Promise<void> {
           </template>
           <p v-else>在左侧选择一个章节，开始写作。</p>
         </div>
+        <DocumentReader
+          v-if="reading"
+          ref="reader"
+          class="workspace__reader"
+          :tree="document.tree"
+          :contents="document.contents"
+          :active-chapter-id="selectedId"
+          :resolve-image="resolveImage"
+          :initial-position="readingStart"
+          @select="selectedId = $event"
+          @exit="closeReading"
+        />
       </div>
 
       <div class="workspace__toasts">
@@ -739,6 +812,12 @@ async function createFirstChapter(): Promise<void> {
   background: var(--color-fill-pressed);
 }
 
+.workspace__tool--on,
+.workspace__tool--on:hover:not(:disabled) {
+  background: var(--color-accent-fill);
+  color: var(--color-accent-text);
+}
+
 .workspace__tool:disabled {
   color: var(--color-text-disabled);
 }
@@ -761,8 +840,15 @@ async function createFirstChapter(): Promise<void> {
 }
 
 .workspace__content {
+  position: relative;
   flex: 1;
   min-height: 0;
+}
+
+/* 全文阅读盖住编辑器（编辑器仍在下面，保持各章节的撤销历史）。 */
+.workspace__reader {
+  position: absolute;
+  inset: 0;
 }
 
 /* 没有打开章节：一句说明 + 主要操作，垂直居中在正文区（扣除工具栏高度，视觉上居中）。 */

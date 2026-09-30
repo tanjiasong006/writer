@@ -47,28 +47,56 @@ class ImageView implements NodeView {
 
   private render(): void {
     const { src, alt } = this.node.attrs as { src: string; alt: string }
-    const url = this.resolve(src)
-    if (url === null) {
-      this.showMissing()
-      return
-    }
-    const image = document.createElement('img')
-    image.src = url
-    image.alt = alt
-    image.title = src
-    image.draggable = false
-    image.addEventListener('error', () => this.showMissing(), { once: true })
-    this.picture.replaceChildren(image)
+    showPicture(this.picture, src, alt, this.resolve)
   }
+}
 
-  private showMissing(): void {
-    const { src, alt } = this.node.attrs as { src: string; alt: string }
-    const missing = document.createElement('span')
-    missing.className = 'editor-image__missing'
-    missing.textContent = `无法显示图片：${alt || src}`
-    missing.title = src
-    this.picture.replaceChildren(missing)
+/** 在 picture 中显示图片；无法解析或加载失败时显示占位。 */
+function showPicture(picture: HTMLElement, src: string, alt: string, resolve: ImageResolver): void {
+  const url = resolve(src)
+  if (url === null) {
+    showMissing(picture, src, alt)
+    return
   }
+  const image = document.createElement('img')
+  image.src = url
+  image.alt = alt
+  image.title = src
+  image.draggable = false
+  image.addEventListener('error', () => showMissing(picture, src, alt), { once: true })
+  picture.replaceChildren(image)
+}
+
+function showMissing(picture: HTMLElement, src: string, alt: string): void {
+  const missing = document.createElement('span')
+  missing.className = 'editor-image__missing'
+  missing.textContent = `无法显示图片：${alt || src}`
+  missing.title = src
+  picture.replaceChildren(missing)
+}
+
+/**
+ * 只读展示的图片（全文阅读）：与编辑器中的 DOM 结构和类名相同，样式因此一致（editor/document_body.css）；
+ * 独立成段的图片下方是图注文字（没有图注时不显示）。
+ */
+export function staticImageDOM(node: Node, resolve: ImageResolver): HTMLElement {
+  const { src, alt } = node.attrs as { src: string; alt: string }
+  const block = node.type === nodes.figure
+  const dom = document.createElement(block ? 'div' : 'span')
+  dom.className = block ? 'editor-image editor-figure' : 'editor-image'
+  const picture = block ? document.createElement('div') : dom
+  if (block) {
+    picture.className = 'editor-figure__picture'
+    dom.append(picture)
+  }
+  showPicture(picture, src, alt, resolve)
+  if (block && alt !== '') {
+    const caption = document.createElement('div')
+    caption.className = 'editor-figure__caption'
+    caption.textContent = alt
+    dom.append(caption)
+  }
+  return dom
 }
 
 /**
