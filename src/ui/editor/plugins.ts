@@ -27,6 +27,7 @@ import { SHORTCUTS, matchesShortcut, proseMirrorKey } from '../common/shortcuts.
 import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { drawCaret } from './caret.ts'
 import { drawSelection } from './selection.ts'
+import { codeHighlight } from './code_highlight.ts'
 import { figureEditing, newParagraphAtBlock, selectFigureBackward, selectFigureForward } from './figure_editing.ts'
 
 /**
@@ -432,6 +433,7 @@ export const editorPlugins: readonly Plugin[] = [
   tableEditing(),
   headerCellEnd(),
   activeTable(),
+  codeHighlight(),
   placeholder('开始写作…'),
   continueBelow(),
   markdownClipboard(),

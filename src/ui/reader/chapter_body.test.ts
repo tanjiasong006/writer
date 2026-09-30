@@ -35,3 +35,17 @@ test('行内图片在段落中；无法显示的图片显示占位', () => {
   expect(body.querySelector('p > .editor-image > img')).not.toBeNull()
   expect(body.querySelector('.editor-image__missing')!.textContent).toBe('无法显示图片：远程')
 })
+
+test('代码块与编辑器相同地高亮，文字不变', () => {
+  const body = render('```js\nconst a = "<x>" // c\n```\n')
+  const pre = body.querySelector('pre')!
+  expect(pre.dataset.params).toBe('js')
+  expect(pre.querySelector('code > .code-keyword')!.textContent).toBe('const')
+  expect(pre.querySelector('code > .code-comment')!.textContent).toBe('// c')
+  expect(pre.textContent).toBe('const a = "<x>" // c')
+})
+
+test('识别不出语言的代码块原样显示', () => {
+  const body = render('```\n样本 A → 样本 B\n```\n')
+  expect(body.querySelector('pre > code')!.innerHTML).toBe('样本 A → 样本 B')
+})

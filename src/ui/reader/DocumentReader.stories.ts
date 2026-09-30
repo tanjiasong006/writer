@@ -85,7 +85,7 @@ const contents = new Map<ChapterId, string>([
   [
     'b',
     '定量部分使用Python完成清洗与统计，缺失项超过30%的问卷直接剔除，完整的编码手册见[附录B](https://example.com)。\n\n' +
-      '```python\ndf = df[df.isna().mean(axis=1) <= 0.3]\n```\n\n- [x] 核对问卷编号\n- [ ] 补充访谈记录\n\n---\n\n## 正文中的 Markdown 标题是普通文字\n',
+      '```python\n# 缺失项超过 30% 的问卷直接剔除\ndf = df[df.isna().mean(axis=1) <= 0.3]\nprint(f"保留 {len(df)} 份")\n```\n\n- [x] 核对问卷编号\n- [ ] 补充访谈记录\n\n---\n\n## 正文中的 Markdown 标题是普通文字\n',
   ],
   ['c', '全文完。\n'],
 ])

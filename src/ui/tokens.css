@@ -69,6 +69,14 @@
   --color-doc-cell-hint: rgba(0, 0, 0, 0.07);
   --color-doc-selection: #bcd6fb;
   --color-doc-selection-inactive: #e3e3e6;
+  /* 代码块语法高亮：低饱和，在代码底色上可读，不比正文更抢眼。 */
+  --color-code-comment: #7c7c80;
+  --color-code-keyword: #a23d6e;
+  --color-code-string: #3b7a3e;
+  --color-code-number: #9a5a14;
+  --color-code-title: #2d5fa8;
+  --color-code-type: #6f4aa8;
+  --color-code-meta: #6b6b70;
 
   /* 间距 */
   --space-1: 2px;

@@ -58,6 +58,49 @@ export const Markdown: Story = {
   },
 }
 
+/** 代码块语法高亮：声明了语言的、没有声明语言（自动识别）的、识别不出语言的（不着色）。 */
+export const CodeHighlight: Story = {
+  args: {
+    chapterId: 'ch-1',
+    number: '4.2',
+    title: '数据处理',
+    content: [
+      '清洗脚本：',
+      '',
+      '```python',
+      '# 去掉缺失值并按组汇总',
+      'def summarize(rows: list[dict], threshold: float = 0.5) -> dict:',
+      '    kept = [r for r in rows if r.get("score") is not None]',
+      '    return {"count": len(kept), "ratio": len(kept) / max(len(rows), 1)}',
+      '```',
+      '',
+      '没有声明语言的代码块（用工具栏插入的代码块）自动识别：',
+      '',
+      '```',
+      'SELECT group_id, COUNT(*) AS n',
+      'FROM samples',
+      "WHERE status = 'valid'",
+      'GROUP BY group_id;',
+      '```',
+      '',
+      '```ts',
+      'interface Sample {',
+      '  readonly id: string',
+      '  score: number | null',
+      '}',
+      'export const isValid = (s: Sample): boolean => s.score !== null && s.score >= 0',
+      '```',
+      '',
+      '识别不出语言时不着色：',
+      '',
+      '```',
+      '样本 A → 样本 B → 汇总',
+      '```',
+      '',
+    ].join('\n'),
+  },
+}
+
 /**
  * 排版样例：中西文混排的长文。用于检查字体、字号与行长、章节标题、段落节奏、
  * 中西文间距与避头尾、楷体引用、三线表（指针移入或光标在表格中时显示单元格边界）、任务方框。

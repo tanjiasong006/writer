@@ -128,6 +128,57 @@
   font-family: var(--font-mono);
 }
 
+/* 代码块语法高亮（code_highlight.ts）：只改颜色：不改字重，避免编辑时文字宽度变化；不用斜体，中文注释没有真正的斜体。 */
+.document-body .code-comment,
+.document-body .code-quote {
+  color: var(--color-code-comment);
+}
+
+.document-body .code-keyword,
+.document-body .code-selector-tag,
+.document-body .code-literal,
+.document-body .code-doctag,
+.document-body .code-name {
+  color: var(--color-code-keyword);
+}
+
+.document-body .code-string,
+.document-body .code-regexp,
+.document-body .code-addition,
+.document-body .code-template-tag,
+.document-body .code-selector-attr {
+  color: var(--color-code-string);
+}
+
+.document-body .code-number,
+.document-body .code-symbol,
+.document-body .code-bullet,
+.document-body .code-variable,
+.document-body .code-template-variable,
+.document-body .code-selector-pseudo {
+  color: var(--color-code-number);
+}
+
+.document-body .code-title,
+.document-body .code-section,
+.document-body .code-attr,
+.document-body .code-attribute,
+.document-body .code-selector-id,
+.document-body .code-selector-class {
+  color: var(--color-code-title);
+}
+
+.document-body .code-type,
+.document-body .code-built_in,
+.document-body .code-class {
+  color: var(--color-code-type);
+}
+
+.document-body .code-meta,
+.document-body .code-deletion {
+  color: var(--color-code-meta);
+}
+
 .document-body :not(pre) > code {
   padding: 0.1em 0.3em;
   border-radius: 3px;

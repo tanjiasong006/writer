@@ -14,6 +14,7 @@
 | `commands.ts` | 编辑命令（格式、结构、插入、表格行列、撤销）与它们的可用 / 激活状态（`commandState` 只从 EditorState 推导）。 |
 | `editor_menu.ts` | 编辑命令在菜单中的名称与快捷键，正文右键菜单的内容（按点击处：图片、表格、文字）。 |
 | `plugins.ts` | 快捷键、输入规则、撤销历史、表格编辑、占位提示、剪贴板；`createEditorState`。 |
+| `code_highlight.ts` | 代码块语法高亮（decoration）：按围栏语言，没有语言时自动识别，识别不可靠时不着色；不改变文档与输出。全文阅读用 `highlightedCodeDOM` 得到相同的高亮。 |
 | `caret.ts` | 自绘文字光标：WebKit 原生光标在段落第二行起高度不对，改为按文字高度绘制（输入法组字期间用原生光标）。 |
 | `selection.ts` | 自绘选区底色：WebKit 原生底色从段落中间开始选择时第一行偏高，改为每行一整行行高、行与行首尾相接。 |
 | `figure_editing.ts` | 独立成段的图片（figure 节点）的编辑：Enter、Backspace / Delete，以及把只剩一张图片的段落转成 figure。 |
