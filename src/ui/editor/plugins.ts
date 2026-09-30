@@ -335,6 +335,25 @@ function headerCellEnd(): Plugin {
   })
 }
 
+/** 光标或选区所在的表格加上 is-active（不进入文档）：三线表平时不画单元格边界，编辑表格时淡淡显示。 */
+function activeTable(): Plugin {
+  return new Plugin({
+    props: {
+      decorations(state) {
+        const { $from } = state.selection
+        for (let depth = $from.depth; depth > 0; depth--) {
+          const node = $from.node(depth)
+          if (node.type === nodes.table) {
+            const pos = $from.before(depth)
+            return DecorationSet.create(state.doc, [Decoration.node(pos, pos + node.nodeSize, { class: 'is-active' })])
+          }
+        }
+        return null
+      },
+    },
+  })
+}
+
 function cellEndMarker(): HTMLElement {
   const marker = document.createElement('span')
   marker.className = 'editor-cell-end'
@@ -421,6 +440,7 @@ export const editorPlugins: readonly Plugin[] = [
   gapCursor(),
   tableEditing(),
   headerCellEnd(),
+  activeTable(),
   placeholder('开始写作…'),
   continueBelow(),
   markdownClipboard(),

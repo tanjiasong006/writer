@@ -324,6 +324,19 @@ test('表头单元格末尾有不可编辑的空标记（WebKit 输入法确认�
   expect(markdown(view)).toBe('| 名称表 |  |\n| --- | --- |\n| 甲 | 乙 |\n')
 })
 
+test('光标在表格中时表格带 is-active（编辑时显示单元格边界），离开表格后去掉', () => {
+  const view = viewOf('前文\n\n| 名称 | 数量 |\n| --- | --- |\n| 甲 | 1 |')
+  const table = () => view.dom.querySelector('table')!
+  expect(table().classList.contains('is-active')).toBe(false)
+
+  cursorAfter(view, '甲')
+  expect(table().classList.contains('is-active')).toBe(true)
+
+  cursorAfter(view, '前文')
+  expect(table().classList.contains('is-active')).toBe(false)
+  expect(markdown(view)).toBe('前文\n\n| 名称 | 数量 |\n| --- | --- |\n| 甲 | 1 |\n')
+})
+
 test('章节第一行是空段落、后面还有内容时，按 Backspace 删掉这一行，光标进入下一块开头', () => {
   for (const [source, expected, cursorIn] of [
     ['正文', '正文\n', 'paragraph'],

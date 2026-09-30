@@ -64,7 +64,9 @@
   --color-doc-muted: #55555a;
   --color-doc-rule: #d8d8d4;
   --color-doc-fill: #f3f3f1;
-  --color-doc-header-fill: #f8f8f6;
+  /* 三线表的顶线、底线与表头线；编辑表格时淡淡显示的单元格边界。 */
+  --color-doc-table-rule: rgba(31, 31, 33, 0.72);
+  --color-doc-cell-hint: rgba(0, 0, 0, 0.07);
   --color-doc-selection: #bcd6fb;
   --color-doc-selection-inactive: #e3e3e6;
 
@@ -97,8 +99,8 @@
   --tree-toggle: 20px;
   --sidebar-w: 260px;
 
-  /* 正文版心 */
-  --doc-column: 760px;
+  /* 正文版心：内容宽 680px，17px 正文每行约 40 个汉字。 */
+  --doc-column: 744px;
   --doc-gutter: 32px;
 
   /* 圆角 */

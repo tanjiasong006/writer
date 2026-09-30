@@ -332,8 +332,8 @@ function rootVar(wrapper: VueWrapper, name: string): string {
 
 test('编辑环境的默认展示参数以 CSS 变量作用在编辑器外层，不来自项目数据', () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '正文' })
-  expect(rootVar(wrapper, '--doc-body-size')).toBe('12pt')
-  expect(rootVar(wrapper, '--doc-line-height')).toBe('1.8')
+  expect(rootVar(wrapper, '--doc-body-size')).toBe('17px')
+  expect(rootVar(wrapper, '--doc-line-height')).toBe('1.78')
   expect(rootVar(wrapper, '--doc-body-font')).toBe(FONT_STACKS.serif)
 })
 

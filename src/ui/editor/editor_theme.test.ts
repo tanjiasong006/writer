@@ -2,18 +2,19 @@
 import { expect, test } from 'vitest'
 import { DEFAULT_EDITOR_THEME, FONT_STACKS, editorHeadingVars, editorThemeCssVars } from './editor_theme.ts'
 
-test('默认展示参数翻译为 CSS 变量：字号用磅、间距用 em', () => {
+test('默认展示参数翻译为 CSS 变量：字号用像素、间距用 em', () => {
   const vars = editorThemeCssVars(DEFAULT_EDITOR_THEME)
   expect(vars['--doc-body-font']).toBe(FONT_STACKS.serif)
-  expect(vars['--doc-body-size']).toBe('12pt')
-  expect(vars['--doc-line-height']).toBe('1.8')
-  expect(vars['--doc-paragraph-spacing']).toBe('0.5em')
+  expect(vars['--doc-body-size']).toBe('17px')
+  expect(vars['--doc-line-height']).toBe('1.78')
+  expect(vars['--doc-paragraph-spacing']).toBe('0.6em')
   expect(vars['--doc-h1-font']).toBe(FONT_STACKS.sans)
-  expect(vars['--doc-h1-size']).toBe('16pt')
-  expect(vars['--doc-h3-before']).toBe('1em')
-  expect(vars['--doc-table-size']).toBe('11pt')
-  expect(vars['--doc-caption-size']).toBe('10pt')
-  expect(vars['--doc-image-spacing']).toBe('1em')
+  expect(vars['--doc-quote-font']).toBe(FONT_STACKS.kai)
+  expect(vars['--doc-h1-size']).toBe('26px')
+  expect(vars['--doc-h3-before']).toBe('1.5em')
+  expect(vars['--doc-table-size']).toBe('15px')
+  expect(vars['--doc-caption-size']).toBe('14px')
+  expect(vars['--doc-image-spacing']).toBe('1.6em')
   // 没有单张图片的尺寸档位。
   expect(Object.keys(vars).some((name) => name.startsWith('--doc-image-') && name !== '--doc-image-spacing')).toBe(false)
 })

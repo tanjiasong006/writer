@@ -7,21 +7,25 @@
  * 变量设在编辑器外层元素上：展示参数变化只改变这些变量，不触碰 ProseMirror 文档与视图。
  */
 
-type FontId = 'serif' | 'sans'
+type FontId = 'serif' | 'sans' | 'kai'
 
-/** 字体族对应的 CSS 字体栈（拉丁字体在前、中文字体在后）。 */
+/**
+ * 字体族对应的 CSS 字体栈（拉丁字体在前、中文字体在后）。
+ * 按屏幕阅读挑选，不复用输出字体候选（docs/decisions.md 第 6 节）：可以使用本机字体，不承诺跨机器一致。
+ */
 export const FONT_STACKS: Readonly<Record<FontId, string>> = {
   serif:
-    '"Times New Roman", "Liberation Serif", "DejaVu Serif", "Songti SC", STSong, SimSun, NSimSun, ' +
-    '"Noto Serif CJK SC", "Source Han Serif SC", "Noto Serif SC", serif',
+    '"Iowan Old Style", Charter, "Bitstream Charter", Georgia, "Source Han Serif SC", "Noto Serif CJK SC", ' +
+    '"Noto Serif SC", "Songti SC", STSong, SimSun, serif',
   sans:
-    'Arial, Helvetica, "Liberation Sans", "DejaVu Sans", "Heiti SC", STHeiti, "PingFang SC", SimHei, ' +
-    '"Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC", "WenQuanYi Micro Hei", sans-serif',
+    '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ' +
+    '"Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC", "WenQuanYi Micro Hei", sans-serif',
+  kai: '"Iowan Old Style", Charter, "Bitstream Charter", Georgia, "Kaiti SC", STKaiti, KaiTi, "Noto Serif CJK SC", serif',
 }
 
 interface TextStyle {
   readonly font: FontId
-  /** 磅。 */
+  /** 像素（编辑展示只面向屏幕）。 */
   readonly size: number
 }
 
@@ -44,26 +48,29 @@ export interface EditorTheme {
   readonly caption: TextStyle
 }
 
-/** 默认的编辑展示：宋体类正文、黑体类标题，舒适的行距。 */
+/**
+ * 默认的编辑展示：宋体类正文、无衬线标题、楷体引用。
+ * 标题字号拉开层级，第 3 级与正文同字号，靠字体、字重与标题前的间距区分。
+ */
 export const DEFAULT_EDITOR_THEME: EditorTheme = {
-  body: { font: 'serif', size: 12, lineHeight: 1.8, paragraphSpacing: 0.5 },
+  body: { font: 'serif', size: 17, lineHeight: 1.78, paragraphSpacing: 0.6 },
   headings: [
-    { font: 'sans', size: 16, before: 1.4, after: 0.6 },
-    { font: 'sans', size: 14, before: 1.2, after: 0.5 },
-    { font: 'sans', size: 13, before: 1, after: 0.4 },
+    { font: 'sans', size: 26, before: 1.4, after: 0.6 },
+    { font: 'sans', size: 20, before: 1.7, after: 0.5 },
+    { font: 'sans', size: 17, before: 1.5, after: 0.35 },
   ],
-  quote: { font: 'serif', size: 12 },
-  codeSize: 10,
-  tableSize: 11,
-  imageSpacing: 1,
-  caption: { font: 'serif', size: 10 },
+  quote: { font: 'kai', size: 17 },
+  codeSize: 14,
+  tableSize: 15,
+  imageSpacing: 1.6,
+  caption: { font: 'serif', size: 14 },
 }
 
-const pt = (value: number) => `${value}pt`
+const px = (value: number) => `${value}px`
 const em = (value: number) => `${value}em`
 
 function text(prefix: string, style: TextStyle): Record<string, string> {
-  return { [`--doc-${prefix}-font`]: FONT_STACKS[style.font], [`--doc-${prefix}-size`]: pt(style.size) }
+  return { [`--doc-${prefix}-font`]: FONT_STACKS[style.font], [`--doc-${prefix}-size`]: px(style.size) }
 }
 
 export function editorThemeCssVars(theme: EditorTheme): Record<string, string> {
@@ -72,8 +79,8 @@ export function editorThemeCssVars(theme: EditorTheme): Record<string, string> {
     '--doc-line-height': String(theme.body.lineHeight),
     '--doc-paragraph-spacing': em(theme.body.paragraphSpacing),
     ...text('quote', theme.quote),
-    '--doc-code-size': pt(theme.codeSize),
-    '--doc-table-size': pt(theme.tableSize),
+    '--doc-code-size': px(theme.codeSize),
+    '--doc-table-size': px(theme.tableSize),
     ...text('caption', theme.caption),
     '--doc-image-spacing': em(theme.imageSpacing),
   }

@@ -281,11 +281,12 @@ defineExpose({
   max-width: var(--doc-column);
   box-sizing: border-box;
   margin: 0 auto;
-  padding: var(--space-10) var(--doc-gutter) 0;
+  padding: calc(var(--space-10) + var(--space-6)) var(--doc-gutter) var(--space-4);
   font-family: var(--heading-font);
   font-size: var(--heading-size);
-  font-weight: bold;
+  font-weight: var(--weight-semibold);
   line-height: 1.4;
+  text-wrap: balance;
   color: var(--color-doc-text);
   overflow-wrap: anywhere;
   /* 标题只能在章节树中修改，这里不可选中编辑，避免被误认为正文的一部分。 */
@@ -296,6 +297,7 @@ defineExpose({
 .chapter-editor__number {
   margin-right: 0.6em;
   color: var(--color-text-tertiary);
+  font-weight: normal;
   font-variant-numeric: tabular-nums;
 }
 
@@ -313,13 +315,21 @@ defineExpose({
   box-sizing: border-box;
   margin: 0 auto;
   /* 下方留出大段空白：写到最后一段时仍可以把它滚到视线高度，而不是贴着窗口底边。 */
-  padding: var(--space-5) var(--doc-gutter) 40vh;
+  padding: var(--space-7) var(--doc-gutter) 40vh;
   font-family: var(--doc-body-font);
   font-size: var(--doc-body-size);
   line-height: var(--doc-line-height);
   color: var(--color-doc-text);
   /* 应用界面关闭了字体合成（App.vue）；正文要像 Word / PDF 一样为没有斜体、粗体字形的中文字体合成斜体与粗体。 */
   font-synthesis: weight style;
+  /*
+   * 中文排版：中西文之间的间距、相邻标点挤压、严格避头尾、行尾标点悬挂。只影响显示，不往正文里插入空格；
+   * 不支持的 WebView 忽略这些属性。
+   */
+  text-autospace: normal;
+  text-spacing-trim: normal;
+  line-break: strict;
+  hanging-punctuation: allow-end;
   /* 文字光标由 caret.ts 自绘（WebKit 的原生光标在段落第二行起高度不对）；输入法组字期间用原生光标。 */
   caret-color: transparent;
   outline: none;
@@ -388,6 +398,7 @@ defineExpose({
 .chapter-editor__body :deep(h4),
 .chapter-editor__body :deep(h5),
 .chapter-editor__body :deep(h6) {
+  font-weight: var(--weight-semibold);
   line-height: 1.4;
 }
 
@@ -428,10 +439,9 @@ defineExpose({
 }
 
 .chapter-editor__body :deep(blockquote) {
-  margin: 1em 0;
-  padding: 0 1em;
-  border-left: 3px solid var(--color-doc-rule);
-  color: var(--color-doc-muted);
+  margin: 1.2em 0;
+  padding: 0 0 0 1.2em;
+  border-left: 2px solid var(--color-doc-rule);
   font-family: var(--doc-quote-font);
   font-size: var(--doc-quote-size);
 }
@@ -440,6 +450,14 @@ defineExpose({
 .chapter-editor__body :deep(ol) {
   margin: 0.6em 0;
   padding-left: 1.6em;
+}
+
+.chapter-editor__body :deep(ol) {
+  font-variant-numeric: tabular-nums;
+}
+
+.chapter-editor__body :deep(li::marker) {
+  color: var(--color-doc-muted);
 }
 
 .chapter-editor__body :deep(li > ul),
@@ -458,15 +476,27 @@ defineExpose({
   list-style: none;
 }
 
+/* 任务方框自绘（☐ / ☑ 字符的样子取决于字体），在第一行中垂直居中。 */
 .chapter-editor__body :deep(li[data-task]::before) {
   position: absolute;
-  left: -1.3em;
-  content: '☐';
-  color: var(--color-text-tertiary);
+  top: calc((var(--doc-line-height) * 1em - 0.82em) / 2);
+  left: -1.45em;
+  box-sizing: border-box;
+  width: 0.82em;
+  height: 0.82em;
+  border: 1.5px solid var(--color-doc-rule);
+  border-radius: 3px;
+  content: '';
+}
+
+.chapter-editor__body :deep(li[data-task='done']) {
+  color: var(--color-doc-muted);
 }
 
 .chapter-editor__body :deep(li[data-task='done']::before) {
-  content: '☑';
+  border-color: var(--color-doc-muted);
+  background: var(--color-doc-muted) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.6 6.3l2.2 2.2 4.6-4.9' fill='none' stroke='%23fff' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 100% no-repeat;
 }
 
 .chapter-editor__body :deep(pre) {
@@ -512,21 +542,44 @@ defineExpose({
   margin: 1em 0;
   border-collapse: collapse;
   table-layout: fixed;
+  border-top: 1.5px solid var(--color-doc-table-rule);
+  border-bottom: 1.5px solid var(--color-doc-table-rule);
   font-size: var(--doc-table-size);
 }
 
+/*
+ * 三线表：顶线、底线与表头下的线，不画单元格边界。
+ * 指针移入或光标在表格中（is-active，plugins.ts）时用内阴影淡淡显示单元格边界，编辑时看得清格子；
+ * 不用透明边框，它们在折叠边框的交点处留下断痕，也不改变布局。表格的第一行总是表头。
+ */
 .chapter-editor__body :deep(th),
 .chapter-editor__body :deep(td) {
   position: relative;
-  padding: 6px 10px;
-  border: 1px solid var(--color-doc-rule);
+  padding: 7px 12px;
   vertical-align: top;
+  transition: box-shadow var(--duration-base) var(--ease-out);
 }
 
 .chapter-editor__body :deep(th) {
-  background: var(--color-doc-header-fill);
-  font-weight: 600;
+  border-bottom: 1px solid var(--color-doc-table-rule);
+  /* 表头用标题的无衬线字体：它有真正的粗体字形，宋体类中文在表头中合成的粗体几乎看不出来。 */
+  font-family: var(--doc-h3-font);
+  font-weight: var(--weight-semibold);
   text-align: left;
+}
+
+.chapter-editor__body :deep(table:is(:hover, .is-active) tr > * + *) {
+  box-shadow: inset 1px 0 0 var(--color-doc-cell-hint);
+}
+
+.chapter-editor__body :deep(table:is(:hover, .is-active) tr:nth-child(n + 3) > td) {
+  box-shadow:
+    inset 1px 0 0 var(--color-doc-cell-hint),
+    inset 0 1px 0 var(--color-doc-cell-hint);
+}
+
+.chapter-editor__body :deep(table:is(:hover, .is-active) tr:nth-child(n + 3) > td:first-child) {
+  box-shadow: inset 0 1px 0 var(--color-doc-cell-hint);
 }
 
 .chapter-editor__body :deep(.selectedCell::after) {
