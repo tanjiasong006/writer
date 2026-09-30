@@ -4,9 +4,9 @@
 use std::io::Cursor;
 use std::path::Path;
 
-use image::{ImageFormat, ImageReader, Limits};
+use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
 
-/// 单边像素上限；更大的图片按比例缩小后再嵌入 Word，控制文件体积。
+/// 单边像素上限；更大的图片按比例缩小后再嵌入输出，控制文件体积。
 const MAX_EMBED_PX: u32 = 2400;
 /// 解码时的尺寸与内存上限，防止恶意图片耗尽内存。
 const MAX_DECODE_PX: u32 = 20_000;
@@ -70,9 +70,9 @@ pub fn text_height_pt(text: &str, font_size: f64, line_pitch: f64, width: f64) -
     lines as f64 * line_pitch
 }
 
-pub struct DocxImage {
-    /// PNG 字节（docx-rs 以 png 形式存放媒体）。
-    pub png: Vec<u8>,
+pub struct ExportImage {
+    /// JPEG 保留原压缩；其他格式使用 PNG。
+    pub bytes: Vec<u8>,
     pub width: u32,
     pub height: u32,
 }
@@ -85,9 +85,49 @@ fn limits() -> Limits {
     limits
 }
 
-/// 读取并准备嵌入 Word 的图片：PNG 且尺寸合适时原样使用，否则解码、必要时缩小、转为 PNG。
-pub fn load_for_docx(path: &Path) -> Option<DocxImage> {
+/// Word / PDF 共用的图片准备：保留 JPEG 压缩，超大图仍沿用尺寸上限。
+/// 带旋转元数据的 JPEG 沿用原 PNG 路径，保持现有显示方向与尺寸。
+pub fn load_for_export(path: &Path) -> Option<ExportImage> {
     let bytes = std::fs::read(path).ok()?;
+    let mut reader = ImageReader::new(Cursor::new(&bytes))
+        .with_guessed_format()
+        .ok()?;
+    reader.limits(limits());
+    if reader.format()? == ImageFormat::Jpeg {
+        let mut decoder = reader.into_decoder().ok()?;
+        let orientation = decoder.orientation().ok()?;
+        let image = image::DynamicImage::from_decoder(decoder).ok()?;
+        if orientation == image::metadata::Orientation::NoTransforms {
+            let width = image.width();
+            let height = image.height();
+            if width == 0 || height == 0 {
+                return None;
+            }
+            let bytes = if width <= MAX_EMBED_PX && height <= MAX_EMBED_PX {
+                bytes
+            } else {
+                let image = image.thumbnail(MAX_EMBED_PX, MAX_EMBED_PX);
+                let mut encoded = Vec::new();
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 90)
+                    .encode_image(&image)
+                    .ok()?;
+                return Some(ExportImage {
+                    bytes: encoded,
+                    width: image.width(),
+                    height: image.height(),
+                });
+            };
+            return Some(ExportImage {
+                bytes,
+                width,
+                height,
+            });
+        }
+    }
+    prepare_png(bytes)
+}
+
+fn prepare_png(bytes: Vec<u8>) -> Option<ExportImage> {
     let mut reader = ImageReader::new(Cursor::new(&bytes))
         .with_guessed_format()
         .ok()?;
@@ -100,8 +140,8 @@ pub fn load_for_docx(path: &Path) -> Option<DocxImage> {
     if format == ImageFormat::Png && width <= MAX_EMBED_PX && height <= MAX_EMBED_PX {
         // 尺寸可读不代表内容完整：完整解码一次，确认不是损坏文件。
         decode(&bytes)?;
-        return Some(DocxImage {
-            png: bytes,
+        return Some(ExportImage {
+            bytes,
             width,
             height,
         });
@@ -112,8 +152,8 @@ pub fn load_for_docx(path: &Path) -> Option<DocxImage> {
     }
     let mut png = Cursor::new(Vec::new());
     image.write_to(&mut png, ImageFormat::Png).ok()?;
-    Some(DocxImage {
-        png: png.into_inner(),
+    Some(ExportImage {
+        bytes: png.into_inner(),
         width: image.width(),
         height: image.height(),
     })
@@ -192,21 +232,19 @@ pub mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("图.png");
         write_image(&path, 40, 20, ImageFormat::Png);
-        let image = load_for_docx(&path).unwrap();
+        let image = load_for_export(&path).unwrap();
         assert_eq!((image.width, image.height), (40, 20));
-        assert_eq!(image.png, fs::read(&path).unwrap());
+        assert_eq!(image.bytes, fs::read(&path).unwrap());
     }
 
     #[test]
-    fn jpeg_and_gif_are_converted_to_png() {
+    fn gif_is_converted_to_png() {
         let dir = TempDir::new().unwrap();
-        for (name, format) in [("a.jpg", ImageFormat::Jpeg), ("a.gif", ImageFormat::Gif)] {
-            let path = dir.path().join(name);
-            write_image(&path, 30, 10, format);
-            let image = load_for_docx(&path).unwrap();
-            assert_eq!((image.width, image.height), (30, 10));
-            assert!(image.png.starts_with(&[137, 80, 78, 71]));
-        }
+        let path = dir.path().join("a.gif");
+        write_image(&path, 30, 10, ImageFormat::Gif);
+        let image = load_for_export(&path).unwrap();
+        assert_eq!((image.width, image.height), (30, 10));
+        assert!(image.bytes.starts_with(&[137, 80, 78, 71]));
     }
 
     #[test]
@@ -214,8 +252,56 @@ pub mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("大.png");
         write_image(&path, 4800, 600, ImageFormat::Png);
-        let image = load_for_docx(&path).unwrap();
+        let image = load_for_export(&path).unwrap();
         assert_eq!((image.width, image.height), (2400, 300));
+    }
+
+    #[test]
+    fn jpeg_and_png_bytes_are_preserved() {
+        let dir = TempDir::new().unwrap();
+        for (name, format) in [("a.jpg", ImageFormat::Jpeg), ("a.png", ImageFormat::Png)] {
+            let path = dir.path().join(name);
+            write_image(&path, 30, 10, format);
+            let image = load_for_export(&path).unwrap();
+            assert_eq!((image.width, image.height), (30, 10));
+            assert_eq!(image.bytes, fs::read(&path).unwrap());
+        }
+    }
+
+    #[test]
+    fn large_jpeg_stays_jpeg_and_gif_becomes_png() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("large.jpg");
+        write_image(&path, 4800, 600, ImageFormat::Jpeg);
+        let image = load_for_export(&path).unwrap();
+        assert_eq!((image.width, image.height), (2400, 300));
+        assert_eq!(image::guess_format(&image.bytes).unwrap(), ImageFormat::Jpeg);
+        assert_eq!(decode(&image.bytes).unwrap().width(), 2400);
+        let path = dir.path().join("a.gif");
+        write_image(&path, 30, 10, ImageFormat::Gif);
+        let image = load_for_export(&path).unwrap();
+        assert_eq!((image.width, image.height), (30, 10));
+        assert_eq!(image::guess_format(&image.bytes).unwrap(), ImageFormat::Png);
+    }
+
+    #[test]
+    fn rotated_jpeg_keeps_existing_display_direction() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("rotated.jpg");
+        write_image(&path, 30, 10, ImageFormat::Jpeg);
+        let bytes = fs::read(&path).unwrap();
+        // APP1 / Exif：小端 TIFF，方向 6（顺时针旋转 90 度）。
+        let exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x06\0\0\0\0\0\0\0";
+        let mut rotated = bytes[..2].to_vec();
+        rotated.extend_from_slice(&[0xff, 0xe1]);
+        rotated.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+        rotated.extend_from_slice(exif);
+        rotated.extend_from_slice(&bytes[2..]);
+        fs::write(&path, rotated).unwrap();
+        let image = load_for_export(&path).unwrap();
+        assert_eq!((image.width, image.height), (30, 10));
+        assert_eq!(image::guess_format(&image.bytes).unwrap(), ImageFormat::Png);
+        assert_eq!(decode(&image.bytes).unwrap().to_rgb8(), decode(&bytes).unwrap().to_rgb8());
     }
 
     #[test]
@@ -223,11 +309,11 @@ pub mod tests {
         let dir = TempDir::new().unwrap();
         let broken = dir.path().join("坏.png");
         fs::write(&broken, b"\x89PNG\r\n\x1a\nnot really").unwrap();
-        assert!(load_for_docx(&broken).is_none());
+        assert!(load_for_export(&broken).is_none());
         let text = dir.path().join("文本.png");
         fs::write(&text, "这不是图片").unwrap();
-        assert!(load_for_docx(&text).is_none());
-        assert!(load_for_docx(&dir.path().join("无.png")).is_none());
+        assert!(load_for_export(&text).is_none());
+        assert!(load_for_export(&dir.path().join("无.png")).is_none());
     }
 
     #[test]
@@ -237,6 +323,6 @@ pub mod tests {
         write_image(&path, 50, 50, ImageFormat::Png);
         let bytes = fs::read(&path).unwrap();
         fs::write(&path, &bytes[..bytes.len() / 2]).unwrap();
-        assert!(load_for_docx(&path).is_none());
+        assert!(load_for_export(&path).is_none());
     }
 }

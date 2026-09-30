@@ -10,7 +10,7 @@
 //! - 图片按统一规则确定尺寸（`export::images`）：保持比例、不放大，不超过所在容器的宽度与正文区高度；
 //!   独立成段的图片居中，为图注预留空间并与图注保持在同一页，实际分页由 Word / WPS 完成。
 
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::Path;
 
 use docx_rs::{
@@ -22,7 +22,7 @@ use docx_rs::{
 };
 
 use super::fonts::{docx_fonts, FontFamily};
-use super::images::{display_size_pt, load_for_docx, text_height_pt, Bounds};
+use super::images::{display_size_pt, load_for_export, text_height_pt, Bounds};
 use super::theme::Theme;
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{Align, Block, Inline};
@@ -99,12 +99,55 @@ pub fn export(
 
     let mut xml = docx.build();
     xml.document = mark_header_rows(&xml.document);
+    let bytes = pack_with_jpeg(xml).map_err(|error| ExportError::RenderFailed {
+        message: error.to_string(),
+    })?;
+    Ok((bytes, writer.report))
+}
+
+/// docx-rs 只按 .png 打包 Pic。将 JPEG 从默认媒体中移出，修正关系后以 .jpeg 追加。
+/// 库已声明 jpeg → image/jpeg 的内容类型；PNG 与其余文档部件仍由库原样打包。
+fn pack_with_jpeg(mut xml: docx_rs::XMLDocx) -> zip::result::ZipResult<Vec<u8>> {
+    let mut jpegs = Vec::new();
+    for (id, bytes) in std::mem::take(&mut xml.media) {
+        if bytes.starts_with(&[0xff, 0xd8]) {
+            jpegs.push((id, bytes));
+        } else {
+            xml.media.push((id, bytes));
+        }
+    }
+    if !jpegs.is_empty() {
+        // 只替换生成器产生的精确 Target 属性，不修改正文中的文字或外部链接。
+        for part in std::iter::once(&mut xml.document_rels)
+            .chain(xml.header_rels.iter_mut())
+            .chain(xml.footer_rels.iter_mut())
+        {
+            let mut rels = String::from_utf8(std::mem::take(part)).map_err(|_| {
+                zip::result::ZipError::InvalidArchive("invalid relationship XML".into())
+            })?;
+            for (id, _) in &jpegs {
+                rels = rels.replace(
+                    &format!("Target=\"media/{id}.png\""),
+                    &format!("Target=\"media/{id}.jpeg\""),
+                );
+            }
+            *part = rels.into_bytes();
+        }
+    }
     let mut bytes = Cursor::new(Vec::new());
-    xml.pack(&mut bytes)
-        .map_err(|error| ExportError::RenderFailed {
-            message: error.to_string(),
-        })?;
-    Ok((bytes.into_inner(), writer.report))
+    xml.pack(&mut bytes)?;
+    if !jpegs.is_empty() {
+        let mut archive = zip::ZipWriter::new_append(&mut bytes)?;
+        // JPEG 已压缩，直接存放，避免无收益的二次压缩。
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (id, image) in jpegs {
+            archive.start_file(format!("word/media/{id}.jpeg"), options)?;
+            archive.write_all(&image)?;
+        }
+        archive.finish()?;
+    }
+    Ok(bytes.into_inner())
 }
 
 // 只在构建期间短暂存在、随后整体移入 Docx，变体大小差异无关紧要。
@@ -415,7 +458,7 @@ impl Writer<'_> {
     }
 
     fn image_run(&mut self, src: &str, alt: &str, bounds: Bounds) -> Run {
-        let image = resolve_image(self.root, src).and_then(|path| load_for_docx(&path));
+        let image = resolve_image(self.root, src).and_then(|path| load_for_export(&path));
         let Some(image) = image else {
             self.report.missing_images.push(src.to_owned());
             let label = if alt.is_empty() { src } else { alt };
@@ -424,7 +467,7 @@ impl Writer<'_> {
                 .add_text(xml_safe(&format!("[图片无法显示：{label}]")));
         };
         let (width, height) = display_size_pt(image.width, image.height, bounds);
-        let pic = Pic::new_with_dimensions(image.png, image.width, image.height)
+        let pic = Pic::new_with_dimensions(image.bytes, image.width, image.height)
             .size(pt_to_emu(width), pt_to_emu(height));
         Run::new().add_image(pic)
     }
@@ -902,6 +945,71 @@ mod tests {
     }
 
     #[test]
+    fn jpeg_media_keeps_original_bytes_and_correct_relationships() {
+        let dir = project();
+        let path = dir.path().join("assets/photo.jpg");
+        let mut seed = 7u32;
+        let image = image::RgbImage::from_fn(1200, 800, |_, _| {
+            let mut next = || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            };
+            image::Rgb([next(), next(), next()])
+        });
+        image.save_with_format(&path, ImageFormat::Jpeg).unwrap();
+        let jpeg = fs::read(&path).unwrap();
+        let started = std::time::Instant::now();
+        let (bytes, report) = export_ok(
+            &dir,
+            &[(
+                "a",
+                vec![1],
+                "Photos",
+                "![Photo](../assets/photo.jpg)\n\n![Again](../assets/photo.jpg)",
+            )],
+        );
+        println!(
+            "JPEG Word: {:?}, {} bytes (source: {})",
+            started.elapsed(),
+            bytes.len(),
+            jpeg.len()
+        );
+        assert!(report.missing_images.is_empty());
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        let names: Vec<_> = archive
+            .file_names()
+            .filter(|name| name.starts_with("word/media/") && !name.ends_with('/'))
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(names.len(), 1, "重复图片只嵌入一次");
+        assert!(names[0].ends_with(".jpeg"));
+        let mut embedded = Vec::new();
+        archive.by_name(&names[0]).unwrap()
+            .read_to_end(&mut embedded).unwrap();
+        assert_eq!(embedded, jpeg);
+        let rels = part(&bytes, "word/_rels/document.xml.rels");
+        assert!(rels.contains(&format!(
+            "Target=\"{}\"",
+            names[0].strip_prefix("word/").unwrap()
+        )));
+        let content_types = part(&bytes, "[Content_Types].xml");
+        assert!(content_types.split("<Default ").skip(1).any(|part| {
+            let tag = part.split('>').next().unwrap();
+            tag.contains("Extension=\"jpeg\"") && tag.contains("ContentType=\"image/jpeg\"")
+        }));
+        assert!(bytes.len() < jpeg.len() + 100_000);
+        let reopened = docx_rs::read_docx_with_options(
+            &bytes,
+            docx_rs::ReadDocxOptions::default().with_image_previews(false),
+        )
+        .unwrap();
+        assert_eq!(reopened.images.len(), 1);
+        assert_eq!(reopened.images[0].2.0, jpeg);
+    }
+
+    #[test]
     fn images_are_embedded_scaled_and_missing_ones_reported() {
         let dir = project();
         write_image(
@@ -933,6 +1041,18 @@ mod tests {
             )],
         );
         assert_eq!(media_count(&bytes), 3);
+        let mut archive = zip::ZipArchive::new(Cursor::new(&bytes)).unwrap();
+        let jpegs: Vec<_> = archive
+            .file_names()
+            .filter(|name| name.ends_with(".jpeg"))
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(jpegs.len(), 1);
+        let mut encoded = Vec::new();
+        archive.by_name(&jpegs[0]).unwrap()
+            .read_to_end(&mut encoded).unwrap();
+        let scaled = image::load_from_memory(&encoded).unwrap();
+        assert_eq!((scaled.width(), scaled.height()), (2400, 1200));
         assert_eq!(
             report.missing_images,
             vec!["../assets/坏.png", "../assets/丢.png"]
@@ -1189,10 +1309,10 @@ fn write_sample_docx() {
     std::fs::create_dir_all(root.join("assets")).unwrap();
     std::fs::create_dir_all(root.join("content")).unwrap();
     write_image(
-        &root.join("assets/示意图.png"),
+        &root.join("assets/示意图.jpg"),
         640,
         320,
-        image::ImageFormat::Png,
+        image::ImageFormat::Jpeg,
     );
     // 竖长图用于核对完整正文区高度限制与图注预留。
     write_image(
@@ -1212,7 +1332,7 @@ fn write_sample_docx() {
         chapters: vec![
             chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
-            chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
+            chapter("c", vec![2], "方法", "![示意图](../assets/示意图.jpg)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
     };
     let (bytes, report) = export(&build(&request), &root).unwrap();

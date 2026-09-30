@@ -23,7 +23,7 @@ use typst_kit::fonts::FontStore;
 use typst_layout::PagedDocument;
 
 use super::fonts::{bundled_font_dirs, families, FontFamily, CJK_PROBE};
-use super::images::{display_size_pt, load_for_docx, Bounds};
+use super::images::{display_size_pt, load_for_export, Bounds};
 use super::theme::{HeadingStyle, Theme};
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{plain_text, Align, Block, Inline};
@@ -442,7 +442,7 @@ impl Writer<'_> {
     /// 高度不超过 max_height（Typst 长度表达式，可以引用排版时测得的尺寸与 layout 的 size）。
     /// 只给出宽度，高度按比例得到。
     fn image(&mut self, src: &str, alt: &str, max_width: f64, max_height: &str) -> String {
-        let Some(image) = resolve_image(self.root, src).and_then(|path| load_for_docx(&path))
+        let Some(image) = resolve_image(self.root, src).and_then(|path| load_for_export(&path))
         else {
             self.report.missing_images.push(src.to_owned());
             let label = if alt.is_empty() { src } else { alt };
@@ -452,7 +452,13 @@ impl Writer<'_> {
             );
         };
         let index = self.images.len();
-        self.images.push(Bytes::new(image.png));
+        // 虚拟路径固定为 .png，格式显式指定，避免 Typst 按扩展名解码 JPEG。
+        let format = if image.bytes.starts_with(&[0xff, 0xd8]) {
+            "jpg"
+        } else {
+            "png"
+        };
+        self.images.push(Bytes::new(image.bytes));
         let bounds = Bounds {
             width: max_width,
             height: f64::INFINITY,
@@ -460,7 +466,7 @@ impl Writer<'_> {
         let (width, height) = display_size_pt(image.width, image.height, bounds);
         format!(
             // 不设最小宽度：极窄的长图宽度可以小于 1pt，高度上限优先（宽度由高度上限按比例反推）。
-            "layout(size => image(\"/img/{index}.png\", width: calc.max(0pt, calc.min({width:.2}pt, size.width, ({max_height}) * {ratio}))))",
+            "layout(size => image(\"/img/{index}.png\", format: \"{format}\", width: calc.max(0pt, calc.min({width:.2}pt, size.width, ({max_height}) * {ratio}))))",
             ratio = width / height,
         )
     }
@@ -657,6 +663,159 @@ mod tests {
         text.matches("/Type /Page\n").count()
             + text.matches("/Type /Page ").count()
             + text.matches("/Type/Page/").count()
+    }
+
+    /// 24 张 JPEG（约 29 MB）与正文的分阶段基准，不计 fixture 生成与字体库预热。
+    /// `cargo test --lib measure_image_pdf_export -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn measure_image_pdf_export() {
+        let dir = project();
+        let mut chapters = Vec::new();
+        let mut seed = 7u32;
+        let fonts = system_fonts();
+        let mut image_bytes = 0;
+        for n in 1..=24 {
+            let path = dir.path().join(format!("assets/photo-{n}.jpg"));
+            let image = image::RgbImage::from_fn(1200, 800, |_, _| {
+                let mut next = || {
+                    seed ^= seed << 13;
+                    seed ^= seed >> 17;
+                    seed ^= seed << 5;
+                    seed as u8
+                };
+                image::Rgb([next(), next(), next()])
+            });
+            image.save_with_format(&path, ImageFormat::Jpeg).unwrap();
+            image_bytes += fs::metadata(&path).unwrap().len();
+            chapters.push(RenderChapter {
+                id: format!("{n}"),
+                number: vec![n],
+                title: format!("第 {n} 章"),
+                markdown: format!(
+                    "{}\n\n![照片](../assets/photo-{n}.jpg)",
+                    vec!["长文档写作需要清晰的结构与稳定的输出。".repeat(20); 5].join("\n\n")
+                ),
+            });
+        }
+        let document = build(&RenderRequest {
+            title: "图文性能测试".into(),
+            chapters,
+        });
+        let started = std::time::Instant::now();
+        let (word, report) = crate::export::docx::export(&document, dir.path()).unwrap();
+        println!("Word export: {:?}, {} bytes", started.elapsed(), word.len());
+        assert!(report.missing_images.is_empty());
+        let mut writer = Writer {
+            theme: Theme::default(),
+            root: dir.path(),
+            out: String::new(),
+            images: Vec::new(),
+            report: ExportReport::default(),
+            quote_font: String::new(),
+        };
+        let started = std::time::Instant::now();
+        writer.preamble(&document, fonts.book());
+        for section in &document.sections {
+            writer.section(section);
+        }
+        println!(
+            "image preparation: {:?}, {} source bytes",
+            started.elapsed(),
+            image_bytes
+        );
+        let world = PdfWorld::new(writer.out, writer.images, fonts);
+        let started = std::time::Instant::now();
+        let paged = typst::compile::<PagedDocument>(&world).output.unwrap();
+        println!(
+            "image layout: {:?}, {} pages",
+            started.elapsed(),
+            paged.pages().len()
+        );
+        let started = std::time::Instant::now();
+        let bytes = typst_pdf::pdf(&paged, &Default::default()).unwrap();
+        println!(
+            "image PDF encoding: {:?}, {} bytes",
+            started.elapsed(),
+            bytes.len()
+        );
+        assert!(writer.report.missing_images.is_empty());
+        comemo::evict(0);
+    }
+
+    #[test]
+    #[ignore]
+    fn measure_text_pdf_export() {
+        let dir = project();
+        let body = vec!["长文档写作需要清晰的结构与稳定的输出。".repeat(20); 5]
+            .join("\n\n");
+        let document = build(&RenderRequest {
+            title: "性能测试".into(),
+            chapters: (1..=50)
+                .map(|n| RenderChapter {
+                    id: format!("{n}"),
+                    number: vec![n],
+                    title: format!("第 {n} 章"),
+                    markdown: body.clone(),
+                })
+                .collect(),
+        });
+        let fonts = system_fonts();
+        let started = std::time::Instant::now();
+        let (paged, _) = layout(&document, dir.path(), fonts).unwrap();
+        println!(
+            "text layout: {:?}, {} pages",
+            started.elapsed(),
+            paged.pages().len()
+        );
+        for tagged in [true, false] {
+            let started = std::time::Instant::now();
+            let options = typst_pdf::PdfOptions {
+                tagged,
+                ..Default::default()
+            };
+            let bytes = typst_pdf::pdf(&paged, &options).unwrap();
+            println!(
+                "text PDF tagged={tagged}: {:?}, {} bytes",
+                started.elapsed(),
+                bytes.len()
+            );
+        }
+        comemo::evict(0);
+    }
+
+    #[test]
+    fn jpeg_is_embedded_without_png_conversion() {
+        let dir = project();
+        let path = dir.path().join("assets/photo.jpg");
+        // 照片类纹理：解码后再无损压缩会比原 JPEG 大很多。
+        let mut seed = 7u32;
+        let image = image::RgbImage::from_fn(1200, 800, |_, _| {
+            let mut next = || {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            };
+            image::Rgb([next(), next(), next()])
+        });
+        image.save_with_format(&path, ImageFormat::Jpeg).unwrap();
+        let jpeg = fs::read(&path).unwrap();
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "Photo", "![Photo](../assets/photo.jpg)")],
+        ));
+        let started = std::time::Instant::now();
+        let (pdf, report) = export(&document, dir.path(), system_fonts()).unwrap();
+        println!(
+            "JPEG PDF: {:?}, {} bytes (source: {})",
+            started.elapsed(),
+            pdf.len(),
+            jpeg.len()
+        );
+        assert!(report.missing_images.is_empty());
+        assert!(pdf.windows(jpeg.len()).any(|bytes| bytes == jpeg));
+        assert!(pdf.len() < jpeg.len() + 100_000);
     }
 
     #[test]
