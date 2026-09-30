@@ -33,7 +33,6 @@ type SemInline =
 type SemItem = { task: boolean | null; blocks: SemBlock[] }
 type SemBlock =
   | { type: 'paragraph'; inlines: SemInline[] }
-  | { type: 'heading'; level: number; inlines: SemInline[] }
   | { type: 'figure'; src: string; alt: string }
   | { type: 'quote'; blocks: SemBlock[] }
   | { type: 'code'; language: string | null; text: string }
@@ -92,8 +91,6 @@ function block(node: Node): SemBlock {
   switch (node.type) {
     case nodes.paragraph:
       return { type: 'paragraph', inlines: inlines(node) }
-    case nodes.heading:
-      return { type: 'heading', level: node.attrs.level as number, inlines: inlines(node) }
     case nodes.figure:
       return { type: 'figure', src: node.attrs.src as string, alt: node.attrs.alt as string }
     case nodes.blockquote:

@@ -337,11 +337,12 @@ test('编辑环境的默认展示参数以 CSS 变量作用在编辑器外层，
   expect(rootVar(wrapper, '--doc-body-font')).toBe(FONT_STACKS.serif)
 })
 
-test('标题样式按章节层级映射：第 2 级章节的 # 是第 3 级标题', () => {
+test('章节标题样式按章节层级映射；正文中的 # 只是文字', () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '# 小节', number: '2.1' })
   expect(rootVar(wrapper, '--heading-size')).toBe('var(--doc-h2-size)')
-  expect(rootVar(wrapper, '--md-h1-size')).toBe('var(--doc-h3-size)')
-  expect(rootVar(wrapper, '--md-h6-font')).toBe('var(--doc-h3-font)')
+  const view = viewOf(wrapper)
+  expect(view.dom.querySelector('h1, h2, h3, h4, h5, h6')).toBeNull()
+  expect(view.state.doc.textContent).toBe('# 小节')
 })
 
 function selectFirstImage(view: EditorView): void {

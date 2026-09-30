@@ -132,8 +132,9 @@ test('常见格式快捷键', () => {
 
 test('Markdown 输入规则：块结构', () => {
   const cases: Array<[string, string]> = [
-    ['# 标题', '# 标题\n'],
-    ['## 小节', '## 小节\n'],
+    // 正文不支持标题：# 只是文字。
+    ['# 标题', '\\# 标题\n'],
+    ['## 小节', '\\## 小节\n'],
     ['- 列表', '- 列表\n'],
     ['1. 有序', '1. 有序\n'],
     ['> 引用', '> 引用\n'],
@@ -164,7 +165,8 @@ test('剪贴板：复制出 Markdown 文本，粘贴的纯文本按 Markdown 解
   expect(serializer(view.state.doc.slice(0, view.state.doc.content.size), view)).toBe('**粗体**与*斜体*\n\n- 列表')
   const parser = view.someProp('clipboardTextParser')!
   const slice = parser('## 标题\n\n| a |\n| - |\n| b |', view.state.doc.resolve(1), false, view)
-  expect(slice.content.child(0).type.name).toBe('heading')
+  expect(slice.content.child(0).type.name).toBe('paragraph')
+  expect(slice.content.child(0).textContent).toBe('## 标题')
   expect(slice.content.child(1).type.name).toBe('table')
 })
 
@@ -288,27 +290,13 @@ test('代码块是章节的最后 / 第一个块时，↓ / ↑ 在其后 / 前�
 })
 
 test('刚由输入规则转换后按 Mod+Z：回到转换前的文字', () => {
-  for (const input of ['- ', '1. ', '> ', '## ', '```']) {
+  for (const input of ['- ', '1. ', '> ', '```']) {
     const view = viewOf('')
     typeText(view, input)
     press(view, 'z', { mod: true })
     expect(view.state.doc.firstChild!.type.name).toBe('paragraph')
     expect(view.state.doc.textContent).toBe(input)
   }
-})
-
-test('标题开头按 Backspace 先变回正文段落，再按一次才与上一段合并', () => {
-  const view = viewOf('正文\n\n## 标题')
-  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, view.state.doc.firstChild!.nodeSize + 1)))
-  press(view, 'Backspace')
-  expect(markdown(view)).toBe('正文\n\n标题\n')
-  press(view, 'Backspace')
-  expect(markdown(view)).toBe('正文标题\n')
-
-  const first = viewOf('# 标题')
-  first.dispatch(first.state.tr.setSelection(Selection.atStart(first.state.doc)))
-  press(first, 'Backspace')
-  expect(markdown(first)).toBe('标题\n')
 })
 
 test('表头单元格末尾有不可编辑的空标记（WebKit 输入法确认时单元格不会变空），标记不进入正文', () => {
@@ -340,7 +328,7 @@ test('光标在表格中时表格带 is-active（编辑时显示单元格边界�
 test('章节第一行是空段落、后面还有内容时，按 Backspace 删掉这一行，光标进入下一块开头', () => {
   for (const [source, expected, cursorIn] of [
     ['正文', '正文\n', 'paragraph'],
-    ['## 标题', '## 标题\n', 'heading'],
+    ['> 引用', '> 引用\n', 'paragraph'],
     ['- 列表', '- 列表\n', 'paragraph'],
     ['| a | b |\n| --- | --- |\n| 1 | 2 |', '| a | b |\n| --- | --- |\n| 1 | 2 |\n', 'table_header'],
   ] as const) {

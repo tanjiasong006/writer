@@ -49,13 +49,6 @@ pub struct Section {
     pub blocks: Vec<Block>,
 }
 
-impl Section {
-    /// 正文内部标题的实际层级：章节层级之下再加 Markdown 级别。
-    pub fn body_heading_depth(&self, markdown_level: u8) -> usize {
-        self.depth + usize::from(markdown_level)
-    }
-}
-
 pub fn build(request: &RenderRequest) -> Document {
     Document {
         title: request.title.clone(),
@@ -155,7 +148,6 @@ mod tests {
         assert_eq!(document.sections[0].number, "1");
         assert_eq!(document.sections[1].number, "1.2");
         assert_eq!(document.sections[1].depth, 2);
-        assert_eq!(document.sections[1].body_heading_depth(1), 3);
         assert!(document.sections[1].blocks.is_empty());
     }
 

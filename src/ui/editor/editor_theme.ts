@@ -29,17 +29,11 @@ interface TextStyle {
   readonly size: number
 }
 
-interface HeadingStyle extends TextStyle {
-  /** 标题前后的间距（em，相对标题字号）。 */
-  readonly before: number
-  readonly after: number
-}
-
 export interface EditorTheme {
   /** lineHeight：相邻两行基线的距离 / 字号；paragraphSpacing：段落之间额外的间距（em）。 */
   readonly body: TextStyle & { readonly lineHeight: number; readonly paragraphSpacing: number }
-  /** 第 1、2、3 级标题；更深的层级使用第 3 级。 */
-  readonly headings: readonly [HeadingStyle, HeadingStyle, HeadingStyle]
+  /** 第 1、2、3 级章节标题；更深的层级使用第 3 级。正文中没有标题。 */
+  readonly headings: readonly [TextStyle, TextStyle, TextStyle]
   readonly quote: TextStyle
   readonly codeSize: number
   readonly tableSize: number
@@ -50,14 +44,14 @@ export interface EditorTheme {
 
 /**
  * 默认的编辑展示：宋体类正文、无衬线标题、楷体引用。
- * 标题字号拉开层级，第 3 级与正文同字号，靠字体、字重与标题前的间距区分。
+ * 章节标题字号拉开层级，第 3 级与正文同字号，靠字体与字重区分。
  */
 export const DEFAULT_EDITOR_THEME: EditorTheme = {
   body: { font: 'serif', size: 17, lineHeight: 1.78, paragraphSpacing: 0.6 },
   headings: [
-    { font: 'sans', size: 26, before: 1.4, after: 0.6 },
-    { font: 'sans', size: 20, before: 1.7, after: 0.5 },
-    { font: 'sans', size: 17, before: 1.5, after: 0.35 },
+    { font: 'sans', size: 26 },
+    { font: 'sans', size: 20 },
+    { font: 'sans', size: 17 },
   ],
   quote: { font: 'kai', size: 17 },
   codeSize: 14,
@@ -85,25 +79,13 @@ export function editorThemeCssVars(theme: EditorTheme): Record<string, string> {
     '--doc-image-spacing': em(theme.imageSpacing),
   }
   theme.headings.forEach((heading, index) => {
-    Object.assign(vars, text(`h${index + 1}`, heading), {
-      [`--doc-h${index + 1}-before`]: em(heading.before),
-      [`--doc-h${index + 1}-after`]: em(heading.after),
-    })
+    Object.assign(vars, text(`h${index + 1}`, heading))
   })
   return vars
 }
 
-/**
- * 标题的变量：章节标题是第 depth 级；正文中的 # … ###### 叠加在章节层级之下（第 depth + n 级）。
- * `--heading-*` 给章节标题，`--md-hN-*` 给正文第 N 级标题；第 3 级及更深共用第 3 级。
- */
+/** 章节标题的变量（`--heading-*`）：第 depth 级章节使用第 depth 级标题样式，第 3 级及更深共用第 3 级。 */
 export function editorHeadingVars(depth: number): Record<string, string> {
-  const vars: Record<string, string> = {}
-  const assign = (prefix: string, level: number) => {
-    const source = `--doc-h${Math.min(Math.max(level, 1), 3)}`
-    for (const part of ['font', 'size', 'before', 'after']) vars[`${prefix}-${part}`] = `var(${source}-${part})`
-  }
-  assign('--heading', depth)
-  for (let n = 1; n <= 6; n++) assign(`--md-h${n}`, depth + n)
-  return vars
+  const source = `--doc-h${Math.min(Math.max(depth, 1), 3)}`
+  return { '--heading-font': `var(${source}-font)`, '--heading-size': `var(${source}-size)` }
 }

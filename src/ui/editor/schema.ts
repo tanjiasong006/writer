@@ -14,9 +14,10 @@ import { tableNodes } from 'prosemirror-tables'
  * 正文结构的权威定义。
  *
  * 只包含正文持久化格式（Markdown，docs/decisions.md 第 2 节）能表达、且导出
- * （Rust pulldown-cmark）能渲染的结构：段落、标题、引用、列表（含任务列表标记）、代码块、
+ * （Rust pulldown-cmark）能渲染的结构：段落、引用、列表（含任务列表标记）、代码块、
  * 分隔线、表格、图片（独占一段的 figure 与行内图片）、硬换行，以及粗体、斜体、删除线、行内代码、链接。
  * 不能用 Markdown 表达的结构（合并单元格、单元格内多段落等）不进入 schema。
+ * 正文不支持标题与 HTML（docs/decisions.md 第 8 节）：结构由章节树表达，Markdown 中的标题与 HTML 都是文字。
  */
 
 type Align = 'left' | 'center' | 'right'
@@ -101,16 +102,6 @@ export const schema = new Schema({
       group: 'block',
       parseDOM: [{ tag: 'p' }],
       toDOM: (): DOMOutputSpec => ['p', 0],
-    },
-
-    heading: {
-      attrs: { level: { default: 1, validate: 'number' } },
-      // ATX 标题只有一行：不允许硬换行。
-      content: '(text | image)*',
-      group: 'block',
-      defining: true,
-      parseDOM: [1, 2, 3, 4, 5, 6].map((level) => ({ tag: `h${level}`, attrs: { level } })),
-      toDOM: (node): DOMOutputSpec => [`h${node.attrs.level}`, 0],
     },
 
     blockquote: {

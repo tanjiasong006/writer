@@ -7,7 +7,6 @@ import {
   exitCode,
   newlineInCode,
   selectParentNode,
-  setBlockType,
 } from 'prosemirror-commands'
 import { history } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
@@ -208,13 +207,6 @@ function arrowOutOfTable(dir: 'up' | 'down'): Command {
   }
 }
 
-/** 标题开头按 Backspace：先变回正文段落（与列表、引用开头按 Backspace 先离开结构一致），再按一次才与上一段合并。 */
-const headingToParagraph: Command = (state, dispatch) => {
-  const { $cursor } = state.selection as TextSelection
-  if (!$cursor || $cursor.parentOffset > 0 || $cursor.parent.type !== nodes.heading) return false
-  return setBlockType(nodes.paragraph)(state, dispatch)
-}
-
 /**
  * 章节第一行是空段落、后面还有内容时按 Backspace：删掉这一行，光标进入下一块的开头。
  * 默认的 Backspace 在文档开头没有可合并的上一块，什么也不做，第一行的空行就删不掉。
@@ -243,7 +235,7 @@ const editingKeymap = keymap({
   [proseMirrorKey(SHORTCUTS.inlineCode)]: toggleCode,
   [proseMirrorKey(SHORTCUTS.outdent)]: liftListItem(nodes.list_item),
   [proseMirrorKey(SHORTCUTS.indent)]: sinkListItem(nodes.list_item),
-  Backspace: chainCommands(undoInputRule, headingToParagraph, selectFigureBackward, deleteEmptyFirstBlock),
+  Backspace: chainCommands(undoInputRule, selectFigureBackward, deleteEmptyFirstBlock),
   Delete: selectFigureForward,
   Escape: selectParentNode,
   Enter: chainCommands(exitCodeAfterBlankLines, newlineInCode, enterInCell, newParagraphAtBlock, splitListItem(nodes.list_item)),
@@ -268,7 +260,6 @@ function blockInputRules(): Plugin {
       (match, node) => node.childCount + node.attrs.order === Number(match[1]),
     ),
     textblockTypeInputRule(/^```$/, nodes.code_block),
-    textblockTypeInputRule(/^(#{1,6})\s$/, nodes.heading, (match) => ({ level: match[1].length })),
     horizontalRuleRule(nodes.horizontal_rule),
   ]
   return inputRules({ rules })

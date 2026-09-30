@@ -4,7 +4,7 @@ import { EditorState } from 'prosemirror-state'
 import { appendImage, parseChapter, parseMarkdown, serializeChapter } from './markdown.ts'
 import { marks, nodes, schema } from './schema.ts'
 
-const { doc, paragraph: p, heading, blockquote, code_block, bullet_list, ordered_list, list_item } = nodes
+const { doc, paragraph: p, blockquote, code_block, bullet_list, ordered_list, list_item } = nodes
 const { table, table_row, table_header, table_cell, image, figure, hard_break, horizontal_rule } = nodes
 
 function text(value: string, ...markNames: Array<keyof typeof marks>) {
@@ -133,14 +133,25 @@ describe('Markdown → 文档', () => {
     expect(parsed.child(1).child(0).marks).toEqual([])
   })
 
-  test('标题、引用、分隔线、硬换行', () => {
-    const parsed = parseMarkdown('## 小节\n\n> 引用\n\n---\n\n甲  \n乙\\\n丙')
-    expect(parsed.child(0).type).toBe(heading)
-    expect(parsed.child(0).attrs.level).toBe(2)
-    expect(parsed.child(1).type).toBe(blockquote)
-    expect(parsed.child(2).type).toBe(horizontal_rule)
+  test('正文不支持标题：Markdown 标题是原文文字的段落，强调记号也是文字；写回时转义', () => {
+    const parsed = parseMarkdown('## 二级 **强调** 标题 ##\n段落\n# 打断\n\n标题\n===')
+    expect(parsed.childCount).toBe(4)
+    parsed.forEach((node) => expect(node.type).toBe(p))
+    expect(parsed.child(0).textContent).toBe('## 二级 **强调** 标题')
+    expect(parsed.child(0).child(0).marks).toEqual([])
+    expect(parsed.child(2).textContent).toBe('# 打断')
+    expect(parsed.child(3).textContent).toBe('标题 ===')
+    const written = write(parsed)
+    expect(written).toBe('\\## 二级 \\*\\*强调\\*\\* 标题\n\n段落\n\n\\# 打断\n\n标题 ===\n')
+    expect(parseMarkdown(written).toJSON()).toEqual(parsed.toJSON())
+  })
+
+  test('引用、分隔线、硬换行', () => {
+    const parsed = parseMarkdown('> 引用\n\n---\n\n甲  \n乙\\\n丙')
+    expect(parsed.child(0).type).toBe(blockquote)
+    expect(parsed.child(1).type).toBe(horizontal_rule)
     const breaks: string[] = []
-    parsed.child(3).forEach((child) => breaks.push(child.type.name))
+    parsed.child(2).forEach((child) => breaks.push(child.type.name))
     expect(breaks).toEqual(['text', 'hard_break', 'text', 'hard_break', 'text'])
   })
 
@@ -159,7 +170,6 @@ describe('文档 → Markdown', () => {
     const written = write(
       doc.create(null, [
         p.create(null, [text('本节介绍'), text('实验设计', 'strong'), text('与'), text('变量控制', 'em'), text('。')]),
-        heading.create({ level: 2 }, text('样本')),
         bullet_list.create(null, [list_item.create(null, p.create(null, text('对照组'))), list_item.create(null, p.create(null, text('实验组')))]),
         blockquote.create(null, p.create(null, text('所有数据均经过脱敏处理。'))),
         code_block.create({ params: 'python' }, text('print("hello")')),
@@ -168,8 +178,6 @@ describe('文档 → Markdown', () => {
     expect(written).toBe(
       [
         '本节介绍**实验设计**与*变量控制*。',
-        '',
-        '## 样本',
         '',
         '- 对照组',
         '- 实验组',
@@ -331,10 +339,10 @@ describe('往返', () => {
   })
 
   test('解析 → 编辑 → 序列化：只有被编辑的部分改变', () => {
-    const { doc: parsed, format } = parseChapter('# 标题\n\n第一段\n\n- 列表\n')
+    const { doc: parsed, format } = parseChapter('> 引用\n\n第一段\n\n- 列表\n')
     const paragraphEnd = parsed.child(0).nodeSize + parsed.child(1).nodeSize - 1
     const edited = EditorState.create({ doc: parsed }).tr.insert(paragraphEnd, text('补充', 'strong')).doc
-    expect(serializeChapter(edited, format)).toBe('# 标题\n\n第一段**补充**\n\n- 列表\n')
+    expect(serializeChapter(edited, format)).toBe('> 引用\n\n第一段**补充**\n\n- 列表\n')
   })
 
   test('随机文档：写出后再次解析，结构与文字不变', () => {
@@ -377,7 +385,6 @@ describe('往返', () => {
           table_row.create(null, [type.create(null, inline(false)), type.create(null, inline(false))])
         return table.create(null, [row(table_header), row(table_cell)])
       }
-      if (roll === 6) return heading.create({ level: 1 + Math.floor(random() * 6) }, inline(false))
       if (roll === 7) return horizontal_rule.create()
       return p.create(null, inline(true))
     }

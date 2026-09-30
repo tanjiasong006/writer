@@ -88,9 +88,6 @@ fn block(block: &Block) -> Value {
     }
     match block {
         Block::Paragraph(content) => json!({ "type": "paragraph", "inlines": inlines(content) }),
-        Block::Heading { level, inlines: content } => {
-            json!({ "type": "heading", "level": level, "inlines": inlines(content) })
-        }
         Block::Quote(children) => json!({ "type": "quote", "blocks": blocks(children) }),
         Block::Code { language, text } => {
             json!({ "type": "code", "language": language, "text": text })

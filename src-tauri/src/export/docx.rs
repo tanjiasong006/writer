@@ -162,11 +162,6 @@ impl Writer<'_> {
             return;
         }
         match block {
-            Block::Heading { level, inlines } => {
-                let level = section.body_heading_depth(*level).clamp(1, MAX_HEADING);
-                let p = self.inlines(heading(level), inlines, RunStyle::default(), text_bounds(text_width_pt()));
-                self.items.push(Item::Paragraph(p));
-            }
             Block::Paragraph(inlines) => {
                 let p = self.paragraph_for(context);
                 let p = self.inlines(p, inlines, RunStyle::default(), text_bounds(content_width_pt(context, 0)));
@@ -731,10 +726,6 @@ fn has_image(inlines: &[Inline]) -> bool {
     })
 }
 
-fn text_width_pt() -> f64 {
-    f64::from(TEXT_WIDTH) / 20.0
-}
-
 /// 块内容的可用宽度（磅）：正文宽度减去引用与列表的缩进。list_level 是内容所在的列表缩进层数。
 fn content_width_pt(context: BlockContext, list_level: usize) -> f64 {
     let levels = list_level.max(context.list_level) + context.quote_level;
@@ -840,8 +831,9 @@ mod tests {
         assert!(xml.contains("1 绪论"));
         assert!(xml.contains(r#"<w:pStyle w:val="Heading2" />"#));
         assert!(xml.contains("1.2 研究方法"));
-        // 第 1 级章节中的 ## → 第 3 级标题，不带编号。
-        assert!(xml.contains(r#"<w:pStyle w:val="Heading3" />"#));
+        // 正文不支持标题：## 是普通段落中的文字。
+        assert!(!xml.contains(r#"<w:pStyle w:val="Heading3" />"#));
+        assert!(xml.contains("## 小节"));
         assert!(xml.contains("正文第一段。"));
         let styles = part(&bytes, "word/styles.xml");
         assert!(styles.contains(r#"w:styleId="Heading1""#));
@@ -863,9 +855,9 @@ mod tests {
             )],
         );
         let xml = part(&bytes, "word/document.xml");
-        // 标题（文档标题除外）：章节标题与正文内标题都与下一段同页、不拆行。
+        // 标题（文档标题除外）：章节标题与下一段同页、不拆行；正文中的 ## 只是文字。
         let headings = xml.matches(r#"<w:pStyle w:val="Heading"#).count();
-        assert_eq!(headings, 2);
+        assert_eq!(headings, 1);
         assert_eq!(xml.matches("<w:keepNext />").count(), headings);
         assert_eq!(xml.matches("<w:keepLines />").count(), headings);
         // 只有表头行在每页重复，且不跨页拆分。

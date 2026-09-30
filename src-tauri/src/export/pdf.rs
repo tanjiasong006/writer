@@ -122,7 +122,7 @@ fn document_has_cjk(document: &Document) -> bool {
     }
     fn blocks_have_cjk(blocks: &[Block]) -> bool {
         blocks.iter().any(|block| match block {
-            Block::Heading { inlines, .. } | Block::Paragraph(inlines) => inlines_have_cjk(inlines),
+            Block::Paragraph(inlines) => inlines_have_cjk(inlines),
             Block::List { items, .. } => items.iter().any(|item| blocks_have_cjk(item)),
             Block::Quote(blocks) => blocks_have_cjk(blocks),
             Block::Code { text, .. } => text.chars().any(is_cjk),
@@ -318,11 +318,6 @@ impl Writer<'_> {
             };
         }
         match block {
-            Block::Heading { level, inlines } => format!(
-                "#heading(level: {})[{}]",
-                section.body_heading_depth(*level),
-                self.inlines(inlines, &Container::text_area())
-            ),
             Block::Paragraph(inlines) => self.inlines(inlines, &Container::text_area()),
             Block::List { ordered, start, items } => {
                 let items: Vec<String> = items.iter().map(|item| format!("[{}]", self.blocks(item, section))).collect();

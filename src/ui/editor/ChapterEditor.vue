@@ -399,53 +399,6 @@ defineExpose({
   pointer-events: none;
 }
 
-/* 正文中的 # … ######：叠加在章节层级之下，--md-hN-* 由组件按章节层级映射到对应级别的标题样式。 */
-.chapter-editor__body :deep(h1),
-.chapter-editor__body :deep(h2),
-.chapter-editor__body :deep(h3),
-.chapter-editor__body :deep(h4),
-.chapter-editor__body :deep(h5),
-.chapter-editor__body :deep(h6) {
-  font-weight: var(--weight-semibold);
-  line-height: 1.4;
-}
-
-.chapter-editor__body :deep(h1) {
-  margin: var(--md-h1-before) 0 var(--md-h1-after);
-  font-family: var(--md-h1-font);
-  font-size: var(--md-h1-size);
-}
-
-.chapter-editor__body :deep(h2) {
-  margin: var(--md-h2-before) 0 var(--md-h2-after);
-  font-family: var(--md-h2-font);
-  font-size: var(--md-h2-size);
-}
-
-.chapter-editor__body :deep(h3) {
-  margin: var(--md-h3-before) 0 var(--md-h3-after);
-  font-family: var(--md-h3-font);
-  font-size: var(--md-h3-size);
-}
-
-.chapter-editor__body :deep(h4) {
-  margin: var(--md-h4-before) 0 var(--md-h4-after);
-  font-family: var(--md-h4-font);
-  font-size: var(--md-h4-size);
-}
-
-.chapter-editor__body :deep(h5) {
-  margin: var(--md-h5-before) 0 var(--md-h5-after);
-  font-family: var(--md-h5-font);
-  font-size: var(--md-h5-size);
-}
-
-.chapter-editor__body :deep(h6) {
-  margin: var(--md-h6-before) 0 var(--md-h6-after);
-  font-family: var(--md-h6-font);
-  font-size: var(--md-h6-size);
-}
-
 .chapter-editor__body :deep(blockquote) {
   margin: 1.2em 0;
   padding: 0 0 0 1.2em;

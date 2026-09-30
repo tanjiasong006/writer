@@ -1,19 +1,16 @@
 //! Markdown → 块 / 行内模型。Word、PDF 共用这一份解析结果，保证两者结构一致；
 //! 与编辑器（另一套实现）的一致性由共享语义 fixture 约束（docs/decisions.md 第 8 节）。
 //!
-//! 原始 HTML 一律作为普通文本处理，与编辑器的方言一致。
+//! 正文不支持标题与 HTML（docs/decisions.md 第 8 节），与编辑器的方言一致：
+//! 原始 HTML 一律作为普通文本；Markdown 标题作为普通段落，文字是标题的原文（见 HeadingsAsText）。
 
+use std::collections::VecDeque;
 use std::iter::Peekable;
 
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
-    /// 正文内部的标题；level 为 Markdown 中的级别（1..=6），渲染时再叠加章节深度。
-    Heading {
-        level: u8,
-        inlines: Vec<Inline>,
-    },
     Paragraph(Vec<Inline>),
     List {
         ordered: bool,
@@ -80,11 +77,90 @@ const MAX_NESTING: usize = 32;
 pub fn parse(markdown: &str) -> Vec<Block> {
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
-    let mut events = Parser::new_ext(markdown, options).peekable();
+    let mut events = HeadingsAsText {
+        source: markdown,
+        inner: Parser::new_ext(markdown, options).into_offset_iter(),
+        queued: VecDeque::new(),
+    }
+    .peekable();
     blocks(&mut events, &|_| false, 0)
 }
 
-type Events<'a> = Peekable<Parser<'a>>;
+type Events<'a> = Peekable<HeadingsAsText<'a>>;
+
+/// 把标题换成普通段落：文字是标题的原文（如“## 研究背景”），其中的强调、链接等记号也只是文字。
+/// 块的边界仍按 Markdown 标题判断，与编辑器（ui/editor/markdown.ts 的 writer_heading_as_text）一致。
+struct HeadingsAsText<'a> {
+    source: &'a str,
+    inner: OffsetIter<'a>,
+    queued: VecDeque<Event<'a>>,
+}
+
+impl<'a> Iterator for HeadingsAsText<'a> {
+    type Item = Event<'a>;
+
+    fn next(&mut self) -> Option<Event<'a>> {
+        if let Some(event) = self.queued.pop_front() {
+            return Some(event);
+        }
+        let (event, range) = self.inner.next()?;
+        if !matches!(event, Event::Start(Tag::Heading { .. })) {
+            return Some(event);
+        }
+        for (event, _) in self.inner.by_ref() {
+            if matches!(event, Event::End(TagEnd::Heading(_))) {
+                break;
+            }
+        }
+        for (index, line) in heading_text(&self.source[range]).into_iter().enumerate() {
+            if index > 0 {
+                self.queued.push_back(Event::SoftBreak);
+            }
+            self.queued.push_back(Event::Text(line.into()));
+        }
+        self.queued.push_back(Event::End(TagEnd::Paragraph));
+        Some(Event::Start(Tag::Paragraph))
+    }
+}
+
+/// 标题原文的各行（之间是软换行）。ATX 标题是“#… 内容”（去掉结尾的 # 序列），
+/// Setext 标题是内容各行加下划线；每行去掉行首的空白与引用记号、行尾的空白。
+fn heading_text(raw: &str) -> Vec<String> {
+    let lines: Vec<&str> = raw.lines().collect();
+    let first = lines.first().copied().unwrap_or("").trim_start();
+    if let Some(line) = atx_heading_text(first) {
+        return vec![line];
+    }
+    lines
+        .iter()
+        .map(|line| {
+            line.trim_start_matches(|c: char| c.is_whitespace() || c == '>')
+                .trim_end()
+                .to_owned()
+        })
+        .collect()
+}
+
+fn atx_heading_text(line: &str) -> Option<String> {
+    let hashes = line.chars().take_while(|&c| c == '#').count();
+    let rest = &line[hashes..];
+    if !(1..=6).contains(&hashes) || !(rest.is_empty() || rest.starts_with([' ', '\t'])) {
+        return None;
+    }
+    let mut content = rest.trim();
+    let without_closing = content.trim_end_matches('#');
+    if without_closing.len() != content.len()
+        && (without_closing.is_empty() || without_closing.ends_with([' ', '\t']))
+    {
+        content = without_closing.trim_end();
+    }
+    let marker = &line[..hashes];
+    Some(if content.is_empty() {
+        marker.to_owned()
+    } else {
+        format!("{marker} {content}")
+    })
+}
 
 /// 读取块，直到遇到满足 stop 的结束标记（该标记被消费）。
 /// 紧凑列表项中的行内内容没有 Paragraph 包裹，这里把连续的行内事件收成一个段落。
@@ -103,13 +179,6 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
             Event::Start(Tag::Paragraph) => {
                 flush(&mut pending, &mut out);
                 out.push(Block::Paragraph(inlines(events, TagEnd::Paragraph)));
-            }
-            Event::Start(Tag::Heading { level, .. }) => {
-                flush(&mut pending, &mut out);
-                out.push(Block::Heading {
-                    level: heading_level(level),
-                    inlines: inlines(events, TagEnd::Heading(level)),
-                });
             }
             Event::Start(Tag::BlockQuote(_) | Tag::List(_)) if depth >= MAX_NESTING => {
                 flush(&mut pending, &mut out);
@@ -170,17 +239,6 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
     }
     flush(&mut pending, &mut out);
     out
-}
-
-fn heading_level(level: HeadingLevel) -> u8 {
-    match level {
-        HeadingLevel::H1 => 1,
-        HeadingLevel::H2 => 2,
-        HeadingLevel::H3 => 3,
-        HeadingLevel::H4 => 4,
-        HeadingLevel::H5 => 5,
-        HeadingLevel::H6 => 6,
-    }
 }
 
 fn list(events: &mut Events, start: Option<u64>, depth: usize) -> Block {
@@ -418,16 +476,49 @@ mod tests {
     }
 
     #[test]
-    fn headings_quotes_rules() {
+    fn headings_are_plain_paragraphs_quotes_rules() {
         assert_eq!(
             parse("## 小节\n\n> 引用\n\n---"),
             vec![
-                Block::Heading {
-                    level: 2,
-                    inlines: vec![text("小节")]
-                },
+                Block::Paragraph(vec![text("## 小节")]),
                 Block::Quote(vec![Block::Paragraph(vec![text("引用")])]),
                 Block::Rule,
+            ]
+        );
+    }
+
+    #[test]
+    fn heading_source_is_kept_as_text() {
+        // 强调记号只是文字；结尾的 # 序列按 CommonMark 去掉；标题仍会打断段落。
+        assert_eq!(
+            parse("## 二级 **强调** 标题 ##\n段落\n# 打断\n\n#\n\n####### 七个井号"),
+            vec![
+                Block::Paragraph(vec![text("## 二级 **强调** 标题")]),
+                Block::Paragraph(vec![text("段落")]),
+                Block::Paragraph(vec![text("# 打断")]),
+                Block::Paragraph(vec![text("#")]),
+                Block::Paragraph(vec![text("####### 七个井号")]),
+            ]
+        );
+        // Setext 标题：内容各行与下划线之间是软换行（中文之间不留空格）。
+        assert_eq!(
+            parse("标题\n===\n\n> Title\n> ---\n\n- 列表中\n  ---"),
+            vec![
+                Block::Paragraph(vec![text("标题"), Inline::SoftBreak, text("===")]),
+                Block::Quote(vec![Block::Paragraph(vec![
+                    text("Title"),
+                    Inline::SoftBreak,
+                    text("---")
+                ])]),
+                Block::List {
+                    ordered: false,
+                    start: 1,
+                    items: vec![vec![Block::Paragraph(vec![
+                        text("列表中"),
+                        Inline::SoftBreak,
+                        text("---")
+                    ])]],
+                },
             ]
         );
     }

@@ -12,7 +12,8 @@ import { marks, nodes, schema } from './schema.ts'
  * 正文持久化格式（Markdown）与编辑器文档之间的转换。
  *
  * Markdown 方言与导出使用的 Rust pulldown-cmark 保持一致：CommonMark + GFM 表格、删除线、任务列表；
- * 原始 HTML 一律视为文字。序列化结果再次解析后结构不变（round trip），见 markdown.test.ts。
+ * 正文不支持标题与 HTML：原始 HTML 与 Markdown 标题一律视为文字。序列化结果再次解析后结构不变（round trip），
+ * 见 markdown.test.ts。
  */
 
 type Token = ReturnType<MarkdownIt['parse']>[number]
@@ -65,6 +66,39 @@ Object.assign(tokenizer.options, { maxNesting: MAX_NESTING })
 tokenizer.normalizeLink = (url) => url
 tokenizer.normalizeLinkText = (url) => url
 tokenizer.validateLink = () => true
+
+/**
+ * 正文不支持标题（docs/decisions.md 第 8 节）：Markdown 标题当作普通段落，文字是标题的原文（如“## 研究背景”），
+ * 其中的强调、链接等记号也只是文字。块的边界仍按标题判断（标题会打断段落），
+ * 与 Rust 渲染器（render::markdown 的 HeadingsAsText）一致。Setext 标题是内容各行加下划线，行与行之间是软换行。
+ */
+tokenizer.core.ruler.push('writer_heading_as_text', (state) => {
+  const lines = state.src.split('\n')
+  state.tokens.forEach((open, index) => {
+    if (open.type !== 'heading_open') return
+    const inline = state.tokens[index + 1]
+    const close = state.tokens[index + 2]
+    const text = headingText(open, inline.content, lines)
+    for (const token of [open, close]) {
+      token.type = token === open ? 'paragraph_open' : 'paragraph_close'
+      token.tag = 'p'
+      token.markup = ''
+    }
+    inline.content = text.join('\n')
+    inline.children = text.flatMap((line, i) => {
+      const token = new state.Token('text', '', 0)
+      token.content = line
+      return i === 0 ? [token] : [new state.Token('softbreak', 'br', 0), token]
+    })
+  })
+})
+
+/** 标题原文的各行：ATX 是“#… 内容”（markdown-it 已去掉结尾的 # 序列），Setext 是内容各行加下划线。 */
+function headingText(open: Token, content: string, lines: readonly string[]): string[] {
+  if (open.markup.startsWith('#')) return [content === '' ? open.markup : `${open.markup} ${content}`]
+  const underline = lines[open.map![1] - 1].replace(/^[\s>]*/, '').trimEnd()
+  return [...content.split('\n').map((line) => line.trim()), underline]
+}
 
 tokenizer.core.ruler.push('writer_soft_break', (state) => {
   for (const token of state.tokens) {
@@ -200,7 +234,6 @@ const parser = new MarkdownParser(schema, tokenizer, {
       tight: listIsTight(tokens, i),
     }),
   },
-  heading: { block: 'heading', getAttrs: (token) => ({ level: Number(token.tag.slice(1)) }) },
   code_block: { block: 'code_block', noCloseToken: true },
   fence: { block: 'code_block', getAttrs: (token) => ({ params: token.info.trim() }), noCloseToken: true },
   hr: { node: 'horizontal_rule' },
@@ -343,7 +376,6 @@ const serializer = new MarkdownSerializer(
   {
     blockquote: baseNodes.blockquote,
     code_block: baseNodes.code_block,
-    heading: baseNodes.heading,
     horizontal_rule: baseNodes.horizontal_rule,
     list_item: baseNodes.list_item,
     hard_break: baseNodes.hard_break,
@@ -379,11 +411,7 @@ const serializer = new MarkdownSerializer(
     },
     text(state, node, parent, index) {
       const text = node.text ?? ''
-      let escaped = atLineStart(parent, index) ? escapeLineStart(state.esc(text, true)) : state.esc(text)
-      // 标题末尾的 # 会被当作 ATX 标题的结束符号而丢掉。
-      if (parent.type === nodes.heading && index === parent.childCount - 1) {
-        escaped = escaped.replace(/#+(?=\s*$)/, (run) => run.replace(/#/g, '\\#'))
-      }
+      const escaped = atLineStart(parent, index) ? escapeLineStart(state.esc(text, true)) : state.esc(text)
       state.text(escaped, false)
     },
   },

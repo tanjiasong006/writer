@@ -184,7 +184,7 @@
 - Rust `render/`：`markdown.rs` 把正文解析为统一的块 / 行内模型（表格、列表、引用、代码、图片、删除线、任务列表），
   引用 / 列表嵌套超过 32 层时压平为文本（10000 层 `>` 不会栈溢出）；`html.rs` 输出全文预览。
 - 安全：原始 HTML 一律当作文本；所有文本转义；链接只展示不跳转；图片只解析项目目录内的文件（规范化路径，防符号链接逃逸）。
-- 章节标题 / 编号来自结构（`buildRenderRequest`，按阅读顺序展开）；正文内的 `#` 标题层级叠加在章节层级之下。
+- 章节标题 / 编号来自结构（`buildRenderRequest`，按阅读顺序展开）；正文内的 `#` 标题层级叠加在章节层级之下（已取消：正文不支持标题，Markdown 标题作为文字，见 decisions 第 8 节）。
 - 图片经 asset 协议显示（运行时把项目目录加入 scope）；缺失图片显示占位。
 - 工作区"预览 / 返回编辑"切换；预览随编辑防抖刷新、只采用最新结果；点击预览中的章节同步选中，树中选中章节时预览滚动到该处。
 - 验证：npm test 297/297，vue-tsc、build-storybook 通过；cargo test（render 18 项）通过，clippy 无警告。
@@ -336,7 +336,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 正文从 Markdown 源码编辑改为 ProseMirror 结构化编辑（docs/decisions.md 第 2 节）。存储格式、Domain、Application
 的保存语义与 Rust 预览 / 导出均未改变：编辑器在 UI 层把 Markdown 解析为 ProseMirror 文档，编辑后再写回 Markdown。
 
-- `ui/editor/schema.ts`：正文结构的权威定义（段落、标题、引用、列表 / 任务列表、代码块、分隔线、GFM 表格、图片、硬换行；
+- `ui/editor/schema.ts`：正文结构的权威定义（段落、引用、列表 / 任务列表、代码块、分隔线、GFM 表格、图片、硬换行；
   粗体、斜体、删除线、行内代码、链接）。
 - `ui/editor/markdown.ts`：markdown-it（与 pulldown-cmark 相同方言）→ 文档；文档 → Markdown（prosemirror-markdown + 表格、
   任务列表、行首转义、图片地址等补充）。写出前保证每个文本块能被 Markdown 原样读回：强调边界紧挨中文标点时把标点移到标记外，

@@ -9,7 +9,7 @@
 
 | 文件 | 职责 |
 |---|---|
-| `schema.ts` | 正文结构的权威定义。只包含 Markdown 能表达、Rust 渲染器能渲染的结构。 |
+| `schema.ts` | 正文结构的权威定义。只包含 Markdown 能表达、Rust 渲染器能渲染的结构；没有标题与 HTML。 |
 | `markdown.ts` | Markdown ⇄ 文档。`parseChapter` / `serializeChapter`（保持 CRLF、BOM、结尾换行）、`appendImage`。 |
 | `commands.ts` | 编辑命令（格式、结构、插入、表格行列、撤销）与它们的可用 / 激活状态（`commandState` 只从 EditorState 推导）。 |
 | `editor_menu.ts` | 编辑命令在菜单中的名称与快捷键，正文右键菜单的内容（按点击处：图片、表格、文字）。 |
@@ -41,7 +41,9 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
 - 父组件回传的 content 与缓存一致时什么都不做；不一致（外部修改）时用一个事务替换文档并以新正文为基准，不回发 change。
 - 任何结构（列表、引用、代码块、表格、图片）都能只用键盘进入和离开；写作中的 Tab / Shift+Tab 由编辑器处理，
   焦点不会意外移出正文；先按 Esc 再按 Tab / Shift+Tab 时焦点按浏览器默认方式离开正文。
-- 独占一段的 Markdown 图片在编辑器中是块级原子节点 figure，与文字同处一段、在表格单元格或标题中的是行内图片 image。
+- 正文不支持标题与 HTML：Markdown 标题与原始 HTML 都是文字（标题是原文文字的段落，如“## 研究背景”），
+  输入 `# ` 不产生标题；与 Rust 导出的规则相同，由共享 fixture 约束（decisions 第 8 节）。
+- 独占一段的 Markdown 图片在编辑器中是块级原子节点 figure，与文字同处一段、在表格单元格中的是行内图片 image。
   光标不能停在 figure 旁边，文字（包括输入法）只会进入前后的段落。Markdown 不变：figure 写成与只含这张图片的段落相同的文字；
   编辑使段落只剩一张（不带链接的）图片时，它成为 figure，与 Rust 内容解析的独立图片判断一致；
   该语义由跨实现测试约束，不依赖应用内预览。
@@ -71,7 +73,7 @@ Vitest 用 `await expect(output).toMatchFileSnapshot(path)` 验证实际 `serial
 预期语义单独审查，不随 golden 自动改写。具体流程见 decisions 第 8 节。
 共享资产放在 `src-tauri/fixtures/`，使用中立 JSON 块树作为预期语义，双方测试各自投影后比较；
 用例组织与语义格式见 decisions 第 8 节“实施”一项；它们不成为产品模型或运行时协议。
-至少覆盖 figure / 行内图片、图注、表格、列表、标题、中文强调、HTML 与换行；
+至少覆盖 figure / 行内图片、图注、表格、列表、标题（作为文字）、中文强调、HTML 与换行；
 比较预期内容与结构，不要求内部节点类型或 Markdown 字节完全相同。
 这些验证在移除预览后继续保留，不引入自定义 Vue SFC 加载器，也无需运行时串联 TS 与 Rust。
 
