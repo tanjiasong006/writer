@@ -1,27 +1,27 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { ProjectSession } from '../../application/project_session.ts'
-import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
+import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { findChapter } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { hasContent } from '../../domain/document/document.ts'
-import type { KeyboardMoveDirection } from '../../application/move_chapter.ts'
+import { resolveTheme } from '../../domain/document_style/document_style.ts'
+import { exportDocument, previewDocument } from '../../application/document_output.ts'
 import ChapterManager from '../chapter_tree/ChapterManager.vue'
 import SaveStatus from './SaveStatus.vue'
 import DocumentTitle from './DocumentTitle.vue'
 import ChapterEditor from '../editor/ChapterEditor.vue'
 import { useServices } from '../services.ts'
 import { useSession } from './use_session.ts'
-import { restoreUiState, serializeUiState } from './ui_state.ts'
+import { useUiState } from './use_ui_state.ts'
+import { useSidebar, SIDEBAR_DEFAULT, SIDEBAR_MIN } from './use_sidebar.ts'
+import { usePreview } from './use_preview.ts'
+import { useExport } from './use_export.ts'
+import { useFocusRegion } from './use_focus_region.ts'
+import { useStylePanel } from './use_style_panel.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
 import DocumentPreview from '../preview/DocumentPreview.vue'
-import {
-  exportDocument,
-  previewDocument,
-  type ExportFormat,
-} from '../../application/document_output.ts'
-import { messageForOutputFailure } from './output_messages.ts'
 import DocumentStylePanel from '../document_style/DocumentStylePanel.vue'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import type { SelectedFigure } from '../editor/image_layout.ts'
@@ -30,13 +30,7 @@ import Toast from '../common/Toast.vue'
 import Icon from '../common/Icon.vue'
 import { useMenu } from '../common/use_menu.ts'
 import { IS_MAC, SHORTCUTS } from '../common/shortcuts.ts'
-import { menuItemForKey, workspaceMenus, type FocusRegion } from './app_menu.ts'
-import {
-  resolveTheme,
-  type ImageOverride,
-  type StyleOverrides,
-  type ThemeId,
-} from '../../domain/document_style/document_style.ts'
+import { menuItemForKey, parseMenuItemId, workspaceMenus, type MenuCommand } from './app_menu.ts'
 
 /**
  * 已打开项目的工作区。
@@ -47,6 +41,9 @@ import {
  * - unified 窗口（macOS）：工具栏与标题栏合为一体，窗口按钮浮在侧栏左上角，工具栏空白处可以拖动窗口。
  * - 菜单栏与快捷键来自同一份菜单（app_menu.ts），可用状态随焦点所在区域变化。
  * - 两侧独立滚动（ui-spec §27）。提示浮在正文区底部，不挤压布局。文档修改一律经 ProjectSession。
+ *
+ * 各项相对独立的职责在同目录的 use_*.ts 中（界面状态、侧栏、预览、导出、焦点区域、样式面板），
+ * 这里负责把它们与菜单命令、章节树、编辑器连接起来。
  */
 const props = defineProps<{
   session: ProjectSession
@@ -64,44 +61,40 @@ const { shell, output } = useServices()
 const { document, status, lastError } = useSession(props.session)
 const unified = shell.windowStyle === 'unified'
 
-const selectedId = ref<ChapterId | null>(null)
-/** 工作区内操作（如插入图片）的错误说明；不属于保存状态。 */
+/** 工作区内操作（如插入图片、导出）的错误说明；不属于保存状态。 */
 const actionError = ref<string | null>(null)
 const editor = ref<InstanceType<typeof ChapterEditor> | null>(null)
 const chapters = ref<InstanceType<typeof ChapterManager> | null>(null)
 const documentTitle = ref<InstanceType<typeof DocumentTitle> | null>(null)
-const collapsedIds = shallowRef<ReadonlySet<ChapterId>>(new Set())
-/** 界面状态恢复完成前不回写，避免用默认值覆盖磁盘上的状态。 */
-const uiStateReady = ref(false)
 
-onMounted(async () => {
-  const restored = restoreUiState(await shell.loadUiState(props.session.path), document.value.tree)
-  selectedId.value = restored.selectedId
-  collapsedIds.value = restored.collapsedIds
-  uiStateReady.value = true
+const { selectedId, collapsedIds } = useUiState(shell, props.session.path, () => document.value.tree)
+
+const {
+  element: sidebarElement,
+  visible: sidebarVisible,
+  width: sidebarWidth,
+  maxWidth: sidebarMax,
+  resizing,
+  setWidth: setSidebarWidth,
+  setVisible: setSidebarVisible,
+  startResize,
+  onResizeKey,
+} = useSidebar(shell, () => editor.value?.focus())
+
+const {
+  open: stylePanelOpen,
+  button: styleButton,
+  panel: stylePanel,
+  show: openStylePanel,
+  toggle: toggleStylePanel,
+  close: closeStylePanel,
+} = useStylePanel({
+  lastFocused: () => focus.lastFocused(),
+  focusEditor: () => editor.value?.focus(),
 })
 
-const UI_STATE_DELAY_MS = 500
-let uiStateTimer: ReturnType<typeof setTimeout> | null = null
-
-function persistUiState(): void {
-  if (uiStateTimer !== null) clearTimeout(uiStateTimer)
-  uiStateTimer = null
-  void shell.saveUiState(
-    props.session.path,
-    serializeUiState({ selectedId: selectedId.value, collapsedIds: collapsedIds.value }),
-  )
-}
-
-watch([selectedId, collapsedIds], () => {
-  if (!uiStateReady.value) return
-  if (uiStateTimer !== null) clearTimeout(uiStateTimer)
-  uiStateTimer = setTimeout(persistUiState, UI_STATE_DELAY_MS)
-})
-
-onBeforeUnmount(() => {
-  if (uiStateTimer !== null) persistUiState()
-})
+const focus = useFocusRegion(() => stylePanel.value)
+const focusRegion = focus.region
 
 /** 窗口标题显示当前文档名（窗口菜单、调度中心中可见）；离开工作区时恢复为应用名。 */
 watch(
@@ -111,42 +104,23 @@ watch(
 )
 onBeforeUnmount(() => shell.setWindowTitle(shell.appName))
 
-function applyTree(tree: ChapterTree): void {
-  props.session.applyTree(tree)
-}
-
-function updateContent(chapterId: ChapterId, text: string): void {
-  props.session.setContent(chapterId, text)
-}
-
 /** 正文区模式：编辑当前章节，或全文预览。 */
 const mode = ref<'edit' | 'preview'>('edit')
-const previewHtml = ref('')
-const previewError = ref<string | null>(null)
-const PREVIEW_DELAY_MS = 400
-let previewTimer: ReturnType<typeof setTimeout> | null = null
-/** 只采用最新一次请求的结果，避免较慢的旧请求覆盖新内容。 */
-let previewRequest = 0
 
-async function refreshPreview(): Promise<void> {
-  const request = ++previewRequest
-  const result = await previewDocument(output, props.session.path, document.value)
-  if (request !== previewRequest || mode.value !== 'preview') return
-  if (result.ok) {
-    previewHtml.value = result.value
-    previewError.value = null
-  } else {
-    previewError.value = messageForOutputFailure(result.error)
-  }
-}
+const preview = usePreview({
+  source: document,
+  active: () => mode.value === 'preview',
+  render: () => previewDocument(output, props.session.path, document.value),
+})
+const previewHtml = preview.html
+const previewError = preview.error
 
 async function setMode(next: 'edit' | 'preview'): Promise<void> {
   if (mode.value === next) return
   mode.value = next
   scrolled.value = false
   if (next === 'preview') {
-    previewHtml.value = ''
-    void refreshPreview()
+    preview.open()
     return
   }
   // 从预览回到编辑：继续在当前章节写作。
@@ -158,18 +132,15 @@ function togglePreview(): void {
   void setMode(mode.value === 'edit' ? 'preview' : 'edit')
 }
 
-// 预览打开时，文档变化后防抖刷新。
-watch(document, () => {
-  if (mode.value !== 'preview') return
-  if (previewTimer !== null) clearTimeout(previewTimer)
-  previewTimer = setTimeout(() => {
-    previewTimer = null
-    void refreshPreview()
-  }, PREVIEW_DELAY_MS)
-})
-
-onBeforeUnmount(() => {
-  if (previewTimer !== null) clearTimeout(previewTimer)
+const {
+  exporting,
+  notice: exportNotice,
+  exportAs,
+} = useExport({
+  shell,
+  title: () => document.value.title,
+  run: (format, target) => exportDocument(output, props.session.path, document.value, format, target),
+  onError: (message) => (actionError.value = message),
 })
 
 /** 工具栏按钮菜单（文档菜单、导出）与它们的界面绘制版本（没有系统菜单时）。 */
@@ -197,60 +168,7 @@ const EXPORT_ITEMS: readonly MenuEntry[] = [
 async function openExportMenu(event: MouseEvent): Promise<void> {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   const chosen = await showButtonMenu('export', EXPORT_ITEMS, { rect, align: 'end' }, event.detail === 0)
-  if (chosen !== null) void exportAs(chosen as ExportFormat)
-}
-
-/** 导出成功的提示在一段时间后自动消失；错误一直显示到用户关闭。 */
-const NOTICE_DURATION_MS = 8000
-let noticeTimer: ReturnType<typeof setTimeout> | null = null
-
-function showExportNotice(notice: { readonly message: string; readonly path: string }): void {
-  exportNotice.value = notice
-  if (noticeTimer !== null) clearTimeout(noticeTimer)
-  noticeTimer = setTimeout(() => {
-    noticeTimer = null
-    exportNotice.value = null
-  }, NOTICE_DURATION_MS)
-}
-
-onBeforeUnmount(() => {
-  if (noticeTimer !== null) clearTimeout(noticeTimer)
-})
-/** 正在导出的格式；导出期间禁用导出，避免重复写同一文件。 */
-const exporting = ref<ExportFormat | null>(null)
-const exportNotice = ref<{ readonly message: string; readonly path: string } | null>(null)
-
-/** 文件名中不允许的字符替换为 -，空标题使用默认名。 */
-function exportBaseName(title: string): string {
-  const name = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim()
-  return name.length > 0 ? name : '未命名文档'
-}
-
-async function exportAs(format: ExportFormat): Promise<void> {
-  if (exporting.value !== null) return
-  actionError.value = null
-  exportNotice.value = null
-  const target = await shell.pickExportPath(format, exportBaseName(document.value.title))
-  if (target === null) return
-  exporting.value = format
-  try {
-    const result = await exportDocument(output, props.session.path, document.value, format, target)
-    if (!result.ok) {
-      actionError.value = messageForOutputFailure(result.error)
-      return
-    }
-    const fileName = target.split(/[\\/]/).pop() ?? target
-    const missing = result.value.missingImages.length
-    showExportNotice({
-      message:
-        missing > 0
-          ? `已导出 ${fileName}，其中 ${missing} 张图片无法嵌入，已用文字占位。`
-          : `已导出 ${fileName}`,
-      path: target,
-    })
-  } finally {
-    exporting.value = null
-  }
+  if (chosen === 'docx' || chosen === 'pdf') void exportAs(chosen)
 }
 
 /** 插入图片：选择文件 → 复制进项目 assets/ → 在发起请求的章节中插入引用。 */
@@ -337,75 +255,12 @@ async function openTitleMenu(rect: DOMRect, keyboard: boolean): Promise<void> {
   else if (chosen === 'reveal') void shell.revealFile(props.session.path)
 }
 
-function renameDocument(title: string): void {
-  props.session.setTitle(title)
-}
-
 /**
  * 文档样式（整本书的设置，不属于正文工具栏）。与 tree 一样只依赖样式对象：
  * 编辑正文时样式引用不变，主题不会重新解析，编辑器与预览的样式也不会重算。
  */
 const documentStyle = computed(() => document.value.style)
 const theme = computed(() => resolveTheme(documentStyle.value))
-const stylePanelOpen = ref(false)
-const styleButton = ref<HTMLButtonElement | null>(null)
-const stylePanel = ref<HTMLElement | null>(null)
-/** 打开样式面板前的焦点：关闭后回到那里（从菜单栏打开时通常是正文）。 */
-let focusBeforeStyle: HTMLElement | null = null
-
-async function openStylePanel(): Promise<void> {
-  if (stylePanelOpen.value) return
-  // 从系统菜单栏打开时，网页中可能暂时没有获得焦点的元素（activeElement 是 body）：用最近一次获得焦点的元素。
-  const active = globalThis.document.activeElement
-  focusBeforeStyle = active instanceof HTMLElement && active !== globalThis.document.body ? active : lastFocused
-  stylePanelOpen.value = true
-  await nextTick()
-  stylePanel.value?.focus({ preventScroll: true })
-}
-
-/**
- * 点击面板以外的地方关闭面板（"样式"按钮自己切换）。不用覆盖整个窗口的透明遮罩：
- * 面板打开时正文仍可以滚动，一边看效果一边调整；点击也照常作用于点到的地方（如在正文中放置光标）。
- */
-function closeStylePanelOnOutsidePointer(event: PointerEvent): void {
-  const target = event.target as globalThis.Node | null
-  if (target && (stylePanel.value?.contains(target) || styleButton.value?.contains(target))) return
-  closeStylePanel()
-}
-
-watch(stylePanelOpen, (open) => {
-  if (open) globalThis.document.addEventListener('pointerdown', closeStylePanelOnOutsidePointer, true)
-  else globalThis.document.removeEventListener('pointerdown', closeStylePanelOnOutsidePointer, true)
-})
-onBeforeUnmount(() => globalThis.document.removeEventListener('pointerdown', closeStylePanelOnOutsidePointer, true))
-
-function toggleStylePanel(): void {
-  if (stylePanelOpen.value) closeStylePanel()
-  else void openStylePanel()
-}
-
-/** 用键盘关闭面板时焦点回到打开前的位置（没有时回到"样式"按钮）。 */
-function closeStylePanel(event?: KeyboardEvent): void {
-  event?.preventDefault()
-  stylePanelOpen.value = false
-  if (!event) return
-  const target = focusBeforeStyle?.isConnected ? focusBeforeStyle : styleButton.value
-  // 回到正文时经编辑器聚焦：光标与滚动位置保持原样。
-  if (target?.closest('.chapter-editor__content')) editor.value?.focus()
-  else target?.focus({ preventScroll: true })
-}
-
-function selectTheme(id: ThemeId): void {
-  props.session.selectTheme(id)
-}
-
-function overrideStyle(patch: StyleOverrides): void {
-  props.session.overrideStyle(patch)
-}
-
-function setImageLayout(key: string, layout: ImageOverride | null): void {
-  props.session.setImageLayout(key, layout)
-}
 
 /** 编辑器报告的命令状态与选中的图片（工具栏与菜单栏据此显示可用 / 勾选状态）。 */
 const tools = shallowRef<CommandState | null>(null)
@@ -437,128 +292,6 @@ function onMainScroll(event: Event): void {
   }
 }
 
-/**
- * 侧栏宽度（ui-spec §31）：默认 260px，拖动分隔线在 180–480px 之间调整，双击恢复默认；
- * 同时保证正文区至少留出 MIN_MAIN 宽度。拖到比最窄处再窄一截松手时隐藏侧栏（macOS 侧栏的习惯）。
- * 宽度与是否显示是本机的界面偏好（应用级状态，见 DesktopShell），不随项目保存。
- */
-const SIDEBAR_DEFAULT = 260
-const SIDEBAR_MIN = 180
-const SIDEBAR_MAX = 480
-const SIDEBAR_COLLAPSE = SIDEBAR_MIN - 60
-const MIN_MAIN = 440
-const SIDEBAR_KEY = 'sidebar-width'
-const SIDEBAR_VISIBLE_KEY = 'sidebar-visible'
-
-function storedSidebarWidth(): number {
-  const value = Number(shell.getPreference(SIDEBAR_KEY))
-  return Number.isFinite(value) && value > 0 ? value : SIDEBAR_DEFAULT
-}
-
-const sidebarPreferred = ref(storedSidebarWidth())
-const sidebarVisible = ref(shell.getPreference(SIDEBAR_VISIBLE_KEY) !== 'false')
-const windowWidth = ref(window.innerWidth)
-const sidebarMax = computed(() => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, windowWidth.value - MIN_MAIN)))
-const sidebarWidth = computed(() => Math.round(Math.min(Math.max(sidebarPreferred.value, SIDEBAR_MIN), sidebarMax.value)))
-const resizing = ref(false)
-
-function onWindowResize(): void {
-  windowWidth.value = window.innerWidth
-}
-
-onMounted(() => window.addEventListener('resize', onWindowResize))
-onBeforeUnmount(() => window.removeEventListener('resize', onWindowResize))
-
-function setSidebarWidth(width: number): void {
-  sidebarPreferred.value = Math.min(Math.max(width, SIDEBAR_MIN), sidebarMax.value)
-  shell.setPreference(SIDEBAR_KEY, String(Math.round(sidebarPreferred.value)))
-}
-
-/** 显示 / 隐藏侧栏。隐藏时焦点若在侧栏中，交给正文，不让焦点落到看不见的地方。 */
-async function setSidebarVisible(visible: boolean): Promise<void> {
-  const focusInSidebar = sidebar.value?.contains(globalThis.document.activeElement) ?? false
-  sidebarVisible.value = visible
-  shell.setPreference(SIDEBAR_VISIBLE_KEY, String(visible))
-  await nextTick()
-  if (!visible && focusInSidebar) editor.value?.focus()
-}
-
-const sidebar = ref<HTMLElement | null>(null)
-
-function startResize(event: PointerEvent): void {
-  if (event.button !== 0) return
-  event.preventDefault()
-  const handle = event.currentTarget as HTMLElement
-  const startX = event.clientX
-  const startWidth = sidebarWidth.value
-  let requested = startWidth
-  resizing.value = true
-  handle.setPointerCapture?.(event.pointerId)
-  const move = (moveEvent: PointerEvent) => {
-    requested = startWidth + moveEvent.clientX - startX
-    setSidebarWidth(requested)
-  }
-  const end = () => {
-    resizing.value = false
-    handle.removeEventListener('pointermove', move)
-    handle.removeEventListener('pointerup', end)
-    handle.removeEventListener('pointercancel', end)
-    if (requested < SIDEBAR_COLLAPSE) void setSidebarVisible(false)
-  }
-  handle.addEventListener('pointermove', move)
-  handle.addEventListener('pointerup', end)
-  handle.addEventListener('pointercancel', end)
-}
-
-const RESIZE_STEP = 16
-
-function onResizeKey(event: KeyboardEvent): void {
-  const next: Record<string, number> = {
-    ArrowLeft: sidebarWidth.value - RESIZE_STEP,
-    ArrowRight: sidebarWidth.value + RESIZE_STEP,
-    Home: SIDEBAR_MIN,
-    End: sidebarMax.value,
-  }
-  if (!(event.key in next)) return
-  event.preventDefault()
-  setSidebarWidth(next[event.key])
-}
-
-/**
- * 键盘焦点所在的区域：菜单栏按它决定哪些命令可用（app_menu.ts）。
- * focusin / focusout 覆盖所有焦点移动；焦点离开到页面之外时为 other。
- */
-const focusRegion = ref<FocusRegion>('other')
-
-function regionOf(element: Element | null): FocusRegion {
-  if (!(element instanceof HTMLElement)) return 'other'
-  if (element.closest('.chapter-editor__content')) return 'editor'
-  if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') return 'text-input'
-  if (element.closest('.chapter-tree__list')) return 'tree'
-  return 'other'
-}
-
-/** 最近一次获得焦点的元素（弹出面板以外）：从菜单栏打开的面板关闭后，焦点回到这里。 */
-let lastFocused: HTMLElement | null = null
-
-function onFocusChange(event: FocusEvent): void {
-  const target = event.type === 'focusin' ? event.target : event.relatedTarget
-  focusRegion.value = regionOf(target as Element | null)
-  if (event.type === 'focusin' && target instanceof HTMLElement && !stylePanel.value?.contains(target)) {
-    lastFocused = target
-  }
-}
-
-onMounted(() => {
-  globalThis.document.addEventListener('focusin', onFocusChange)
-  globalThis.document.addEventListener('focusout', onFocusChange)
-  focusRegion.value = regionOf(globalThis.document.activeElement)
-})
-onBeforeUnmount(() => {
-  globalThis.document.removeEventListener('focusin', onFocusChange)
-  globalThis.document.removeEventListener('focusout', onFocusChange)
-})
-
 const NO_MOVES = { up: false, down: false, outdent: false, indent: false } as const
 
 const menus = computed(() =>
@@ -582,70 +315,90 @@ const menus = computed(() =>
   }),
 )
 
-watch(menus, (next) => shell.setAppMenu?.(next, (id) => void runMenuItem(id)), { immediate: true })
+watch(menus, (next) => shell.setAppMenu?.(next, runMenuItem), { immediate: true })
 
 /** 执行菜单栏（或它的快捷键）中的一项。 */
-async function runMenuItem(id: string): Promise<void> {
-  const [group, name] = id.split(':') as [string, string]
-  if (group === 'editor') {
-    runCommand(name as EditorCommand)
-    return
-  }
-  switch (id) {
-    case 'file:new':
-      emit('new-project')
+function runMenuItem(id: string): void {
+  const command = parseMenuItemId(id)
+  if (command !== null) void runMenuCommand(command)
+}
+
+async function runMenuCommand(command: MenuCommand): Promise<void> {
+  switch (command.group) {
+    case 'editor':
+      runCommand(command.command)
       return
-    case 'file:open':
-      emit('open-project')
+    case 'file':
+      switch (command.action) {
+        case 'new':
+          emit('new-project')
+          return
+        case 'open':
+          emit('open-project')
+          return
+        case 'rename':
+          void documentTitle.value?.startRename()
+          return
+        case 'reveal':
+          void shell.revealFile(props.session.path)
+          return
+        case 'save':
+          void props.session.save()
+          return
+        case 'export-docx':
+          void exportAs('docx')
+          return
+        case 'export-pdf':
+          void exportAs('pdf')
+          return
+      }
       return
-    case 'file:rename':
-      void documentTitle.value?.startRename()
+    case 'edit':
+      if (command.action === 'context-menu') {
+        if (focusRegion.value === 'tree') chapters.value?.openChapterMenu()
+        else void editor.value?.openMenuAtCaret()
+      } else if (focusRegion.value === 'editor') {
+        // 正文有自己的撤销历史；普通输入框交给浏览器。
+        runCommand(command.action)
+      } else {
+        globalThis.document.execCommand(command.action)
+      }
       return
-    case 'file:reveal':
-      void shell.revealFile(props.session.path)
-      return
-    case 'file:save':
-      void props.session.save()
-      return
-    case 'file:export-docx':
-      void exportAs('docx')
-      return
-    case 'file:export-pdf':
-      void exportAs('pdf')
-      return
-    case 'edit:undo':
-    case 'edit:redo':
-      // 正文有自己的撤销历史；普通输入框交给浏览器。
-      if (focusRegion.value === 'editor') runCommand(name as EditorCommand)
-      else globalThis.document.execCommand(name)
-      return
-    case 'edit:context-menu':
-      if (focusRegion.value === 'tree') chapters.value?.openChapterMenu()
-      else void editor.value?.openMenuAtCaret()
-      return
-    case 'format:style':
+    case 'format':
       void openStylePanel()
       return
-    case 'view:sidebar':
-      void setSidebarVisible(!sidebarVisible.value)
+    case 'view':
+      if (command.action === 'sidebar') void setSidebarVisible(!sidebarVisible.value)
+      else if (command.action === 'preview') togglePreview()
+      else switchFocus()
       return
-    case 'view:preview':
-      togglePreview()
-      return
-    case 'view:switch-focus':
-      switchFocus()
-      return
+    case 'chapter':
+    case 'move-chapter': {
+      // 章节命令作用于侧栏中的章节：侧栏隐藏时先显示出来，新建与重命名才看得见。
+      const isDelete = command.group === 'chapter' && command.action === 'delete'
+      if (!sidebarVisible.value && !isDelete) await setSidebarVisible(true)
+      const manager = chapters.value
+      if (!manager) return
+      if (command.group === 'move-chapter') {
+        manager.moveChapter(command.direction)
+        return
+      }
+      switch (command.action) {
+        case 'new':
+          manager.createChapter()
+          return
+        case 'new-child':
+          manager.createChildChapter()
+          return
+        case 'rename':
+          manager.renameChapter()
+          return
+        case 'delete':
+          manager.deleteChapter()
+          return
+      }
+    }
   }
-  if (group !== 'chapter') return
-  // 章节命令作用于侧栏中的章节：侧栏隐藏时先显示出来，新建与重命名才看得见。
-  if (!sidebarVisible.value && name !== 'delete') await setSidebarVisible(true)
-  const manager = chapters.value
-  if (!manager) return
-  if (name === 'new') manager.createChapter()
-  else if (name === 'new-child') manager.createChildChapter()
-  else if (name === 'rename') manager.renameChapter()
-  else if (name === 'delete') manager.deleteChapter()
-  else if (name.startsWith('move-')) manager.moveChapter(name.slice('move-'.length) as KeyboardMoveDirection)
 }
 
 /**
@@ -657,7 +410,7 @@ function onKeydown(event: KeyboardEvent): void {
   const id = menuItemForKey(menus.value, event)
   if (id !== null) {
     event.preventDefault()
-    void runMenuItem(id)
+    runMenuItem(id)
     return
   }
   // 全文预览中按 Esc 回到编辑（菜单、面板、对话框、重命名自己处理的 Esc 不会走到这里）。
@@ -695,7 +448,7 @@ async function createFirstChapter(): Promise<void> {
     :style="{ '--sidebar-w': `${sidebarWidth}px` }"
     :data-save-status="status"
   >
-    <aside v-show="sidebarVisible" ref="sidebar" class="workspace__sidebar" aria-label="文档结构">
+    <aside v-show="sidebarVisible" ref="sidebarElement" class="workspace__sidebar" aria-label="文档结构">
       <!-- unified 窗口：侧栏顶部是标题栏的一部分，左边是窗口按钮，右边是侧栏开关。 -->
       <div v-if="unified" class="workspace__sidebar-bar" data-tauri-drag-region>
         <button
@@ -717,7 +470,7 @@ async function createFirstChapter(): Promise<void> {
         class="workspace__chapters"
         :tree="document.tree"
         :has-content="chapterHasContent"
-        @update:tree="applyTree"
+        @update:tree="session.applyTree($event)"
         @open="openChapter"
       />
 
@@ -757,7 +510,7 @@ async function createFirstChapter(): Promise<void> {
           :class="{ 'workspace__title--open': openMenuButton === 'title' }"
           :title="document.title"
           @menu="openTitleMenu"
-          @rename="renameDocument"
+          @rename="session.setTitle($event)"
         />
         <SaveStatus
           v-if="status === 'failed'"
@@ -835,8 +588,8 @@ async function createFirstChapter(): Promise<void> {
             >
               <DocumentStylePanel
                 :document-style="documentStyle"
-                @select-theme="selectTheme"
-                @override="overrideStyle"
+                @select-theme="session.selectTheme($event)"
+                @override="session.overrideStyle($event)"
                 @reset="session.resetStyleOverrides()"
               />
             </div>
@@ -879,9 +632,9 @@ async function createFirstChapter(): Promise<void> {
           :resolve-image="resolveImage"
           :theme="theme"
           :image-layouts="documentStyle.images"
-          @change="updateContent"
+          @change="(chapterId, text) => session.setContent(chapterId, text)"
           @request-image="insertImage"
-          @image-layout="setImageLayout"
+          @image-layout="(key, layout) => session.setImageLayout(key, layout)"
           @tools="showTools"
         />
         <div v-else class="workspace__placeholder">

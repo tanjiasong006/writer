@@ -28,6 +28,88 @@ export interface AppMenuContext {
   readonly exporting: boolean
 }
 
+const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'reveal', 'export-docx', 'export-pdf'] as const
+const EDIT_ACTIONS = ['undo', 'redo', 'context-menu'] as const
+const FORMAT_ACTIONS = ['style'] as const
+const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
+const VIEW_ACTIONS = ['sidebar', 'preview', 'switch-focus'] as const
+const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
+
+type FileAction = (typeof FILE_ACTIONS)[number]
+type EditAction = (typeof EDIT_ACTIONS)[number]
+type FormatAction = (typeof FORMAT_ACTIONS)[number]
+type ChapterAction = (typeof CHAPTER_ACTIONS)[number]
+type ViewAction = (typeof VIEW_ACTIONS)[number]
+
+/**
+ * 菜单项 id：`分组:名称`。系统菜单栏与快捷键只传回这个字符串，由 parseMenuItemId 还原成 MenuCommand。
+ * 菜单定义中的 id 按此类型检查，写错会在编译时发现。
+ */
+export type MenuItemId =
+  | `file:${FileAction}`
+  | `edit:${EditAction}`
+  | `editor:${EditorCommand}`
+  | `format:${FormatAction}`
+  | `chapter:${ChapterAction}`
+  | `chapter:move-${KeyboardMoveDirection}`
+  | `view:${ViewAction}`
+
+/** 菜单项要执行的命令。 */
+export type MenuCommand =
+  | { readonly group: 'file'; readonly action: FileAction }
+  | { readonly group: 'edit'; readonly action: EditAction }
+  /** 正文编辑命令（格式、插入、表格）。 */
+  | { readonly group: 'editor'; readonly command: EditorCommand }
+  | { readonly group: 'format'; readonly action: FormatAction }
+  | { readonly group: 'chapter'; readonly action: ChapterAction }
+  | { readonly group: 'move-chapter'; readonly direction: KeyboardMoveDirection }
+  | { readonly group: 'view'; readonly action: ViewAction }
+
+function oneOf<T extends string>(values: readonly T[], value: string): value is T {
+  return (values as readonly string[]).includes(value)
+}
+
+function isEditorCommand(value: string): value is EditorCommand {
+  return Object.hasOwn(COMMAND_LABELS, value)
+}
+
+/** 菜单项 id → 命令；不认识的 id 返回 null。 */
+export function parseMenuItemId(id: string): MenuCommand | null {
+  const separator = id.indexOf(':')
+  if (separator < 0) return null
+  const group = id.slice(0, separator)
+  const name = id.slice(separator + 1)
+  switch (group) {
+    case 'file':
+      return oneOf(FILE_ACTIONS, name) ? { group: 'file', action: name } : null
+    case 'edit':
+      return oneOf(EDIT_ACTIONS, name) ? { group: 'edit', action: name } : null
+    case 'editor':
+      return isEditorCommand(name) ? { group: 'editor', command: name } : null
+    case 'format':
+      return oneOf(FORMAT_ACTIONS, name) ? { group: 'format', action: name } : null
+    case 'chapter': {
+      if (!name.startsWith('move-')) return oneOf(CHAPTER_ACTIONS, name) ? { group: 'chapter', action: name } : null
+      const direction = name.slice('move-'.length)
+      return oneOf(MOVE_DIRECTIONS, direction) ? { group: 'move-chapter', direction } : null
+    }
+    case 'view':
+      return oneOf(VIEW_ACTIONS, name) ? { group: 'view', action: name } : null
+    default:
+      return null
+  }
+}
+
+/** id 按 MenuItemId 检查的菜单（结构与 AppMenu 相同，交给 DesktopShell 时不需要转换）。 */
+type WorkspaceMenuItem = Omit<Extract<MenuEntry, { readonly id: string }>, 'id' | 'submenu'> & {
+  readonly id: MenuItemId
+}
+type WorkspaceMenuEntry = WorkspaceMenuItem | Exclude<MenuEntry, { readonly id: string }>
+
+export interface WorkspaceMenu extends AppMenu {
+  readonly items: readonly WorkspaceMenuEntry[]
+}
+
 /** 上移 / 下移 / 升级 / 降级：只在章节树获得焦点时可用（快捷键在正文中另有含义）。 */
 export const MOVE_LABELS: ReadonlyArray<{
   readonly direction: KeyboardMoveDirection
@@ -41,7 +123,7 @@ export const MOVE_LABELS: ReadonlyArray<{
 ]
 
 /** 欢迎页（没有打开文档）时的菜单栏。 */
-export function welcomeMenus(): AppMenu[] {
+export function welcomeMenus(): WorkspaceMenu[] {
   return [
     {
       label: '文件',
@@ -56,16 +138,19 @@ export function welcomeMenus(): AppMenu[] {
   ]
 }
 
-export function workspaceMenus(context: AppMenuContext): AppMenu[] {
+export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
   const { mode, focus, tools } = context
   const editing = mode === 'edit' && focus === 'editor' && tools !== null
   /** 正文命令：勾选状态总是跟随当前章节，可用状态要求正文获得焦点。 */
-  const editorItem = (command: EditorCommand, options: { checkable?: boolean; label?: string } = {}): MenuEntry => {
+  const editorItem = (
+    command: EditorCommand,
+    options: { checkable?: boolean; label?: string } = {},
+  ): WorkspaceMenuEntry => {
     const entry = commandEntry(command, tools, options)
     return editing ? { ...entry, id: `editor:${command}` } : { ...entry, id: `editor:${command}`, disabled: true }
   }
   const undoable = focus === 'text-input'
-  const history = (command: 'undo' | 'redo'): MenuEntry => ({
+  const history = (command: 'undo' | 'redo'): WorkspaceMenuEntry => ({
     id: `edit:${command}`,
     label: COMMAND_LABELS[command].label,
     shortcut: COMMAND_LABELS[command].shortcut,
@@ -161,7 +246,7 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
           disabled: !context.hasSelectedChapter,
         },
         { separator: true },
-        ...MOVE_LABELS.map(({ direction, label, shortcut }) => ({
+        ...MOVE_LABELS.map(({ direction, label, shortcut }): WorkspaceMenuItem => ({
           id: `chapter:move-${direction}`,
           label,
           shortcut,
@@ -200,16 +285,12 @@ export function workspaceMenus(context: AppMenuContext): AppMenu[] {
 }
 
 /** 菜单中所有可用、带快捷键的项。 */
-function shortcutItems(menus: readonly AppMenu[]): Array<{ readonly id: string; readonly shortcut: string }> {
-  const found: Array<{ id: string; shortcut: string }> = []
-  const visit = (entries: readonly MenuEntry[]) => {
-    for (const entry of entries) {
-      if ('separator' in entry || 'role' in entry) continue
-      if (entry.submenu) visit(entry.submenu)
-      else if (entry.shortcut && !entry.disabled) found.push({ id: entry.id, shortcut: entry.shortcut })
-    }
+function shortcutItems(menus: readonly WorkspaceMenu[]): Array<{ readonly id: MenuItemId; readonly shortcut: string }> {
+  const found: Array<{ id: MenuItemId; shortcut: string }> = []
+  for (const entry of menus.flatMap((menu) => menu.items)) {
+    if ('separator' in entry || 'role' in entry) continue
+    if (entry.shortcut && !entry.disabled) found.push({ id: entry.id, shortcut: entry.shortcut })
   }
-  for (const menu of menus) visit(menu.items)
   return found
 }
 
@@ -217,7 +298,7 @@ function shortcutItems(menus: readonly AppMenu[]): Array<{ readonly id: string; 
  * 没有系统菜单栏时由工作区响应快捷键：返回按键对应的可用菜单项 id。
  * 撤销 / 重做不在这里处理：正文与输入框各自处理自己的撤销。
  */
-export function menuItemForKey(menus: readonly AppMenu[], event: KeyboardEvent): string | null {
+export function menuItemForKey(menus: readonly WorkspaceMenu[], event: KeyboardEvent): MenuItemId | null {
   for (const item of shortcutItems(menus)) {
     if (item.id === 'edit:undo' || item.id === 'edit:redo') continue
     if (matchesShortcut(event, item.shortcut)) return item.id

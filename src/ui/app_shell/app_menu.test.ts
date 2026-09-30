@@ -3,7 +3,13 @@ import type { AppMenu, MenuEntry } from '../../application/desktop_shell.ts'
 import { commandState } from '../editor/commands.ts'
 import { createEditorState } from '../editor/plugins.ts'
 import { parseMarkdown } from '../editor/markdown.ts'
-import { menuItemForKey, welcomeMenus, workspaceMenus, type AppMenuContext } from './app_menu.ts'
+import {
+  menuItemForKey,
+  parseMenuItemId,
+  welcomeMenus,
+  workspaceMenus,
+  type AppMenuContext,
+} from './app_menu.ts'
 import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 
 const tools = commandState(createEditorState(parseMarkdown('正文')))
@@ -125,7 +131,7 @@ describe('快捷键', () => {
     const entries = workspaceMenus(context())
       .filter((menu) => menu.label === '格式' || menu.label === '插入')
       .flatMap((menu) => menu.items)
-      .filter((entry): entry is Extract<MenuEntry, { id: string }> => !('separator' in entry) && !('role' in entry))
+      .filter((entry) => 'id' in entry)
     for (const entry of entries) expect(entry.shortcut, entry.id).toBeDefined()
   })
 
@@ -208,5 +214,30 @@ describe('快捷键', () => {
 
   test('重做只在编辑菜单中，没有快捷键', () => {
     expect(item(workspaceMenus(context()), 'edit:redo').shortcut).toBeUndefined()
+  })
+})
+
+describe('菜单项 id', () => {
+  test('菜单中的每一项都能还原成命令', () => {
+    for (const focus of ['editor', 'tree', 'text-input', 'other'] as const) {
+      const entries = [...welcomeMenus(), ...workspaceMenus(context({ focus }))].flatMap((menu) => menu.items)
+      for (const entry of entries) {
+        if ('id' in entry) expect(parseMenuItemId(entry.id), entry.id).not.toBeNull()
+      }
+    }
+  })
+
+  test('按分组还原', () => {
+    expect(parseMenuItemId('file:export-pdf')).toEqual({ group: 'file', action: 'export-pdf' })
+    expect(parseMenuItemId('editor:bold')).toEqual({ group: 'editor', command: 'bold' })
+    expect(parseMenuItemId('chapter:new-child')).toEqual({ group: 'chapter', action: 'new-child' })
+    expect(parseMenuItemId('chapter:move-indent')).toEqual({ group: 'move-chapter', direction: 'indent' })
+    expect(parseMenuItemId('view:switch-focus')).toEqual({ group: 'view', action: 'switch-focus' })
+  })
+
+  test('不认识的 id 返回 null', () => {
+    for (const id of ['', 'file', 'file:', 'file:print', 'editor:toString', 'chapter:move-left', 'chapter:move-', 'help:about']) {
+      expect(parseMenuItemId(id), id).toBeNull()
+    }
   })
 })
