@@ -1,6 +1,6 @@
 # Writer
 
-专注长文档的组织、写作与输出：章节树 + Markdown 正文 + 自动编号 + 全文预览 + Word / PDF 导出。
+专注长文档的组织、写作与输出：章节树 + 结构化正文（以 Markdown 保存）+ 自动编号 + 全文预览 + Word / PDF 导出。
 
 技术栈：Tauri 2 + Vue 3 + TypeScript + Rust。
 

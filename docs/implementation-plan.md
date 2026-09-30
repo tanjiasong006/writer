@@ -8,6 +8,20 @@
 每个阶段完成标准：相关测试 → 全量 `npm test` → `npm run typecheck` →
 （有 Rust 代码后）`cargo test` + `cargo clippy` → 自查 → 更新本文件。
 
+## 当前状态（阅读说明）
+
+本文件按时间顺序记录，**后面的章节会取代前面章节中的描述**；被取代处已就地标注。当前实现的要点：
+
+- 正文编辑器是 ProseMirror（见"正文编辑器迁移"）。S5 / S6 中的 CodeMirror 与 `markdown_commands.ts` 已随迁移删除；
+  `EditorToolbar.vue` 在"以 macOS HIG 为基准的界面调整"中删除，格式命令移到菜单栏、右键菜单与快捷键。
+- 命令入口：菜单栏 `ui/app_shell/app_menu.ts`（同时是工作区快捷键的唯一来源，菜单项 id 有类型检查）、
+  快捷键定义 `ui/common/shortcuts.ts`、右键菜单与按钮菜单 `ui/common/use_menu.ts`（见"以 macOS HIG 为基准的界面调整"）。
+- 工作区：文档名在正文区工具栏开头，侧栏只有章节树；侧栏可调宽度、可隐藏。`Workspace.vue` 负责连接，
+  独立职责在同目录的 `use_*.ts`（界面状态、侧栏、预览、导出、焦点区域、样式面板）。
+- 章节树：`ChapterTree.vue` 负责渲染、选择、菜单与键盘；显示行在 `tree_rows.ts`，拖拽在 `use_tree_drag.ts`，
+  内联重命名在 `use_inline_rename.ts`。键盘导航与键盘移动章节已完成。
+- 尚未完成的事项见"后续（MVP 之外，按价值排序）"与文末的手动验收清单。
+
 ## 状态总览
 
 | 阶段 | 内容 | 状态 |
@@ -131,8 +145,11 @@
 - Domain：新增 `countDescendants`、`hasContent`。
 - 验证：npm test 257/257，vue-tsc、vite build、build-storybook 通过；cargo test 25/25，clippy 无警告。
 - 未做（有意延后）：↑↓ 键盘导航（known-risks #2）、侧栏宽度拖动（spec P1）。
+  （已被取代：两项均已完成，见"后续 2"与"界面整体重做"。）
 
 ### S5（完成）
+
+> 已被取代：编辑器已整体迁移到 ProseMirror，本节的 CodeMirror 实现已删除，见"正文编辑器迁移"。
 
 - `ui/editor/ChapterEditor.vue`：CodeMirror 6 Markdown 源码编辑，自动换行、列表续行（markdownKeymap）、搜索、Tab 缩进、占位提示；
   章节编号与标题显示在编辑器上方，不进入正文。
@@ -145,6 +162,9 @@
   **限制**：本环境没有屏幕录制权限，无法截图或操作原生对话框；手动验收清单见文末。
 
 ### S6（完成）
+
+> 已被取代：`markdown_commands.ts` 已随 ProseMirror 迁移删除，命令见 `ui/editor/commands.ts`；`EditorToolbar.vue`
+> 在"以 macOS HIG 为基准的界面调整"中删除。图片导入（Rust `storage::assets`）仍然有效。
 
 - `ui/editor/markdown_commands.ts`：粗体 / 斜体（包裹与取消）、无序 / 有序列表 / 引用（按行切换，列表类型互换）、
   代码块、表格模板、图片；块级内容自动与前后段落隔开空行。纯 StateCommand，逐一单测。
@@ -362,7 +382,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 
 - 界面 token：`ui/tokens.css`（颜色层级、字号、间距、控件高度、圆角、阴影、动画时长）；`ui/base.css` 为应用与 Storybook 共用的基础样式。
   共用组件 `ui/common/`：`Icon`（统一线条图标）、`PopupMenu`（键盘导航、翻转定位、焦点归还）、`Toast`（浮层提示，不挤压布局）。
-- 工作区：侧栏 = 文档名（文档菜单：重命名 / 新建 / 打开，⌘N / ⌘O）+ 保存状态 + 章节树，可拖动调整宽度（180–480px，双击恢复，
+- 工作区（文档名与保存状态后来移到工具栏开头，快捷键改为 ⇧⌘N / ⇧⌘O，见下一节）：侧栏 = 文档名（文档菜单：重命名 / 新建 / 打开，⌘N / ⌘O）+ 保存状态 + 章节树，可拖动调整宽度（180–480px，双击恢复，
   键盘可调）；正文区只有一行顶栏：左侧正文工具（由编辑器提供状态与命令），右侧"样式 / 预览 / 导出"文字按钮；
   章节标题随正文滚动；正文滚动后顶栏下方才出现分隔线；预览为开关按钮，Esc 回到编辑。
 - 章节树（ui-spec 语义不变）：旋转的展开箭头；插入线从落点层级的编号处开始，并显示松手后的新编号（Application `moveChapterTo`
@@ -410,6 +430,8 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   `app-state.json`（正式版第一次运行时迁移原 localStorage 中的记录）；项目锁仍按项目路径生效。见 AGENTS.md"开发版与用户数据"。
 - 已知的小问题：选中图片时浮在图片上方的布局按钮会盖住上一段的末行文字；系统自动加入的菜单项（Close All、AutoFill、
   Start Dictation、Emoji & Symbols）在未打包的开发版中显示为英文，正式包需要在 Info.plist 中声明中文本地化后再确认。
+
+## 后续（MVP 之外，按价值排序）
 
 0. 富文本粘贴的后续能力（不是迁移回归）：识别 Word / WPS 的列表段落（目前是带 · 的普通段落）；
    粘贴 / 拖入的图片自动导入项目资源（目前被忽略，只能通过"插入图片"）。

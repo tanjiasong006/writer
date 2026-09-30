@@ -34,7 +34,8 @@ UI → Application → Domain
 依赖方向是单向的：UI 依赖 Application，Application 依赖 Domain；Infrastructure 实现 Application 所需的外部能力，不反向控制 Domain。
 
 - Domain 不得依赖 Tauri、文件系统或任何具体存储实现。
-- UI 可以使用 Domain 的只读数据类型，但业务操作必须通过 Application 用例组织。
+- UI 可以使用 Domain 的只读数据类型、常量和无副作用的查询函数（如 `findChapter`、`computeChapterNumbers`、`resolveTheme`），
+  但产生新数据的业务操作必须通过 Application 用例组织。
 - 当前没有实际用途时，不要提前创建 Repository、Service 或接口。
 
 Domain 数据默认使用 readonly，通过生成新数据而不是原地修改来表达状态变化。
