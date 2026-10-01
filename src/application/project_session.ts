@@ -2,7 +2,9 @@ import type { ChapterId, ChapterTree } from '../domain/chapter_tree/chapter_tree
 import {
   replaceTree,
   setContent,
+  setDocumentInfo,
   setTitle,
+  type DocumentInfo,
   type WriterDocument,
 } from '../domain/document/document.ts'
 import type {
@@ -109,6 +111,11 @@ export class ProjectSession {
 
   setTitle(title: string): void {
     this.commit(setTitle(this.current, title))
+  }
+
+  /** 修改文档信息（标题、副标题、作者）；与当前相同时不产生修改。 */
+  setDocumentInfo(info: DocumentInfo): void {
+    this.commit(setDocumentInfo(this.current, info))
   }
 
   /** 会话关闭 / 放弃后，等已开始的保存结束再释放存储资源（如独占锁）。 */

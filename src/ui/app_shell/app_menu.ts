@@ -32,7 +32,7 @@ export interface AppMenuContext {
   readonly appearance: Appearance
 }
 
-const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'reveal', 'export-docx', 'export-pdf'] as const
+const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader'] as const
@@ -194,6 +194,7 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         { id: 'file:save', label: '保存', shortcut: SHORTCUTS.save },
         { separator: true },
         { id: 'file:rename', label: '重命名文档' },
+        { id: 'file:info', label: '文档信息…' },
         { id: 'file:reveal', label: IS_MAC ? '在访达中显示' : '在文件夹中显示' },
         { separator: true },
         { id: 'file:export-docx', label: '导出为 Word…', disabled: context.exporting },

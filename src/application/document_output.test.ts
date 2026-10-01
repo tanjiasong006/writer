@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createDocument } from '../domain/document/document.ts'
+import { createDocument, setDocumentInfo } from '../domain/document/document.ts'
 import { buildRenderRequest } from './document_output.ts'
 
 test('buildRenderRequest：按阅读顺序展开，编号来自结构，正文原样', () => {
@@ -16,8 +16,11 @@ test('buildRenderRequest：按阅读顺序展开，编号来自结构，正文�
     ]),
   )
   if (!result.ok) throw new Error('fixture')
-  expect(buildRenderRequest(result.document)).toEqual({
+  const document = setDocumentInfo(result.document, { title: '论文', subtitle: '一项研究', author: '张三' })
+  expect(buildRenderRequest(document)).toEqual({
     title: '论文',
+    subtitle: '一项研究',
+    author: '张三',
     chapters: [
       { id: 'a', number: [1], title: '绪论', markdown: 'A' },
       { id: 'a1', number: [1, 1], title: '背景', markdown: 'A1\r\n' },
@@ -30,7 +33,7 @@ test('buildRenderRequest：只携带内容与结构，不携带任何排版参�
   const result = createDocument('论文', [{ id: 'a', title: '绪论', children: [] }], new Map([['a', '![图](../assets/图.png)']]))
   if (!result.ok) throw new Error('fixture')
   const request = buildRenderRequest(result.document)
-  expect(Object.keys(request).sort()).toEqual(['chapters', 'title'])
+  expect(Object.keys(request).sort()).toEqual(['author', 'chapters', 'subtitle', 'title'])
   expect(Object.keys(request.chapters[0]).sort()).toEqual(['id', 'markdown', 'number', 'title'])
   expect(request.chapters[0].markdown).toBe('![图](../assets/图.png)')
 })
@@ -38,5 +41,5 @@ test('buildRenderRequest：只携带内容与结构，不携带任何排版参�
 test('buildRenderRequest：空文档', () => {
   const result = createDocument('空', [], new Map())
   if (!result.ok) throw new Error('fixture')
-  expect(buildRenderRequest(result.document)).toEqual({ title: '空', chapters: [] })
+  expect(buildRenderRequest(result.document)).toEqual({ title: '空', subtitle: '', author: '', chapters: [] })
 })

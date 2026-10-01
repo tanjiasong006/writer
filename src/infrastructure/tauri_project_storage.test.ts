@@ -68,6 +68,19 @@ test('open：校验后组装文档', async () => {
   expect(result.value.orphanFiles).toEqual(['ch_9.md'])
 })
 
+test('open：读出副标题与作者；缺省时为空', async () => {
+  invokeMock.mockResolvedValue({
+    manifest: { ...manifest, subtitle: '一项研究', author: '张三' },
+    contents: { a: 'A', b: 'B', b1: 'B1' },
+  })
+  const result = await createTauriProjectStorage().open('/p/论文')
+  expect(result.ok && result.value.document).toMatchObject({ title: '论文', subtitle: '一项研究', author: '张三' })
+
+  invokeMock.mockResolvedValue({ manifest, contents: { a: 'A', b: 'B', b1: 'B1' } })
+  const plain = await createTauriProjectStorage().open('/p/论文')
+  expect(plain.ok && plain.value.document).toMatchObject({ subtitle: '', author: '' })
+})
+
 test('Rust 返回的结构化错误原样传递', async () => {
   invokeMock.mockRejectedValue({ code: 'content-missing', chapterId: 'b', file: 'ch_2.md' })
   expect(await createTauriProjectStorage().open('/p')).toEqual({
@@ -138,7 +151,7 @@ test('旧项目的 style（已取消的文档样式）：打开时忽略，正�
     orphanFiles: [],
   })
   if (!opened.ok) throw new Error('decode')
-  expect(Object.keys(opened.value.document).sort()).toEqual(['contents', 'title', 'tree'])
+  expect(Object.keys(opened.value.document).sort()).toEqual(['author', 'contents', 'subtitle', 'title', 'tree'])
   expect(opened.value.document.contents.get('b1')).toBe('B1')
 
   invokeMock.mockResolvedValue(null)

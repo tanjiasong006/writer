@@ -9,6 +9,7 @@ import { hasContent } from '../../domain/document/document.ts'
 import { exportDocument } from '../../application/document_output.ts'
 import ChapterManager from '../chapter_tree/ChapterManager.vue'
 import SaveStatus from './SaveStatus.vue'
+import DocumentInfoDialog from './DocumentInfoDialog.vue'
 import DocumentTitle from './DocumentTitle.vue'
 import ChapterEditor from '../editor/ChapterEditor.vue'
 import DocumentReader, { type ReadingPosition } from '../reader/DocumentReader.vue'
@@ -66,6 +67,8 @@ const actionError = ref<string | null>(null)
 const editor = ref<InstanceType<typeof ChapterEditor> | null>(null)
 const chapters = ref<InstanceType<typeof ChapterManager> | null>(null)
 const documentTitle = ref<InstanceType<typeof DocumentTitle> | null>(null)
+/** 文档信息对话框是否打开。 */
+const editingInfo = ref(false)
 const reader = ref<InstanceType<typeof DocumentReader> | null>(null)
 
 const { selectedId, collapsedIds } = useUiState(shell, props.session.path, () => document.value.tree)
@@ -233,9 +236,10 @@ watch(
   },
 )
 
-/** 文档名：重命名、新建 / 打开其他文档、在访达中显示项目文件夹。 */
+/** 文档名：重命名、文档信息、新建 / 打开其他文档、在访达中显示项目文件夹。 */
 const TITLE_ITEMS: readonly MenuEntry[] = [
   { id: 'rename', label: '重命名' },
+  { id: 'info', label: '文档信息…' },
   { separator: true },
   { id: 'new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
   { id: 'open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
@@ -246,6 +250,11 @@ const TITLE_ITEMS: readonly MenuEntry[] = [
 async function openTitleMenu(rect: DOMRect, keyboard: boolean): Promise<void> {
   const chosen = await showButtonMenu('title', TITLE_ITEMS, { rect, align: 'start' }, keyboard)
   if (chosen === 'rename') void documentTitle.value?.startRename()
+  else if (chosen === 'info') {
+    // 等菜单关闭、焦点回到文档名后再打开：对话框关闭时把焦点还到这里。
+    await nextTick()
+    editingInfo.value = true
+  }
   else if (chosen === 'new') emit('new-project')
   else if (chosen === 'open') emit('open-project')
   else if (chosen === 'reveal') void shell.revealFile(props.session.path)
@@ -325,6 +334,9 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
           return
         case 'rename':
           void documentTitle.value?.startRename()
+          return
+        case 'info':
+          editingInfo.value = true
           return
         case 'reveal':
           void shell.revealFile(props.session.path)
@@ -637,6 +649,13 @@ async function createFirstChapter(): Promise<void> {
       :keyboard="menu.current.value.keyboard"
       @select="menu.select"
       @close="menu.close"
+    />
+
+    <DocumentInfoDialog
+      v-if="editingInfo"
+      :info="document"
+      @submit="session.setDocumentInfo($event); editingInfo = false"
+      @cancel="editingInfo = false"
     />
   </div>
 </template>

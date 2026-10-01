@@ -1,7 +1,7 @@
 import type { ChapterId, ChapterTree } from '../chapter_tree/chapter_tree.ts'
 
 /**
- * 一份文档：标题、章节树、每个章节的正文。
+ * 一份文档：文档信息（标题、副标题、作者）、章节树、每个章节的正文。
  *
  * 不变量：contents 的 key 集合与 tree 中的 id 集合完全一致，每个章节恰好有一份正文（可为空串）。
  * 正文是章节内容本身，不包含章节标题与编号，也不包含任何排版信息。编辑环境主题属于应用偏好，
@@ -9,6 +9,10 @@ import type { ChapterId, ChapterTree } from '../chapter_tree/chapter_tree.ts'
  */
 export interface WriterDocument {
   readonly title: string
+  /** 空串表示没有副标题。 */
+  readonly subtitle: string
+  /** 空串表示没有作者。 */
+  readonly author: string
   readonly tree: ChapterTree
   readonly contents: ReadonlyMap<ChapterId, string>
 }
@@ -37,12 +41,12 @@ export function createDocument(
   for (const id of contents.keys()) {
     if (!ids.has(id)) return { ok: false, reason: 'content-orphan', chapterId: id }
   }
-  return { ok: true, document: { title, tree, contents } }
+  return { ok: true, document: { title, subtitle: '', author: '', tree, contents } }
 }
 
-/** 空文档：没有章节。 */
+/** 空文档：没有章节，也没有副标题与作者。 */
 export function emptyDocument(title: string): WriterDocument {
-  return { title, tree: [], contents: new Map() }
+  return { title, subtitle: '', author: '', tree: [], contents: new Map() }
 }
 
 /**
@@ -81,6 +85,22 @@ export function setContent(
 /** 修改文档标题。 */
 export function setTitle(document: WriterDocument, title: string): WriterDocument {
   return title === document.title ? document : { ...document, title }
+}
+
+/** 文档信息：属于文档内容，Word 与 PDF 都会输出（docs/pdf-layout.md 第 2 节）。 */
+export interface DocumentInfo {
+  readonly title: string
+  readonly subtitle: string
+  readonly author: string
+}
+
+/** 修改文档信息；与当前相同时原样返回同一文档对象。 */
+export function setDocumentInfo(document: WriterDocument, info: DocumentInfo): WriterDocument {
+  const { title, subtitle, author } = info
+  if (title === document.title && subtitle === document.subtitle && author === document.author) {
+    return document
+  }
+  return { ...document, title, subtitle, author }
 }
 
 /** 章节正文是否有实际内容（不只是空白字符）；找不到章节返回 false。 */

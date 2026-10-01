@@ -12,12 +12,17 @@ use serde::Deserialize;
 
 use markdown::Block;
 
-/// 前端传入的待渲染文档：只有标题与按树的先序顺序展开的章节内容与结构。
+/// 前端传入的待渲染文档：文档信息（标题、副标题、作者）与按树的先序顺序展开的章节内容与结构。
 /// 不携带任何排版参数：Word / PDF 各自取得输出参数（`export::theme`）。
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderRequest {
     pub title: String,
+    /// 空串表示没有（docs/pdf-layout.md 第 2 节）。
+    #[serde(default)]
+    pub subtitle: String,
+    #[serde(default)]
+    pub author: String,
     pub chapters: Vec<RenderChapter>,
 }
 
@@ -35,6 +40,8 @@ pub struct RenderChapter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     pub title: String,
+    pub subtitle: String,
+    pub author: String,
     pub sections: Vec<Section>,
 }
 
@@ -52,6 +59,8 @@ pub struct Section {
 pub fn build(request: &RenderRequest) -> Document {
     Document {
         title: request.title.clone(),
+        subtitle: request.subtitle.clone(),
+        author: request.author.clone(),
         sections: request
             .chapters
             .iter()
@@ -144,6 +153,7 @@ mod tests {
                     markdown: String::new(),
                 },
             ],
+            ..Default::default()
         });
         assert_eq!(document.sections[0].number, "1");
         assert_eq!(document.sections[1].number, "1.2");

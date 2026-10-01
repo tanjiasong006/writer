@@ -17,6 +17,8 @@ import type { IoKind } from './project_storage.ts'
  */
 export interface RenderRequest {
   readonly title: string
+  readonly subtitle: string
+  readonly author: string
   readonly chapters: readonly RenderChapter[]
 }
 
@@ -85,5 +87,5 @@ export function buildRenderRequest(document: WriterDocument): RenderRequest {
     }
   }
   visit(document.tree)
-  return { title: document.title, chapters }
+  return { title: document.title, subtitle: document.subtitle, author: document.author, chapters }
 }

@@ -7,6 +7,7 @@ import {
   hasContent,
   replaceTree,
   setContent,
+  setDocumentInfo,
   setTitle,
 } from './document.ts'
 
@@ -54,11 +55,13 @@ test('createDocument：多出不属于任何章节的正文时失败', () => {
   })
 })
 
-test('emptyDocument：空树、空正文，只有标题、结构与正文', () => {
+test('emptyDocument：空树、空正文，只有文档信息、结构与正文', () => {
   const document = emptyDocument('新文档')
   assert.deepEqual(document.tree, [])
   assert.equal(document.contents.size, 0)
-  assert.deepEqual(Object.keys(document).sort(), ['contents', 'title', 'tree'])
+  assert.deepEqual(Object.keys(document).sort(), ['author', 'contents', 'subtitle', 'title', 'tree'])
+  assert.equal(document.subtitle, '')
+  assert.equal(document.author, '')
 })
 
 test('replaceTree：删除子树时一并去掉子孙正文', () => {
@@ -109,6 +112,20 @@ test('setTitle：相同标题返回同一对象', () => {
   const original = doc()
   assert.equal(setTitle(original, '论文'), original)
   assert.equal(setTitle(original, '新标题').title, '新标题')
+})
+
+test('setDocumentInfo：新文档没有副标题与作者；相同信息返回同一对象，其余内容不变', () => {
+  const original = doc()
+  assert.equal(original.subtitle, '')
+  assert.equal(original.author, '')
+  assert.equal(setDocumentInfo(original, { title: '论文', subtitle: '', author: '' }), original)
+  const changed = setDocumentInfo(original, { title: '论文', subtitle: '一项研究', author: '张三' })
+  assert.notEqual(changed, original)
+  assert.equal(changed.subtitle, '一项研究')
+  assert.equal(changed.author, '张三')
+  assert.equal(changed.tree, original.tree)
+  assert.equal(changed.contents, original.contents)
+  assert.equal(original.subtitle, '')
 })
 
 test('hasContent：只含空白字符不算有正文', () => {

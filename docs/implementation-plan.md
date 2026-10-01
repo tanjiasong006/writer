@@ -651,6 +651,23 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 验证：新增封面 / 目录 / 章节分页 / 页眉、无标题无封面、首行缩进测试；原有测试按新增目录页与页码重新计数更新预期。
   Rust 测试全部通过，clippy 无警告；示例 PDF 逐页渲染目视检查。
 
+### 第 2 步：文档信息（完成，2026-10-01）
+
+- Domain：`WriterDocument` 增加 `subtitle`、`author`（空串表示没有）与 `setDocumentInfo`；
+  `createDocument` / `emptyDocument` 的签名不变，得到的文档没有副标题与作者，加载时再设置。
+- 格式：manifest 可选字段 `subtitle`、`author`，空串不写出；存在但不是字符串时拒绝打开（`subtitle-invalid` /
+  `author-invalid`，界面显示 writer.json 损坏）。Rust 存储层原样传递 manifest，无需改动。
+- 会话：`setDocumentInfo` 推进 revision、产生 dirty，保存不携带正文；相同信息不产生修改。
+- 输出：`RenderRequest` 增加 `subtitle`、`author`（Rust 侧缺省为空）。PDF 封面在标题与细线之下依次显示副标题（16pt）
+  与作者（12pt），三者都为空时没有封面；PDF 元数据写入标题与作者。Word 在标题后输出 `Subtitle`、`Author` 样式段落，
+  并整体生成 `docProps/core.xml`（标题、作者），不再写出 docx-rs 默认的作者 "unknown"。
+- 界面：文档名菜单与菜单栏"文件"中的"文档信息…"打开模态对话框（`DocumentInfoDialog`，外观与删除确认一致）：
+  标题、副标题、作者三栏，Enter 完成、Esc 取消、Tab 在对话框内循环，点击遮罩不关闭；空标题保留原标题；
+  关闭后焦点回到打开前的位置。新增 Story（空、已填写、超长）。
+- 验证：Domain、格式、存储适配、会话、输出请求、Workspace（菜单入口、Esc / 完成、焦点、Tab 循环）测试；
+  Rust 新增 PDF 封面 / 元数据与 Word 段落 / 文档属性测试。Rust 测试与 clippy、Vitest、类型检查全部通过。
+  Storybook 中目视检查了浅色与深色外观；示例 PDF 封面渲染检查。
+
 ## 后续（MVP 之外，按价值排序）
 
 0. 富文本粘贴的后续能力（不是迁移回归）：识别 Word / WPS 的列表段落（目前是带 · 的普通段落）；

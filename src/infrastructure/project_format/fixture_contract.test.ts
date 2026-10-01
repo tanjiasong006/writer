@@ -20,7 +20,7 @@ test('共享示例项目：TS 解析与生成都与磁盘格式一致', () => {
   const contents = new Map(
     [...parsed.manifest.files].map(([id, file]) => [id, readFileSync(`${root}content/${file}`, 'utf8')]),
   )
-  const document = createDocument(parsed.manifest.title, parsed.manifest.tree, contents)
+  const document = createDocument(parsed.manifest.info.title, parsed.manifest.tree, contents)
   expect(document.ok).toBe(true)
   if (!document.ok) return
 

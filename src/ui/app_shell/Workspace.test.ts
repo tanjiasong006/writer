@@ -158,6 +158,62 @@ test('修改文档标题：在工具栏的文档名处原地重命名，Esc 放�
   expect(services.storage.committed(PATH)!.title).toBe('新标题')
 })
 
+test('文档信息：从文档名菜单打开，Enter 完成后保存副标题与作者；Esc 放弃，焦点回到原处', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  const titleButton = wrapper.find<HTMLButtonElement>('.document-title__button').element
+  titleButton.focus()
+
+  await documentMenu(wrapper, '文档信息…')
+  await flushPromises()
+  const dialog = () => wrapper.find('.document-info')
+  expect(dialog().exists()).toBe(true)
+  const inputs = dialog().findAll<HTMLInputElement>('input')
+  expect(inputs.map((input) => input.element.value)).toEqual(['毕业论文', '', ''])
+  expect(document.activeElement).toBe(inputs[0].element)
+
+  await inputs[1].setValue('不要')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  await flushPromises()
+  expect(dialog().exists()).toBe(false)
+  expect(saveState(wrapper)).not.toBe('dirty')
+  expect(document.activeElement).toBe(titleButton)
+
+  await documentMenu(wrapper, '文档信息…')
+  await flushPromises()
+  const fields = dialog().findAll<HTMLInputElement>('input')
+  await fields[0].setValue('   ')
+  await fields[1].setValue('  一项研究  ')
+  await fields[2].setValue('张三')
+  await dialog().trigger('submit')
+  await flushPromises()
+  expect(dialog().exists()).toBe(false)
+  // 空标题保留原标题。
+  expect(documentTitle(wrapper)).toBe('毕业论文')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ...MOD }))
+  await flushPromises()
+  expect(services.storage.committed(PATH)).toMatchObject({ title: '毕业论文', subtitle: '一项研究', author: '张三' })
+})
+
+test('文档信息：菜单栏"文件"中也有入口，打开时 Tab 只在对话框内循环', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.enableAppMenu()
+  const wrapper = await mountApp(services)
+
+  expect(appMenuItem(services, 'file:info').label).toBe('文档信息…')
+  services.shell.chooseMenuItem('file:info')
+  await flushPromises()
+  const controls = wrapper.findAll('.document-info input, .document-info button')
+  expect(controls).toHaveLength(5)
+  ;(controls[4].element as HTMLElement).focus()
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
+  expect(document.activeElement).toBe(controls[0].element)
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true }))
+  expect(document.activeElement).toBe(controls[4].element)
+})
+
 test('导出菜单：点击别处或按 Esc 关闭', async () => {
   const services = seededServices()
   services.shell.lastProjectPath = PATH
@@ -396,7 +452,7 @@ test('没有文档样式与图片布局入口；导出请求只携带内容与�
   await button(wrapper, '导出为 PDF…').trigger('click')
   await flushPromises()
   const { request } = services.output.exports[0]
-  expect(Object.keys(request).sort()).toEqual(['chapters', 'title'])
+  expect(Object.keys(request).sort()).toEqual(['author', 'chapters', 'subtitle', 'title'])
   expect(request.chapters[0].markdown).toBe('![装置](../assets/装置.png)\n')
 })
 

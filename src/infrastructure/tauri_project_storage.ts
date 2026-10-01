@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ChapterId } from '../domain/chapter_tree/chapter_tree.ts'
-import { createDocument } from '../domain/document/document.ts'
+import { createDocument, setDocumentInfo } from '../domain/document/document.ts'
 import type {
   OpenedProject,
   ProjectStorage,
@@ -129,11 +129,12 @@ export function decodeOpened(raw: unknown): StorageResult<OpenedProject> {
     texts.set(id, text)
   }
 
-  const document = createDocument(parsed.manifest.title, parsed.manifest.tree, texts)
+  const { info, tree } = parsed.manifest
+  const document = createDocument(info.title, tree, texts)
   if (!document.ok) return invalid(document.reason)
 
   const orphans = Array.isArray(orphanFiles)
     ? orphanFiles.filter((name): name is string => typeof name === 'string')
     : []
-  return { ok: true, value: { document: document.document, orphanFiles: orphans } }
+  return { ok: true, value: { document: setDocumentInfo(document.document, info), orphanFiles: orphans } }
 }

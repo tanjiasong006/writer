@@ -57,6 +57,9 @@ fn half_points(pt: f64) -> usize {
     (pt * 2.0).round() as usize
 }
 
+/// 副标题的字号（磅）。
+const SUBTITLE_PT: f64 = 16.0;
+
 /// 磅 → twip（1/20 磅）。
 fn twips(pt: f64) -> u32 {
     (pt * 20.0).round() as u32
@@ -75,12 +78,19 @@ pub fn export(
         items: Vec::new(),
     };
 
-    if !document.title.trim().is_empty() {
-        writer.items.push(Item::Paragraph(
-            Paragraph::new()
-                .style("Title")
-                .add_run(Run::new().add_text(xml_safe(&document.title))),
-        ));
+    // 文档开头：标题、副标题、作者，各用自己的段落样式；空的不输出。
+    for (style, text) in [
+        ("Title", &document.title),
+        ("Subtitle", &document.subtitle),
+        ("Author", &document.author),
+    ] {
+        if !text.trim().is_empty() {
+            writer.items.push(Item::Paragraph(
+                Paragraph::new()
+                    .style(style)
+                    .add_run(Run::new().add_text(xml_safe(text.trim()))),
+            ));
+        }
     }
     for section in &document.sections {
         writer.section(section);
@@ -99,10 +109,37 @@ pub fn export(
 
     let mut xml = docx.build();
     xml.document = mark_header_rows(&xml.document);
+    xml.doc_props.core = core_properties(&document.title, &document.author);
     let bytes = pack_with_jpeg(xml).map_err(|error| ExportError::RenderFailed {
         message: error.to_string(),
     })?;
     Ok((bytes, writer.report))
+}
+
+/// 文档属性（docProps/core.xml）：标题与作者。docx-rs 没有设置它们的接口，默认写出的
+/// 作者是 "unknown"，因此整体生成；空的项不写出。
+fn core_properties(title: &str, author: &str) -> Vec<u8> {
+    let mut xml = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+         <cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" \
+         xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" \
+         xmlns:dcmitype=\"http://purl.org/dc/dcmitype/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+    );
+    for (tag, value) in [("dc:title", title), ("dc:creator", author)] {
+        let value = xml_safe(value.trim());
+        if !value.is_empty() {
+            xml.push_str(&format!("<{tag}>{}</{tag}>", escape_xml(&value)));
+        }
+    }
+    xml.push_str("</cp:coreProperties>");
+    xml.into_bytes()
+}
+
+fn escape_xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// docx-rs 只按 .png 打包 Pic。将 JPEG 从默认媒体中移出，修正关系后以 .jpeg 追加。
@@ -629,6 +666,24 @@ fn base_document(theme: &Theme) -> Docx {
                 .q_format(true),
         )
         .add_style(
+            Style::new("Subtitle", StyleType::Paragraph)
+                .name("Subtitle")
+                .based_on("Normal")
+                .fonts(fonts(theme.title.font))
+                .size(half_points(SUBTITLE_PT))
+                .color("4B5563")
+                .align(AlignmentType::Center)
+                .q_format(true),
+        )
+        .add_style(
+            Style::new("Author", StyleType::Paragraph)
+                .name("Author")
+                .based_on("Normal")
+                .size(half_points(body.size))
+                .color("4B5563")
+                .align(AlignmentType::Center),
+        )
+        .add_style(
             Style::new("Code", StyleType::Paragraph)
                 .name("Code")
                 .based_on("Normal")
@@ -802,6 +857,7 @@ mod tests {
                     markdown: (*markdown).into(),
                 })
                 .collect(),
+            ..Default::default()
         }
     }
 
@@ -883,6 +939,34 @@ mod tests {
         assert!(styles.contains(r#"<w:outlineLvl w:val="0" />"#));
         assert!(styles.contains(r#"w:eastAsia="SimHei""#));
         assert!(report.missing_images.is_empty());
+    }
+
+    #[test]
+    fn subtitle_and_author_follow_the_title_and_fill_document_properties() {
+        let dir = project();
+        let mut request = request(&[("a", vec![1], "绪论", "")]);
+        request.subtitle = "一项研究".into();
+        request.author = "张三 & <李四>".into();
+        let (bytes, _) = export(&build(&request), dir.path()).unwrap();
+        docx_rs::read_docx(&bytes).expect("generated docx must be readable");
+        let xml = part(&bytes, "word/document.xml");
+        let title = xml.find("示例论文").unwrap();
+        let subtitle = xml.find("一项研究").unwrap();
+        let author = xml.find("张三 &amp; &lt;李四&gt;").unwrap();
+        assert!(title < subtitle && subtitle < author);
+        assert!(xml.contains(r#"<w:pStyle w:val="Subtitle" />"#));
+        assert!(xml.contains(r#"<w:pStyle w:val="Author" />"#));
+        let core = part(&bytes, "docProps/core.xml");
+        assert!(core.contains("<dc:title>示例论文</dc:title>"), "{core}");
+        assert!(core.contains("<dc:creator>张三 &amp; &lt;李四&gt;</dc:creator>"), "{core}");
+        assert!(!core.contains("unknown"), "{core}");
+
+        // 没有副标题与作者时不输出空段落，文档属性也不写作者。
+        let (bytes, _) = export_ok(&dir, &[("a", vec![1], "绪论", "")]);
+        let xml = part(&bytes, "word/document.xml");
+        assert!(!xml.contains(r#"<w:pStyle w:val="Subtitle" />"#));
+        assert!(!xml.contains(r#"<w:pStyle w:val="Author" />"#));
+        assert!(!part(&bytes, "docProps/core.xml").contains("dc:creator"));
     }
 
     #[test]
@@ -1334,6 +1418,7 @@ fn write_sample_docx() {
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.jpg)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
+        ..Default::default()
     };
     let (bytes, report) = export(&build(&request), &root).unwrap();
     assert!(report.missing_images.is_empty());

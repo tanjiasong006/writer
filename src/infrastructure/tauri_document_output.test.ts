@@ -7,6 +7,8 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
 const invokeMock = vi.mocked(invoke)
 const request: RenderRequest = {
   title: '论文',
+  subtitle: '',
+  author: '',
   chapters: [{ id: 'a', number: [1], title: '绪论', markdown: '正文' }],
 }
 

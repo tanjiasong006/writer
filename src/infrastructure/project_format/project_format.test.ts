@@ -2,7 +2,7 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import type { ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { MAX_CHAPTER_DEPTH } from '../../domain/chapter_tree/chapter_tree.ts'
-import { replaceTree, emptyDocument } from '../../domain/document/document.ts'
+import { replaceTree, emptyDocument, setDocumentInfo } from '../../domain/document/document.ts'
 import {
   buildManifest,
   contentFileName,
@@ -92,6 +92,27 @@ test('buildManifest：包含格式、版本、标题、章节树和文件对应�
   assert.equal(manifest.files.b2, 'ch_2_2.md')
 })
 
+test('文档信息：副标题与作者非空时写出并往返；空串时不写出', () => {
+  const plain = buildManifest(emptyDocument('论文'))
+  assert.equal('subtitle' in plain, false)
+  assert.equal('author' in plain, false)
+
+  const document = setDocumentInfo(emptyDocument('论文'), { title: '论文', subtitle: '一项研究', author: '张三' })
+  const raw = JSON.parse(JSON.stringify(buildManifest(document)))
+  assert.equal(raw.subtitle, '一项研究')
+  assert.equal(raw.author, '张三')
+  const result = parseManifest(raw)
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  assert.deepEqual(result.manifest.info, { title: '论文', subtitle: '一项研究', author: '张三' })
+})
+
+test('文档信息：副标题或作者不是字符串时拒绝打开', () => {
+  assert.equal(issueOf(manifestJson({ subtitle: 3 })).code, 'subtitle-invalid')
+  assert.equal(issueOf(manifestJson({ subtitle: null })).code, 'subtitle-invalid')
+  assert.equal(issueOf(manifestJson({ author: ['张三'] })).code, 'author-invalid')
+})
+
 test('buildManifest：空文档', () => {
   const manifest = buildManifest(emptyDocument(''))
   assert.deepEqual(manifest.chapters, [])
@@ -102,7 +123,7 @@ test('parseManifest：生成的 manifest 往返后解析成功', () => {
   const result = parseManifest(manifestJson())
   assert.equal(result.ok, true)
   if (!result.ok) return
-  assert.equal(result.manifest.title, '我的论文')
+  assert.deepEqual(result.manifest.info, { title: '我的论文', subtitle: '', author: '' })
   assert.deepEqual(result.manifest.tree, tree)
   assert.equal(result.manifest.files.get('b1'), 'ch_2_1.md')
 })
@@ -172,7 +193,7 @@ test('parseManifest：中文标题与特殊 id 原样保留', () => {
   const result = parseManifest(raw)
   assert.equal(result.ok, true)
   if (!result.ok) return
-  assert.equal(result.manifest.title, '论文 🎓')
+  assert.equal(result.manifest.info.title, '论文 🎓')
   assert.equal(result.manifest.files.get('__proto__'), 'ch_1.md')
 })
 
@@ -220,7 +241,7 @@ test('旧项目的 style（已取消的文档样式）：无论内容如何都�
     const parsed = parseManifest(manifestJson({ style }))
     assert.ok(parsed.ok, JSON.stringify(style))
     if (!parsed.ok) return
-    assert.deepEqual(Object.keys(parsed.manifest).sort(), ['files', 'title', 'tree'])
+    assert.deepEqual(Object.keys(parsed.manifest).sort(), ['files', 'info', 'tree'])
   }
   const document = replaceTree(emptyDocument('我的论文'), tree)
   assert.equal('style' in buildManifest(document), false)

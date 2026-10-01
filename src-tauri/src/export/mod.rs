@@ -143,6 +143,7 @@ mod tests {
                     markdown,
                 })
                 .collect(),
+            ..Default::default()
         };
         let document = build(&request);
         let (docx, report) = docx::export(&document, &root).unwrap();
@@ -172,6 +173,7 @@ mod tests {
         let request = RenderRequest {
             title: "大文档".into(),
             chapters,
+            ..Default::default()
         };
         let t = Instant::now();
         let document = build(&request);

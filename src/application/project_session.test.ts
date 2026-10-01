@@ -96,6 +96,19 @@ test('只调整结构：不携带任何正文，正文由存储层保留', async
   expect(committedContents(storage)).toEqual({ a: '引言', a1: '背景正文', b: '' })
 })
 
+test('修改文档信息：dirty，保存不携带正文；相同信息不产生修改', async () => {
+  const { storage, session } = setup()
+  session.setDocumentInfo({ title: '论文', subtitle: '', author: '' })
+  expect(session.isDirty).toBe(false)
+
+  session.setDocumentInfo({ title: '论文', subtitle: '一项研究', author: '张三' })
+  expect(session.isDirty).toBe(true)
+  await session.save()
+  expect(storage.saves[0].changed.size).toBe(0)
+  expect(storage.committed(PATH)).toMatchObject({ title: '论文', subtitle: '一项研究', author: '张三' })
+  expect(session.status).toBe('saved')
+})
+
 test('删除含子章节的章节：保存后磁盘上不再有其正文', async () => {
   const { storage, session } = setup()
   const removed = removeChapter(session.document.tree, 'a')

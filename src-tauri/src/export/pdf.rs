@@ -50,6 +50,9 @@ const FIRST_LINE_INDENT_EM: f64 = 2.0;
 const CHAPTER_TOP_SPACE_PT: f64 = 36.0;
 /// 页眉、页码的字号（磅）。
 const META_TEXT_PT: f64 = 9.0;
+/// 封面上副标题与作者的字号（磅）。
+const COVER_SUBTITLE_PT: f64 = 16.0;
+const COVER_AUTHOR_PT: f64 = 12.0;
 /// 目录显示的章节层级。
 const TOC_DEPTH: usize = 2;
 
@@ -252,11 +255,16 @@ impl Writer<'_> {
             )
         };
         self.out.push_str(&format!(
-            "#set document(title: {title})\n\
+            "#set document(title: {title}, author: {author})\n\
              #set page(paper: \"a4\", margin: 25mm, numbering: none, header: none, footer: none)\n\
              #set text(font: {body_font}, size: {body_size}pt, lang: \"zh\", region: \"cn\", top-edge: 0.8em, bottom-edge: -{bottom_edge}em)\n\
              #set par(justify: true, leading: {leading}em, spacing: {spacing}em, first-line-indent: (amount: {indent}em, all: true))\n\
              #set heading(numbering: none)\n",
+            author = if document.author.trim().is_empty() {
+                "()".to_owned()
+            } else {
+                string(document.author.trim())
+            },
             body_font = font_list(body.font.into()),
             bottom_edge = num(TEXT_BOTTOM_EDGE_EM),
             body_size = num(body.size),
@@ -329,18 +337,37 @@ impl Writer<'_> {
              }}\n",
             meta = num(META_TEXT_PT),
         ));
-        if !document.title.trim().is_empty() {
-            self.out.push_str(&format!(
+        // 封面：标题、细线，其下依次是副标题与作者；三者都为空时没有封面。
+        let subtitle = document.subtitle.trim();
+        let author = document.author.trim();
+        if !document.title.trim().is_empty() || !subtitle.is_empty() || !author.is_empty() {
+            let cover_font = font_list(theme.title.font.into());
+            let mut cover = format!(
                 "#page[\n\
                  #set par(first-line-indent: 0em, justify: false)\n\
+                 #set align(center)\n\
                  #v(28%)\n\
-                 #align(center, text(font: {font}, size: {size}pt, weight: \"bold\")[#{title}])\n\
+                 #text(font: {cover_font}, size: {size}pt, weight: \"bold\")[#{title}]\n\
                  #v(1.5em)\n\
-                 #align(center, line(length: 40%, stroke: 0.6pt + luma(120)))\n\
-                 ]\n",
-                font = font_list(theme.title.font.into()),
+                 #line(length: 40%, stroke: 0.6pt + luma(120))\n",
                 size = num(theme.title.size),
-            ));
+            );
+            if !subtitle.is_empty() {
+                cover.push_str(&format!(
+                    "#v(1.2em)\n#text(font: {cover_font}, size: {}pt, fill: luma(60))[#{}]\n",
+                    num(COVER_SUBTITLE_PT),
+                    string(subtitle),
+                ));
+            }
+            if !author.is_empty() {
+                cover.push_str(&format!(
+                    "#v(3em)\n#text(font: {cover_font}, size: {}pt, fill: luma(60))[#{}]\n",
+                    num(COVER_AUTHOR_PT),
+                    string(author),
+                ));
+            }
+            cover.push_str("]\n");
+            self.out.push_str(&cover);
         }
         if !document.sections.is_empty() {
             self.out.push_str(&format!(
@@ -735,6 +762,7 @@ mod tests {
                     markdown: (*markdown).into(),
                 })
                 .collect(),
+            ..Default::default()
         }
     }
 
@@ -985,6 +1013,7 @@ mod tests {
         let document = build(&RenderRequest {
             title: "图文性能测试".into(),
             chapters,
+            ..Default::default()
         });
         let started = std::time::Instant::now();
         let (word, report) = crate::export::docx::export(&document, dir.path()).unwrap();
@@ -1044,6 +1073,7 @@ mod tests {
                     markdown: body.clone(),
                 })
                 .collect(),
+            ..Default::default()
         });
         let fonts = system_fonts();
         let started = std::time::Instant::now();
@@ -1398,6 +1428,28 @@ mod tests {
         assert!(texts[second].starts_with("2 第二章节"), "{}", texts[second]);
         assert!(!texts[second - 1].contains("第二章正文"));
         assert!(texts.iter().any(|t| t.contains("第一小节") && t.contains("很长的正文")));
+    }
+
+    #[test]
+    fn cover_shows_subtitle_and_author_and_pdf_metadata_names_the_author() {
+        let dir = project();
+        let mut request = request("论文标题", &[("a", vec![1], "章", "正文。")]);
+        request.subtitle = "一项研究".into();
+        request.author = "张三".into();
+        let document = build(&request);
+        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        assert_eq!(page_texts(&paged)[0], "论文标题一项研究张三");
+        let sizes: Vec<(String, f64)> = placed(&paged)
+            .into_iter()
+            .filter_map(|p| match p {
+                Placed::Text { page: 0, text, size, .. } => Some((text, size)),
+                _ => None,
+            })
+            .collect();
+        assert!(sizes.contains(&("一项研究".into(), 16.0)) && sizes.contains(&("张三".into(), 12.0)), "{sizes:?}");
+        let info = typst::model::Document::info(&paged);
+        assert_eq!(info.author, vec!["张三"]);
+        assert_eq!(info.title.as_deref(), Some("论文标题"));
     }
 
     #[test]
@@ -1837,6 +1889,8 @@ fn write_sample_pdf() {
     };
     let request = RenderRequest {
         title: "Writer 示例文档".into(),
+        subtitle: "长文档写作与输出示例".into(),
+        author: "Writer 团队".into(),
         chapters: vec![
             chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二\n\n注入测试：\"]#panic(\"x\")[ $ x $ #strong[不应加粗]"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),

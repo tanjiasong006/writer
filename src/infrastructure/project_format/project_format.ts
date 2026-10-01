@@ -8,7 +8,7 @@ import {
   computeChapterNumbers,
   type ChapterNumber,
 } from '../../domain/chapter_numbering/chapter_numbering.ts'
-import type { WriterDocument } from '../../domain/document/document.ts'
+import type { DocumentInfo, WriterDocument } from '../../domain/document/document.ts'
 
 /**
  * Writer 项目 manifest（writer.json）的生成与解析。
@@ -23,6 +23,10 @@ export interface Manifest {
   readonly format: typeof MANIFEST_FORMAT
   readonly version: typeof MANIFEST_VERSION
   readonly title: string
+  /** 省略表示没有副标题。 */
+  readonly subtitle?: string
+  /** 省略表示没有作者。 */
+  readonly author?: string
   readonly chapters: ChapterTree
   /** ChapterId → 当前正文文件名（相对 content/）。 */
   readonly files: Readonly<Record<ChapterId, string>>
@@ -96,6 +100,9 @@ export function buildManifest(document: WriterDocument): Manifest {
     format: MANIFEST_FORMAT,
     version: MANIFEST_VERSION,
     title: document.title,
+    // 副标题与作者是可选字段：空串不写出（docs/project-format.md 第 3.2 节）。
+    ...(document.subtitle === '' ? {} : { subtitle: document.subtitle }),
+    ...(document.author === '' ? {} : { author: document.author }),
     chapters: document.tree,
     files: Object.fromEntries(contentFiles(document.tree)),
   }
@@ -106,6 +113,8 @@ export type ManifestIssue =
   | { readonly code: 'format-unknown' }
   | { readonly code: 'version-unsupported'; readonly version: unknown }
   | { readonly code: 'title-invalid' }
+  | { readonly code: 'subtitle-invalid' }
+  | { readonly code: 'author-invalid' }
   | { readonly code: 'tree-invalid'; readonly issues: readonly TreeIssue[] }
   | { readonly code: 'files-invalid' }
   | { readonly code: 'file-name-invalid'; readonly chapterId: ChapterId }
@@ -114,7 +123,7 @@ export type ManifestIssue =
   | { readonly code: 'file-orphan'; readonly chapterId: ChapterId }
 
 export interface ParsedManifest {
-  readonly title: string
+  readonly info: DocumentInfo
   readonly tree: ChapterTree
   readonly files: ReadonlyMap<ChapterId, string>
 }
@@ -137,6 +146,10 @@ export function parseManifest(raw: unknown): ParseManifestResult {
   if (m.format !== MANIFEST_FORMAT) return fail({ code: 'format-unknown' })
   if (m.version !== MANIFEST_VERSION) return fail({ code: 'version-unsupported', version: m.version })
   if (typeof m.title !== 'string') return fail({ code: 'title-invalid' })
+  // 副标题与作者可以缺省（等同于空串）；存在但不是字符串时与标题一样拒绝打开，不静默丢弃内容。
+  if (m.subtitle !== undefined && typeof m.subtitle !== 'string') return fail({ code: 'subtitle-invalid' })
+  if (m.author !== undefined && typeof m.author !== 'string') return fail({ code: 'author-invalid' })
+  const info = { title: m.title, subtitle: m.subtitle ?? '', author: m.author ?? '' }
 
   const tree = validateTree(m.chapters)
   if (!tree.ok) return fail({ code: 'tree-invalid', issues: tree.issues })
@@ -162,7 +175,7 @@ export function parseManifest(raw: unknown): ParseManifestResult {
     if (!files.has(chapterId)) return fail({ code: 'file-missing', chapterId })
   }
 
-  return { ok: true, manifest: { title: m.title, tree: tree.tree, files } }
+  return { ok: true, manifest: { info, tree: tree.tree, files } }
 }
 
 function fail(issue: ManifestIssue): ParseManifestResult {
