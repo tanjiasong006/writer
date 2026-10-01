@@ -7,15 +7,20 @@ import {
   type DocumentInfo,
   type WriterDocument,
 } from '../domain/document/document.ts'
+import type { PdfLayoutSettings } from '../domain/pdf_layout/pdf_layout.ts'
 import type {
   ImportedAsset,
+  ProjectState,
   ProjectStorage,
   StorageFailure,
   StorageResult,
 } from './project_storage.ts'
 
 /**
- * 一个已打开项目的编辑会话：持有当前文档，组织保存。
+ * 一个已打开项目的编辑会话：持有当前文档与 PDF 排版配置，组织保存。
+ *
+ * 文档与配置共用 revision 与保存快照：修改配置同样产生 dirty、自动保存与关闭保护；
+ * 只改配置时保存不携带任何正文（docs/decisions.md 第 8 节"PDF 配置与项目会话"）。
  *
  * dirty 的边界（docs/decisions.md 第 4 节）：
  * - 每次修改 revision + 1；保存以"发起时的快照"为单位。
@@ -43,6 +48,7 @@ export class ProjectSession {
   private readonly retryDelayMs: number
 
   private current: WriterDocument
+  private layout: PdfLayoutSettings
   private revision = 0
   private savedRevision = 0
   /** 磁盘上已确认的正文；用来计算下次保存需要携带哪些章节。 */
@@ -54,17 +60,18 @@ export class ProjectSession {
   private closed = false
   private readonly listeners = new Set<() => void>()
 
-  /** document 必须是磁盘上已提交的状态（刚打开或刚新建）。 */
+  /** project 必须是磁盘上已提交的状态（刚打开或刚新建）。 */
   constructor(
     storage: ProjectStorage,
     path: string,
-    document: WriterDocument,
+    project: ProjectState,
     options: ProjectSessionOptions = {},
   ) {
     this.storage = storage
     this.path = path
-    this.current = document
-    this.savedContents = document.contents
+    this.current = project.document
+    this.layout = project.pdfLayout
+    this.savedContents = project.document.contents
     this.autosaveDelayMs =
       options.autosaveDelayMs === undefined ? DEFAULT_AUTOSAVE_DELAY_MS : options.autosaveDelayMs
     this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
@@ -72,6 +79,11 @@ export class ProjectSession {
 
   get document(): WriterDocument {
     return this.current
+  }
+
+  /** PDF 排版配置中用户改过的项。 */
+  get pdfLayout(): PdfLayoutSettings {
+    return this.layout
   }
 
   get isDirty(): boolean {
@@ -116,6 +128,13 @@ export class ProjectSession {
   /** 修改文档信息（标题、副标题、作者）；与当前相同时不产生修改。 */
   setDocumentInfo(info: DocumentInfo): void {
     this.commit(setDocumentInfo(this.current, info))
+  }
+
+  /** 替换 PDF 排版配置（由 pdf_layout 的纯函数生成）；与当前相同时不产生修改。 */
+  setPdfLayout(settings: PdfLayoutSettings): void {
+    if (settings === this.layout) return
+    this.layout = settings
+    this.changed()
   }
 
   /** 会话关闭 / 放弃后，等已开始的保存结束再释放存储资源（如独占锁）。 */
@@ -171,6 +190,10 @@ export class ProjectSession {
   private commit(next: WriterDocument): void {
     if (next === this.current) return
     this.current = next
+    this.changed()
+  }
+
+  private changed(): void {
     this.revision += 1
     this.schedule(this.autosaveDelayMs)
     this.notify()
@@ -191,6 +214,7 @@ export class ProjectSession {
 
   private async runSave(): Promise<boolean> {
     const snapshot = this.current
+    const layout = this.layout
     const revision = this.revision
     if (revision === this.savedRevision) return true
 
@@ -201,7 +225,7 @@ export class ProjectSession {
 
     let result: StorageResult<void>
     try {
-      result = await this.storage.save(this.path, snapshot, changed)
+      result = await this.storage.save(this.path, { document: snapshot, pdfLayout: layout }, changed)
     } catch (error) {
       result = { ok: false, error: { code: 'unknown', message: String(error) } }
     }

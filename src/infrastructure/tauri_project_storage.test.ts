@@ -37,7 +37,7 @@ beforeEach(() => {
 
 test('save：发送按编号推导的 manifest，只携带变化章节的正文', async () => {
   invokeMock.mockResolvedValue(null)
-  const result = await createTauriProjectStorage().save('/p/论文', document, new Set(['b1']))
+  const result = await createTauriProjectStorage().save('/p/论文', { document, pdfLayout: {} }, new Set(['b1']))
   expect(result).toEqual({ ok: true, value: undefined })
   expect(invokeMock).toHaveBeenCalledWith('project_save', {
     path: '/p/论文',
@@ -47,7 +47,7 @@ test('save：发送按编号推导的 manifest，只携带变化章节的正文'
 
 test('create：携带全部正文', async () => {
   invokeMock.mockResolvedValue(null)
-  await createTauriProjectStorage().create('/p/新', document)
+  await createTauriProjectStorage().create('/p/新', { document, pdfLayout: {} })
   expect(invokeMock).toHaveBeenCalledWith('project_create', {
     path: '/p/新',
     request: { manifest, contents: { a: 'A', b: 'B', b1: 'B1' } },
@@ -79,6 +79,18 @@ test('open：读出副标题与作者；缺省时为空', async () => {
   invokeMock.mockResolvedValue({ manifest, contents: { a: 'A', b: 'B', b1: 'B1' } })
   const plain = await createTauriProjectStorage().open('/p/论文')
   expect(plain.ok && plain.value.document).toMatchObject({ subtitle: '', author: '' })
+})
+
+test('PDF 排版配置：保存时只写出改过的项；打开时读回', async () => {
+  invokeMock.mockResolvedValue(null)
+  await createTauriProjectStorage().save('/p/论文', { document, pdfLayout: { toc: false, paper: 'b5' } }, new Set())
+  const sent = invokeMock.mock.calls[0][1] as { request: { manifest: Record<string, unknown> } }
+  // 按配置项的固定顺序写出。
+  expect(JSON.stringify(sent.request.manifest.pdf)).toBe('{"paper":"b5","toc":false}')
+
+  invokeMock.mockResolvedValue({ manifest: sent.request.manifest, contents: { a: 'A', b: 'B', b1: 'B1' } })
+  const opened = await createTauriProjectStorage().open('/p/论文')
+  expect(opened.ok && opened.value.pdfLayout).toEqual({ paper: 'b5', toc: false })
 })
 
 test('Rust 返回的结构化错误原样传递', async () => {
@@ -116,7 +128,7 @@ test('open：释放失败仍保留原始校验错误', async () => {
 
 test('未知错误归为 unknown，不会被当成成功', async () => {
   invokeMock.mockRejectedValue('command project_save not found')
-  const result = await createTauriProjectStorage().save('/p', document, new Set())
+  const result = await createTauriProjectStorage().save('/p', { document, pdfLayout: {} }, new Set())
   expect(result).toEqual({
     ok: false,
     error: { code: 'unknown', message: 'command project_save not found' },
@@ -155,7 +167,7 @@ test('旧项目的 style（已取消的文档样式）：打开时忽略，正�
   expect(opened.value.document.contents.get('b1')).toBe('B1')
 
   invokeMock.mockResolvedValue(null)
-  await createTauriProjectStorage().save('/p/论文', opened.value.document, new Set())
+  await createTauriProjectStorage().save('/p/论文', opened.value, new Set())
   const sent = invokeMock.mock.calls[0][1] as { request: { manifest: unknown; contents: unknown } }
   expect(sent.request.contents).toEqual({})
   expect(sent.request.manifest).toEqual(manifest)

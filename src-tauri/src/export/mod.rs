@@ -9,6 +9,7 @@ pub mod docx;
 pub mod fonts;
 pub mod images;
 pub mod pdf;
+pub mod pdf_layout;
 pub mod theme;
 
 use std::fs::{self, File};
@@ -149,7 +150,7 @@ mod tests {
         let (docx, report) = docx::export(&document, &root).unwrap();
         assert_eq!(report.missing_images, vec!["../assets/不存在.png".to_owned()]);
         fs::write(out.join("stress.docx"), docx).unwrap();
-        let (pdf, _) = pdf::export(&document, &root, pdf::font_store(None)).unwrap();
+        let (pdf, _) = pdf::export(&document, &root, pdf::font_store(None), &pdf_layout::PdfLayout::default()).unwrap();
         fs::write(out.join("stress.pdf"), pdf).unwrap();
     }
 
@@ -183,7 +184,7 @@ mod tests {
         println!("docx: {:?} ({} KB)", t.elapsed(), docx.len() / 1024);
         let fonts = pdf::font_store(None);
         let t = Instant::now();
-        let (pdf, _) = pdf::export(&document, dir.path(), fonts).unwrap();
+        let (pdf, _) = pdf::export(&document, dir.path(), fonts, &pdf_layout::PdfLayout::default()).unwrap();
         println!("pdf: {:?} ({} KB)", t.elapsed(), pdf.len() / 1024);
     }
 }

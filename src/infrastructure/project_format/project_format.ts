@@ -9,6 +9,11 @@ import {
   type ChapterNumber,
 } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import type { DocumentInfo, WriterDocument } from '../../domain/document/document.ts'
+import {
+  PDF_LAYOUT_KEYS,
+  isPdfLayoutValue,
+  type PdfLayoutSettings,
+} from '../../domain/pdf_layout/pdf_layout.ts'
 
 /**
  * Writer 项目 manifest（writer.json）的生成与解析。
@@ -27,6 +32,8 @@ export interface Manifest {
   readonly subtitle?: string
   /** 省略表示没有作者。 */
   readonly author?: string
+  /** PDF 排版配置中用户改过的项；没有改动时省略。 */
+  readonly pdf?: PdfLayoutSettings
   readonly chapters: ChapterTree
   /** ChapterId → 当前正文文件名（相对 content/）。 */
   readonly files: Readonly<Record<ChapterId, string>>
@@ -95,7 +102,8 @@ function projectRelativeParts(reference: string): string[] | null {
  * 由文档生成 manifest；文件名总是按当前编号重新推导。
  * 只写出已定义的字段：读取时忽略的额外字段（如旧版的 style）不会再被写出。
  */
-export function buildManifest(document: WriterDocument): Manifest {
+export function buildManifest(document: WriterDocument, pdfLayout: PdfLayoutSettings = {}): Manifest {
+  const pdf = normalizePdfLayout(pdfLayout)
   return {
     format: MANIFEST_FORMAT,
     version: MANIFEST_VERSION,
@@ -103,6 +111,7 @@ export function buildManifest(document: WriterDocument): Manifest {
     // 副标题与作者是可选字段：空串不写出（docs/project-format.md 第 3.2 节）。
     ...(document.subtitle === '' ? {} : { subtitle: document.subtitle }),
     ...(document.author === '' ? {} : { author: document.author }),
+    ...(Object.keys(pdf).length === 0 ? {} : { pdf }),
     chapters: document.tree,
     files: Object.fromEntries(contentFiles(document.tree)),
   }
@@ -124,6 +133,7 @@ export type ManifestIssue =
 
 export interface ParsedManifest {
   readonly info: DocumentInfo
+  readonly pdfLayout: PdfLayoutSettings
   readonly tree: ChapterTree
   readonly files: ReadonlyMap<ChapterId, string>
 }
@@ -175,7 +185,25 @@ export function parseManifest(raw: unknown): ParseManifestResult {
     if (!files.has(chapterId)) return fail({ code: 'file-missing', chapterId })
   }
 
-  return { ok: true, manifest: { info, tree: tree.tree, files } }
+  return { ok: true, manifest: { info, pdfLayout: parsePdfLayout(m.pdf), tree: tree.tree, files } }
+}
+
+/**
+ * PDF 排版配置有问题不阻止打开（docs/project-format.md 第 3.2 节）：不是对象时整体忽略；
+ * 单项类型或取值非法、未知项都只忽略该项（回到默认值），下一次保存不再写出。
+ */
+function parsePdfLayout(raw: unknown): PdfLayoutSettings {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  return normalizePdfLayout(raw as Record<string, unknown>)
+}
+
+/** 只保留已定义且取值合法的项，按配置项的固定顺序排列。 */
+function normalizePdfLayout(raw: Readonly<Record<string, unknown>>): PdfLayoutSettings {
+  const settings: Record<string, unknown> = {}
+  for (const key of PDF_LAYOUT_KEYS) {
+    if (Object.hasOwn(raw, key) && isPdfLayoutValue(key, raw[key])) settings[key] = raw[key]
+  }
+  return settings as PdfLayoutSettings
 }
 
 function fail(issue: ManifestIssue): ParseManifestResult {

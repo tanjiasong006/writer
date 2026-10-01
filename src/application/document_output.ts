@@ -4,6 +4,11 @@ import {
   type ChapterNumber,
 } from '../domain/chapter_numbering/chapter_numbering.ts'
 import type { WriterDocument } from '../domain/document/document.ts'
+import {
+  resolvePdfLayout,
+  type PdfLayout,
+  type PdfLayoutSettings,
+} from '../domain/pdf_layout/pdf_layout.ts'
 import type { IoKind } from './project_storage.ts'
 
 /**
@@ -50,6 +55,7 @@ export interface ExportReport {
 export interface DocumentOutput {
   /**
    * 导出到 targetPath。导出内容是内存中的当前文档（包含尚未保存的修改）。
+   * pdfLayout 是完整的 PDF 排版配置，只用于 PDF；Word 使用自己的默认输出样式。
    * 目标文件原子写入：失败时不会留下半个文件，也不破坏同名旧文件。
    */
   exportDocument(
@@ -57,18 +63,21 @@ export interface DocumentOutput {
     request: RenderRequest,
     format: ExportFormat,
     targetPath: string,
+    pdfLayout: PdfLayout,
   ): Promise<OutputResult<ExportReport>>
 }
 
-/** 导出当前文档。 */
+/** 导出当前文档；内容与 PDF 排版配置取自同一时刻。 */
 export function exportDocument(
   output: DocumentOutput,
   projectPath: string,
   document: WriterDocument,
+  pdfLayout: PdfLayoutSettings,
   format: ExportFormat,
   targetPath: string,
 ): Promise<OutputResult<ExportReport>> {
-  return output.exportDocument(projectPath, buildRenderRequest(document), format, targetPath)
+  const request = buildRenderRequest(document)
+  return output.exportDocument(projectPath, request, format, targetPath, resolvePdfLayout(pdfLayout))
 }
 
 /** 按章节树先序（即阅读顺序）展开文档。 */

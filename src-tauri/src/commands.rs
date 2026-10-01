@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 use tauri::Manager;
 
+use crate::export::pdf_layout::PdfLayout;
 use crate::export::{self, ExportError, ExportReport};
 use crate::render::{self, RenderRequest};
 use crate::storage::{self, fs::RealFs, OpenedProject, SaveRequest, StorageError};
@@ -183,12 +184,13 @@ pub async fn export_pdf(
     app: tauri::AppHandle,
     path: PathBuf,
     document: RenderRequest,
+    layout: PdfLayout,
     target: PathBuf,
 ) -> Result<ExportReport, ExportError> {
     let resource_dir = app.path().resource_dir().ok();
     tauri::async_runtime::spawn_blocking(move || {
         let fonts = export::pdf::font_store(resource_dir.as_deref());
-        let (bytes, report) = export::pdf::export(&render::build(&document), &path, fonts)?;
+        let (bytes, report) = export::pdf::export(&render::build(&document), &path, fonts, &layout)?;
         export::write_output(&target, &bytes)?;
         Ok(report)
     })

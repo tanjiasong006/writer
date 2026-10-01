@@ -1,0 +1,18 @@
+{
+  "paper": "a4",
+  "margin": "normal",
+  "binding": "single",
+  "bodyFont": "serif",
+  "headingFont": "sans",
+  "bodySize": 12,
+  "lineHeight": "normal",
+  "paragraph": "indent",
+  "cover": true,
+  "toc": true,
+  "tocDepth": 2,
+  "chapterNewPage": true,
+  "chapterNumber": "plain",
+  "header": "titleAndChapter",
+  "pageNumber": "plain",
+  "table": "threeLine"
+}

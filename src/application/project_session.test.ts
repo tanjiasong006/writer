@@ -32,7 +32,7 @@ function initialDocument(): WriterDocument {
 function setup(options: { autosaveDelayMs?: number | null; retryDelayMs?: number } = {}) {
   const storage = new MemoryProjectStorage()
   storage.seed(PATH, initialDocument())
-  const session = new ProjectSession(storage, PATH, initialDocument(), {
+  const session = new ProjectSession(storage, PATH, { document: initialDocument(), pdfLayout: {} }, {
     autosaveDelayMs: null,
     ...options,
   })
@@ -107,6 +107,35 @@ test('修改文档信息：dirty，保存不携带正文；相同信息不产生
   expect(storage.saves[0].changed.size).toBe(0)
   expect(storage.committed(PATH)).toMatchObject({ title: '论文', subtitle: '一项研究', author: '张三' })
   expect(session.status).toBe('saved')
+})
+
+test('修改 PDF 排版配置：dirty，与文档在同一快照中保存，不携带正文；相同配置不产生修改', async () => {
+  const { storage, session } = setup()
+  session.setPdfLayout(session.pdfLayout)
+  expect(session.isDirty).toBe(false)
+
+  session.setPdfLayout({ toc: false })
+  expect(session.isDirty).toBe(true)
+  expect(session.pdfLayout).toEqual({ toc: false })
+  await session.save()
+  expect(storage.saves[0].changed.size).toBe(0)
+  expect(storage.committedPdfLayout(PATH)).toEqual({ toc: false })
+  expect(committedContents(storage)).toEqual({ a: '引言', a1: '背景正文', b: '' })
+  expect(session.status).toBe('saved')
+})
+
+test('保存期间修改 PDF 排版配置：这次保存提交发起时的配置，之后仍为 dirty', async () => {
+  const { storage, session } = setup()
+  session.setPdfLayout({ paper: 'b5' })
+  storage.hold()
+  const saving = session.save()
+  session.setPdfLayout({ paper: 'a5' })
+  storage.release()
+  await saving
+  expect(storage.committedPdfLayout(PATH)).toEqual({ paper: 'b5' })
+  expect(session.isDirty).toBe(true)
+  await session.save()
+  expect(storage.committedPdfLayout(PATH)).toEqual({ paper: 'a5' })
 })
 
 test('删除含子章节的章节：保存后磁盘上不再有其正文', async () => {

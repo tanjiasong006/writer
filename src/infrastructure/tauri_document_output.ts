@@ -8,10 +8,12 @@ import type {
 /** DocumentOutput 的 Tauri 实现：渲染与导出在 Rust `render` 模块中完成。 */
 export function createTauriDocumentOutput(): DocumentOutput {
   return {
-    async exportDocument(projectPath, request, format, targetPath) {
-      const command = format === 'docx' ? 'export_docx' : 'export_pdf'
+    async exportDocument(projectPath, request, format, targetPath, pdfLayout) {
+      const args = { path: projectPath, document: request, target: targetPath }
       const result = await call(() =>
-        invoke<unknown>(command, { path: projectPath, document: request, target: targetPath }),
+        format === 'docx'
+          ? invoke<unknown>('export_docx', args)
+          : invoke<unknown>('export_pdf', { ...args, layout: pdfLayout }),
       )
       if (!result.ok) return result
       const raw = result.value as { missingImages?: unknown } | null

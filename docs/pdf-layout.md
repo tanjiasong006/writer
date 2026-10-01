@@ -81,8 +81,9 @@
 
 ## 5. 实现约束
 
-- Domain：`PdfLayoutSettings`（稀疏，只含用户改过的项）与纯函数 `resolvePdfLayout`
-  （合并出完整配置）。所有字段都是枚举或布尔值。
+- Domain（`domain/pdf_layout`）：`PdfLayoutSettings`（稀疏，只含用户改过的项）、纯函数 `resolvePdfLayout`
+  （合并出完整配置）与 `setPdfLayoutOption`（改回默认值时删除该项）。所有字段都是枚举、布尔或分档数值。
+  默认值与 Rust 共享 `src-tauri/fixtures/pdf_layout_default.json`。
 - Application：项目会话持有"文档 + PDF 配置"，规则见 `docs/decisions.md` 第 8 节"PDF 配置与项目会话"。
   导出时在同一次操作中捕获内容与配置。
 - Rust 只接收语义参数，先解析为 `PageSetup`（纸张、边距、装订）与输出 `Theme`。
@@ -91,11 +92,12 @@
 - 界面：点"导出 PDF…"后先打开排版设置面板，设置项分组排列，每项配一张静态示意图，面板上有"导出"按钮；
   修改立即写入项目。菜单中另提供"PDF 排版设置…"入口。文档信息（副标题、作者）在单独的文档信息入口中编辑。
   具体交互在实施前按 `docs/ui-design-principles.md` 细化。
+- 双面装订时为凑右页插入的空白页不显示页眉与页码，但计入页码。
 - 不提供应用内分页预览（`docs/decisions.md` 第 8 节）。
 
 ## 6. 实施顺序
 
 1. 默认样式：只改 Rust `pdf.rs` 的输出规则（封面、目录、另起页、页眉、首行缩进、三线表等），不涉及配置。（已完成）
 2. 文档信息：Domain / manifest / 会话 / Word 与 PDF 输出，以及编辑入口。（已完成）
-3. 排版配置的存储与会话：Domain 类型、manifest 字段、保存快照，导出请求携带配置，Rust 按配置生成页面与样式。
+3. 排版配置的存储与会话：Domain 类型、manifest 字段、保存快照，导出请求携带配置，Rust 按配置生成页面与样式。（已完成）
 4. 排版设置界面与 Story。

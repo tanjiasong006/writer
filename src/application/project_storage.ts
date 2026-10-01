@@ -1,5 +1,6 @@
 import type { ChapterId } from '../domain/chapter_tree/chapter_tree.ts'
 import type { WriterDocument } from '../domain/document/document.ts'
+import type { PdfLayoutSettings } from '../domain/pdf_layout/pdf_layout.ts'
 
 /**
  * 项目存储端口：Application 需要的外部能力。具体实现（Tauri + Rust）在 infrastructure。
@@ -39,24 +40,32 @@ export type StorageResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: StorageFailure }
 
-export interface OpenedProject {
+/**
+ * 项目中保存的全部状态：文档（内容与结构）与 PDF 排版配置。两者在同一次保存中提交
+ * （docs/decisions.md 第 8 节"PDF 配置与项目会话"）；配置不属于 WriterDocument。
+ */
+export interface ProjectState {
   readonly document: WriterDocument
+  readonly pdfLayout: PdfLayoutSettings
+}
+
+export interface OpenedProject extends ProjectState {
   /** content/ 中未被引用的文件，仅用于提示，不影响打开。 */
   readonly orphanFiles: readonly string[]
 }
 
 export interface ProjectStorage {
   /** 在不存在或为空的目录中新建项目，写入文档的全部内容。 */
-  create(path: string, document: WriterDocument): Promise<StorageResult<void>>
+  create(path: string, project: ProjectState): Promise<StorageResult<void>>
   open(path: string): Promise<StorageResult<OpenedProject>>
   /**
-   * 把文档完整提交到磁盘。changed 是自上次成功保存后正文发生变化的章节（含新章节）；
+   * 把项目状态（文档与 PDF 排版配置）完整提交到磁盘。changed 是自上次成功保存后正文发生变化的章节（含新章节）；
    * 其余章节的正文由存储层从磁盘保留（编号变化时按字节换名）。
    * 只有返回 ok: true 才表示已提交。
    */
   save(
     path: string,
-    document: WriterDocument,
+    project: ProjectState,
     changed: ReadonlySet<ChapterId>,
   ): Promise<StorageResult<void>>
   /**

@@ -16,7 +16,7 @@ export async function openProject(
   if (!result.ok) return result
   return {
     ok: true,
-    session: new ProjectSession(storage, path, result.value.document, options),
+    session: new ProjectSession(storage, path, result.value, options),
     orphanFiles: result.value.orphanFiles,
   }
 }
@@ -31,10 +31,10 @@ export async function createProject(
   title: string,
   options?: ProjectSessionOptions,
 ): Promise<OpenSessionResult> {
-  const document = emptyDocument(title)
-  const result = await storage.create(path, document)
+  const project = { document: emptyDocument(title), pdfLayout: {} }
+  const result = await storage.create(path, project)
   if (!result.ok) return result
-  return { ok: true, session: new ProjectSession(storage, path, document, options), orphanFiles: [] }
+  return { ok: true, session: new ProjectSession(storage, path, project, options), orphanFiles: [] }
 }
 
 /**

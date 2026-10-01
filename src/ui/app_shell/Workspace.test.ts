@@ -5,6 +5,7 @@ import { undo, undoDepth } from 'prosemirror-history'
 import type { EditorView } from 'prosemirror-view'
 import { createMemoryServices } from '../../testing/memory_services.ts'
 import { createDocument } from '../../domain/document/document.ts'
+import { DEFAULT_PDF_LAYOUT } from '../../domain/pdf_layout/pdf_layout.ts'
 import ChapterEditor from '../editor/ChapterEditor.vue'
 import DocumentReader from '../reader/DocumentReader.vue'
 import {
@@ -156,6 +157,22 @@ test('修改文档标题：在工具栏的文档名处原地重命名，Esc 放�
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ...MOD }))
   await flushPromises()
   expect(services.storage.committed(PATH)!.title).toBe('新标题')
+})
+
+test('导出 PDF：携带项目中保存的排版配置（与默认值合并后的完整配置）', async () => {
+  const services = seededServices()
+  services.storage.seed(PATH, services.storage.committed(PATH)!, { toc: false, paper: 'b5' })
+  services.shell.lastProjectPath = PATH
+  services.shell.exportPath = '/导出/毕业论文.pdf'
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出为 PDF…').trigger('click')
+  await flushPromises()
+
+  expect(services.output.exports).toHaveLength(1)
+  expect(services.output.exports[0].pdfLayout).toEqual({ ...DEFAULT_PDF_LAYOUT, toc: false, paper: 'b5' })
 })
 
 test('文档信息：从文档名菜单打开，Enter 完成后保存副标题与作者；Esc 放弃，焦点回到原处', async () => {

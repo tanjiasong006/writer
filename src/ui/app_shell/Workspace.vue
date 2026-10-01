@@ -102,7 +102,8 @@ const {
 } = useExport({
   shell,
   title: () => document.value.title,
-  run: (format, target) => exportDocument(output, props.session.path, document.value, format, target),
+  run: (format, target) =>
+    exportDocument(output, props.session.path, document.value, props.session.pdfLayout, format, target),
   onError: (message) => (actionError.value = message),
 })
 

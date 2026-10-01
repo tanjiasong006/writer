@@ -1,8 +1,8 @@
 //! PDF 导出：把 `render::Document` 生成 Typst 源码，用内嵌的 Typst 排版为 PDF。
 //!
 //! - 用户文本一律以 Typst 字符串字面量（`#"..."`）注入，不存在"正文里的符号被当作 Typst 语法"的问题。
-//! - 排版使用 PDF 的默认输出参数（`Theme::pdf()`）：在 preamble 中翻译成 Typst 的 set / show 规则；
-//!   页面结构（封面、目录、一级章节另起一页、页眉页码）见 docs/pdf-layout.md 第 3 节。
+//! - 排版按 PDF 排版配置（`export::pdf_layout`）：页面尺寸、输出参数与页面结构（封面、目录、
+//!   一级章节另起一页、页眉页码等）在 preamble 中翻译成 Typst 的 set / show 规则（docs/pdf-layout.md）。
 //! - 图片按统一规则自动排版（`export::images`）：保持比例、不放大，不超过所在容器的宽度与完整正文区高度；
 //!   独立成段的图片居中，有图注时为图注预留空间。尺寸与图片落在页上的位置无关：当前页放不下时，
 //!   图片与图注作为一个整体移到下一页，不为塞进页底而缩小。
@@ -26,14 +26,12 @@ use typst_layout::PagedDocument;
 
 use super::fonts::{bundled_font_dirs, families, FontFamily, CJK_PROBE};
 use super::images::{display_size_pt, load_for_export, Bounds};
+use super::pdf_layout::{Binding, ChapterNumber, Header, PageNumber, PageSetup, ParagraphStyle, PdfLayout, TableStyle};
 use super::theme::{HeadingStyle, Theme};
 use super::{ExportError, ExportReport};
 use crate::render::markdown::{plain_text, Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
 
-/// A4 正文区（210mm × 297mm 减去四边 25mm 页边距 = 160mm × 247mm）对应的磅数。
-const TEXT_WIDTH_PT: f64 = 453.5;
-const TEXT_HEIGHT_PT: f64 = 700.1;
 /// 图片高度上限再留出的余量（磅），吸收取整差异，保证图片与图注不会被挤出正文区。
 const IMAGE_HEIGHT_SLACK: f64 = 2.0;
 /// Typst figure 中图片与图注之间的默认间距（em，相对正文字号）。
@@ -53,8 +51,6 @@ const META_TEXT_PT: f64 = 9.0;
 /// 封面上副标题与作者的字号（磅）。
 const COVER_SUBTITLE_PT: f64 = 16.0;
 const COVER_AUTHOR_PT: f64 = 12.0;
-/// 目录显示的章节层级。
-const TOC_DEPTH: usize = 2;
 
 static FONTS: OnceLock<FontStore> = OnceLock::new();
 
@@ -78,21 +74,14 @@ fn layout(
     document: &Document,
     project_root: &Path,
     fonts: &'static FontStore,
+    pdf_layout: &PdfLayout,
 ) -> Result<(PagedDocument, ExportReport), ExportError> {
     let book = fonts.book();
     if document_has_cjk(document) && !book_has_cjk(book) {
         return Err(ExportError::NoCjkFont);
     }
 
-    let mut writer = Writer {
-        theme: Theme::pdf(),
-        root: project_root,
-        out: String::new(),
-        images: Vec::new(),
-        image_cache: HashMap::new(),
-        report: ExportReport::default(),
-        quote_font: String::new(),
-    };
+    let mut writer = Writer::new(project_root, pdf_layout);
     writer.preamble(document, book);
     for section in &document.sections {
         writer.section(section);
@@ -109,8 +98,9 @@ pub fn export(
     document: &Document,
     project_root: &Path,
     fonts: &'static FontStore,
+    pdf_layout: &PdfLayout,
 ) -> Result<(Vec<u8>, ExportReport), ExportError> {
-    let result = layout(document, project_root, fonts).and_then(|(paged, report)| {
+    let result = layout(document, project_root, fonts, pdf_layout).and_then(|(paged, report)| {
         typst_pdf::pdf(&paged, &typst_pdf::PdfOptions::default())
             .map(|pdf| (pdf, report))
             .map_err(|errors| render_failed(&errors))
@@ -187,10 +177,10 @@ fn line_limit(max_height: &str) -> String {
 
 impl Container {
     /// 正文中的段落与标题：完整正文区。
-    fn text_area() -> Self {
+    fn text_area(page: &PageSetup) -> Self {
         Container {
-            width: TEXT_WIDTH_PT,
-            max_height: line_limit(&format!("{}pt", num(TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK))),
+            width: page.text_width_pt(),
+            max_height: line_limit(&format!("{}pt", num(page.text_height_pt() - IMAGE_HEIGHT_SLACK))),
         }
     }
 }
@@ -204,6 +194,8 @@ struct PreparedImage {
 }
 
 struct Writer<'a> {
+    layout: PdfLayout,
+    page: PageSetup,
     theme: Theme,
     root: &'a Path,
     out: String,
@@ -213,11 +205,28 @@ struct Writer<'a> {
     report: ExportReport,
     /// 引用使用的字体列表（preamble 中按输出参数确定）。
     quote_font: String,
+    /// 封面关闭时文档信息放在正文首页顶部，第一章紧接其后，不另起一页。
+    title_block_before_body: bool,
 }
 
-impl Writer<'_> {
-    /// 文档级样式与页面结构：封面（有标题时）→ 目录（有章节时，罗马数字页码）→ 正文（页眉，页码从 1 开始）。
-    /// 之后依次输出各章节（docs/pdf-layout.md 第 3 节）。
+impl<'a> Writer<'a> {
+    fn new(root: &'a Path, layout: &PdfLayout) -> Self {
+        Writer {
+            layout: *layout,
+            page: layout.page(),
+            theme: layout.theme(),
+            root,
+            out: String::new(),
+            images: Vec::new(),
+            image_cache: HashMap::new(),
+            report: ExportReport::default(),
+            quote_font: String::new(),
+            title_block_before_body: false,
+        }
+    }
+
+    /// 文档级样式与页面结构，按排版配置生成（docs/pdf-layout.md 第 3、4 节）：
+    /// 封面 → 目录（罗马数字页码）→ 正文（页眉，页码从 1 开始）。之后依次输出各章节。
     fn preamble(&mut self, document: &Document, book: &FontBook) {
         let font_list = |family: FontFamily| {
             let names = available_families(book, family);
@@ -235,8 +244,12 @@ impl Writer<'_> {
                 )
             }
         };
+        let layout = self.layout;
+        let page = self.page;
         let theme = self.theme;
         let body = &theme.body;
+        let scale = layout.scale();
+        let double = layout.binding == Binding::Double;
         let mono = font_list(FontFamily::Mono);
         let sans = font_list(FontFamily::Sans);
         let title = string(&document.title);
@@ -254,9 +267,10 @@ impl Writer<'_> {
                 below = num(style.spacing_after * style.size + half_leading + body_half_leading),
             )
         };
+        let (inside, outside) = page.inside_outside_mm();
         self.out.push_str(&format!(
             "#set document(title: {title}, author: {author})\n\
-             #set page(paper: \"a4\", margin: 25mm, numbering: none, header: none, footer: none)\n\
+             #set page(width: {width}mm, height: {height}mm, margin: (top: {margin}mm, bottom: {margin}mm, inside: {inside}mm, outside: {outside}mm), numbering: none, header: none, footer: none)\n\
              #set text(font: {body_font}, size: {body_size}pt, lang: \"zh\", region: \"cn\", top-edge: 0.8em, bottom-edge: -{bottom_edge}em)\n\
              #set par(justify: true, leading: {leading}em, spacing: {spacing}em, first-line-indent: (amount: {indent}em, all: true))\n\
              #set heading(numbering: none)\n",
@@ -265,6 +279,11 @@ impl Writer<'_> {
             } else {
                 string(document.author.trim())
             },
+            width = num(page.width_mm),
+            height = num(page.height_mm),
+            margin = num(page.margin_mm),
+            inside = num(inside),
+            outside = num(outside),
             body_font = font_list(body.font.into()),
             bottom_edge = num(TEXT_BOTTOM_EDGE_EM),
             body_size = num(body.size),
@@ -273,7 +292,10 @@ impl Writer<'_> {
             leading = num(body.line_height - 1.0),
             // 段距在行距之外再加 paragraph_spacing。
             spacing = num(body.line_height - 1.0 + body.paragraph_spacing),
-            indent = num(FIRST_LINE_INDENT_EM),
+            indent = num(match layout.paragraph {
+                ParagraphStyle::Indent => FIRST_LINE_INDENT_EM,
+                ParagraphStyle::Spacing => 0.0,
+            }),
         ));
         // 更深的标题规则在前，第 1–3 级的规则在后，优先生效。
         self.out
@@ -284,10 +306,12 @@ impl Writer<'_> {
             .push_str(&heading_rules("heading.where(level: 1)", &theme.heading1));
         self.out
             .push_str(&heading_rules("heading.where(level: 2)", &theme.heading2));
+        let table_stroke = match layout.table {
+            TableStyle::ThreeLine => "none",
+            TableStyle::Grid => "0.5pt + luma(160)",
+        };
         self.out.push_str(&format!(
-            // 一级章节（以及目录标题）另起一页，上方留白；页首的块间距会被丢弃，因此用固定留白。
-            "#show heading.where(level: 1): it => {{ pagebreak(weak: true); v({chapter_top}pt); it }}\n\
-             #show list: set par(first-line-indent: 0em)\n\
+            "#show list: set par(first-line-indent: 0em)\n\
              #show enum: set par(first-line-indent: 0em)\n\
              #show table: set par(first-line-indent: 0em)\n\
              #show figure: set par(first-line-indent: 0em)\n\
@@ -298,7 +322,7 @@ impl Writer<'_> {
              #show raw.where(block: false): it => highlight(fill: luma(238), radius: 2pt, extent: 1pt, it)\n\
              #show raw.where(block: true): set text(size: {code}pt)\n\
              #show raw.where(block: true): block.with(fill: luma(245), inset: 8pt, radius: 3pt, width: 100%)\n\
-             #set table(stroke: none, inset: {inset}pt)\n\
+             #set table(stroke: {table_stroke}, inset: {inset}pt)\n\
              #let writer-three-line(last) = (_, y) => (\n\
                top: if y == 0 {{ 1pt }} else {{ none }},\n\
                bottom: if y == last {{ 1pt }} else if y == 0 {{ 0.5pt }} else {{ none }},\n\
@@ -310,7 +334,6 @@ impl Writer<'_> {
              #let writer-caption = (font: {caption_font}, size: {caption}pt)\n\
              #show figure.caption: set text(..writer-caption, fill: luma(100))\n\
              #show link: set text(fill: rgb(\"#1f4e9a\"))\n",
-            chapter_top = num(CHAPTER_TOP_SPACE_PT),
             inline_code = num(body.size * 0.9),
             inset = num(TABLE_INSET_PT),
             code = num(theme.code_block),
@@ -319,79 +342,95 @@ impl Writer<'_> {
             caption_font = font_list(theme.caption.font.into()),
             caption = num(theme.caption.size),
         ));
-        // 页眉：左侧文档标题，右侧当前一级章节；每章首页不显示。页脚：居中页码。
-        // 页眉位于页首，用原生的 before / after 选择器查找前后章节：
-        // 在脚本中逐页遍历全部章节会让千章文档的排版慢数倍。
-        self.out.push_str(&format!(
-            "#let writer-footer = context align(center, text(size: {meta}pt, fill: luma(100), counter(page).display()))\n\
-             #let writer-header = context {{\n\
-               let chapter = heading.where(level: 1, outlined: true)\n\
-               let next = query(selector(chapter).after(here()))\n\
-               if next.len() == 0 or next.first().location().page() != here().page() {{\n\
-                 let before = query(selector(chapter).before(here()))\n\
-                 set text(size: {meta}pt, fill: luma(100))\n\
-                 set par(first-line-indent: 0em, justify: false)\n\
-                 block(width: 100%, inset: (bottom: 4pt), stroke: (bottom: 0.4pt + luma(160)),\n\
-                   grid(columns: (1fr, 1fr), gutter: 1em, align(left)[#{title}], align(right, if before.len() > 0 {{ before.last().body }})))\n\
-               }}\n\
-             }}\n",
-            meta = num(META_TEXT_PT),
-        ));
-        // 封面：标题、细线，其下依次是副标题与作者；三者都为空时没有封面。
+        self.out.push_str(&page_furniture(&layout, &title));
+
         let subtitle = document.subtitle.trim();
         let author = document.author.trim();
-        if !document.title.trim().is_empty() || !subtitle.is_empty() || !author.is_empty() {
-            let cover_font = font_list(theme.title.font.into());
-            let mut cover = format!(
-                "#page[\n\
-                 #set par(first-line-indent: 0em, justify: false)\n\
-                 #set align(center)\n\
-                 #v(28%)\n\
-                 #text(font: {cover_font}, size: {size}pt, weight: \"bold\")[#{title}]\n\
-                 #v(1.5em)\n\
-                 #line(length: 40%, stroke: 0.6pt + luma(120))\n",
-                size = num(theme.title.size),
-            );
+        let has_info = !document.title.trim().is_empty() || !subtitle.is_empty() || !author.is_empty();
+        let info_font = font_list(theme.title.font.into());
+        // 文档信息：标题、副标题、作者。封面上标题与副标题之间有一条细线，放在页面约 1/3 高处；
+        // 不用封面时放在首页顶部，居中，下方留白后接目录或正文。
+        let info_block = |cover: bool| {
+            let mut out = String::from("#set par(first-line-indent: 0em, justify: false)\n#set align(center)\n");
+            if cover {
+                out.push_str("#v(28%)\n");
+            }
+            out.push_str(&format!(
+                "#text(font: {info_font}, size: {}pt, weight: \"bold\")[#{title}]\n",
+                num(theme.title.size),
+            ));
+            if cover {
+                out.push_str("#v(1.5em)\n#line(length: 40%, stroke: 0.6pt + luma(120))\n");
+            }
             if !subtitle.is_empty() {
-                cover.push_str(&format!(
-                    "#v(1.2em)\n#text(font: {cover_font}, size: {}pt, fill: luma(60))[#{}]\n",
-                    num(COVER_SUBTITLE_PT),
+                out.push_str(&format!(
+                    "#v(1.2em)\n#text(font: {info_font}, size: {}pt, fill: luma(60))[#{}]\n",
+                    num(COVER_SUBTITLE_PT * scale),
                     string(subtitle),
                 ));
             }
             if !author.is_empty() {
-                cover.push_str(&format!(
-                    "#v(3em)\n#text(font: {cover_font}, size: {}pt, fill: luma(60))[#{}]\n",
-                    num(COVER_AUTHOR_PT),
+                out.push_str(&format!(
+                    "#v({})\n#text(font: {info_font}, size: {}pt, fill: luma(60))[#{}]\n",
+                    if cover { "3em" } else { "1em" },
+                    num(COVER_AUTHOR_PT * scale),
                     string(author),
                 ));
             }
-            cover.push_str("]\n");
-            self.out.push_str(&cover);
+            out
+        };
+        let cover = layout.cover && has_info;
+        let title_inline = !layout.cover && has_info;
+        let has_toc = layout.toc && !document.sections.is_empty();
+        // 双面装订：目录与正文从右页（奇数页）开始。
+        let odd_page = if double { ODD_PAGE_BREAK } else { "" };
+        if cover {
+            self.out.push_str(&format!("#page[\n{}]\n", info_block(true)));
+        }
+        if has_toc {
+            self.out.push_str(&format!(
+                "{odd_page}#set page(numbering: \"i\", footer: writer-toc-footer)\n#counter(page).update(1)\n"
+            ));
+            if title_inline {
+                self.out.push_str(&format!("#block(width: 100%, below: 2.5em)[\n{}]\n", info_block(false)));
+            } else {
+                self.out.push_str(&format!("#v({}pt)\n", num(CHAPTER_TOP_SPACE_PT)));
+            }
+            self.out.push_str(&format!("#outline(depth: {})\n", layout.toc_depth.get()));
         }
         if !document.sections.is_empty() {
             self.out.push_str(&format!(
-                "#set page(numbering: \"i\", footer: writer-footer)\n\
-                 #counter(page).update(1)\n\
-                 #outline(depth: {TOC_DEPTH})\n\
-                 #set page(numbering: \"1\", header: writer-header, footer: writer-footer)\n\
-                 #counter(page).update(1)\n\n"
+                "{odd_page}#set page(numbering: \"1\", header: writer-header, footer: writer-body-footer)\n#counter(page).update(1)\n\n"
             ));
+        }
+        if title_inline && !has_toc {
+            self.out.push_str(&format!("#block(width: 100%, below: 2.5em)[\n{}]\n", info_block(false)));
+            self.title_block_before_body = true;
         }
         self.quote_font = font_list(theme.blockquote.font.into());
     }
 
     fn section(&mut self, section: &Section) {
-        let text = if section.number.is_empty() {
-            section.title.clone()
-        } else {
-            format!("{} {}", section.number, section.title)
+        let depth = section.depth.max(1);
+        let text = match (self.layout.chapter_number, section.number.is_empty()) {
+            (ChapterNumber::None, _) | (_, true) => section.title.clone(),
+            (ChapterNumber::Chapter, false) if depth == 1 => {
+                format!("第 {} 章 {}", section.number, section.title)
+            }
+            _ => format!("{} {}", section.number, section.title),
         };
-        self.out.push_str(&format!(
-            "#heading(level: {})[#{}]\n\n",
-            section.depth.max(1),
-            string(&text)
-        ));
+        // 一级章节另起一页，上方留白；双面装订时从右页开始。页首的块间距会被丢弃，因此用固定留白。
+        // 不用封面时，第一章紧接首页顶部的文档信息。
+        if depth == 1 && self.layout.chapter_new_page && !self.title_block_before_body {
+            let page_break = if self.layout.binding == Binding::Double {
+                ODD_PAGE_BREAK
+            } else {
+                "#pagebreak(weak: true)\n"
+            };
+            self.out.push_str(&format!("{page_break}#v({}pt)\n", num(CHAPTER_TOP_SPACE_PT)));
+        }
+        self.title_block_before_body = false;
+        self.out.push_str(&format!("#heading(level: {depth})[#{}]\n\n", string(&text)));
         for block in &section.blocks {
             let rendered = self.block(block, section);
             self.out.push_str(&rendered);
@@ -404,7 +443,9 @@ impl Writer<'_> {
             // 尺寸上限是完整正文区扣除图注及其间距，与图片落在页上的位置无关；
             // 图注高度在排版时按实际字体、宽度与折行测量，不做估算。
             // figure 不跨页拆分，当前页放不下时连同图注整体移到下一页。
-            let mut max_height = format!("{}pt", num(TEXT_HEIGHT_PT - IMAGE_HEIGHT_SLACK));
+            let text_width = self.page.text_width_pt();
+            let text_height = self.page.text_height_pt();
+            let mut max_height = format!("{}pt", num(text_height - IMAGE_HEIGHT_SLACK));
             if !alt.is_empty() {
                 max_height = format!(
                     "{max_height} - {gap}pt - measure(block(width: size.width, text(..writer-caption)[#{caption}])).height",
@@ -412,7 +453,7 @@ impl Writer<'_> {
                     caption = string(alt),
                 );
             }
-            let image = self.image(src, alt, TEXT_WIDTH_PT, &max_height);
+            let image = self.image(src, alt, text_width, &max_height);
             return if alt.is_empty() {
                 format!("#figure({image})")
             } else {
@@ -420,7 +461,7 @@ impl Writer<'_> {
             };
         }
         match block {
-            Block::Paragraph(inlines) => self.inlines(inlines, &Container::text_area()),
+            Block::Paragraph(inlines) => self.inlines(inlines, &Container::text_area(&self.page)),
             Block::List { ordered, start, items } => {
                 let items: Vec<String> = items.iter().map(|item| format!("[{}]", self.blocks(item, section))).collect();
                 if *ordered {
@@ -455,12 +496,13 @@ impl Writer<'_> {
                 // 不超过单元格宽度；含图片的行不能跨页拆开，而表头在每页重复，因此正文行中的图片不超过
                 // 正文区减去表头高度与单元格上下内边距。表头高度在排版时按与最终表格相同的列宽、
                 // 在表格实际所在容器的宽度下测量，折行与最终结果一致。
-                let cell_width = TEXT_WIDTH_PT / columns as f64 - 2.0 * TABLE_INSET_PT;
-                let cell_limit = num(TEXT_HEIGHT_PT - 2.0 * TABLE_INSET_PT - IMAGE_HEIGHT_SLACK);
+                let text_height = self.page.text_height_pt();
+                let cell_width = self.page.text_width_pt() / columns as f64 - 2.0 * TABLE_INSET_PT;
+                let cell_limit = num(text_height - 2.0 * TABLE_INSET_PT - IMAGE_HEIGHT_SLACK);
                 // 表头在每页重复，其中的图片不超过正文区高度的四分之一（与 Word 相同），不能占满页面。
                 let head_cell = Container {
                     width: cell_width,
-                    max_height: format!("{}pt", num(TEXT_HEIGHT_PT / 4.0)),
+                    max_height: format!("{}pt", num(text_height / 4.0)),
                 };
                 let body_cell = Container {
                     width: cell_width,
@@ -479,15 +521,19 @@ impl Writer<'_> {
                 let cells = cells.join(", ");
                 let with_images = std::iter::once(header).chain(rows).flatten().any(|cell| has_image(cell));
                 // 三线表：顶线、表头下的细线与底线；表头随跨页重复，顶线与表头线也随之重复。
-                let stroke = format!("writer-three-line({})", rows.len());
+                // 网格表使用 preamble 中的统一描边。
+                let stroke = match self.layout.table {
+                    TableStyle::ThreeLine => format!(", stroke: writer-three-line({})", rows.len()),
+                    TableStyle::Grid => String::new(),
+                };
                 if !with_images {
-                    return format!("#table(columns: {columns}, align: ({align},), stroke: {stroke}, table.header({head}), {cells})");
+                    return format!("#table(columns: {columns}, align: ({align},){stroke}, table.header({head}), {cells})");
                 }
                 format!(
                     "#layout(size => {{\n\
                      let columns = (1fr,) * {columns}\n\
                      let writer-table-head = measure(block(width: size.width, table(columns: columns, align: ({align},), table.header({head})))).height\n\
-                     table(columns: columns, align: ({align},), stroke: {stroke}, table.header({head}), {cells})\n}})"
+                     table(columns: columns, align: ({align},){stroke}, table.header({head}), {cells})\n}})"
                 )
             }
             Block::Rule => "#align(center, line(length: 30%, stroke: 0.5pt + luma(160)))".to_owned(),
@@ -588,6 +634,80 @@ impl Writer<'_> {
             ratio = width / height,
         )
     }
+}
+
+/// 双面装订时换到下一个右页。为凑右页插入的空白页不显示页眉页码：前后各放一个标记，
+/// 页眉页脚据此判断自己是否在空白页上（`writer-blank`）。
+const ODD_PAGE_BREAK: &str = "#metadata(none) <writer-gap-start>\n#pagebreak(weak: true, to: \"odd\")\n#metadata(none) <writer-gap-end>\n";
+
+/// 页眉与页脚（Typst 定义）。页眉位于页首，用原生的 before / after 选择器查找前后章节：
+/// 在脚本中逐页遍历全部章节会让千章文档的排版慢数倍。
+/// - 单面：页码居中；页眉左侧文档标题、右侧当前一级章节。
+/// - 双面：页码在外侧；左页（偶数页）页眉是文档标题，右页（奇数页）是当前一级章节，都靠外侧。
+/// - 一级章节另起一页时，每章首页不显示页眉。
+fn page_furniture(layout: &PdfLayout, title: &str) -> String {
+    let double = layout.binding == Binding::Double;
+    let side = if double {
+        "if calc.odd(here().page()) { right } else { left }"
+    } else {
+        "center"
+    };
+    let label = match layout.page_number {
+        PageNumber::Plain => "counter(page).display()",
+        PageNumber::Page => "[第 #counter(page).display() 页]",
+        PageNumber::Total => "[#counter(page).display() / #counter(page).final().first()]",
+    };
+    // 空白页：处在一对换页标记之间（之前的开始标记多于结束标记），最近的开始标记在更早的页上
+    // （同一页上的开始标记跟在该页内容之后），下一个结束标记在更晚的页上。
+    let mut out = String::from(
+        "#let writer-blank() = {\n\
+           let page = here().page()\n\
+           let starts = query(selector(<writer-gap-start>).before(here()))\n\
+           let ends = query(selector(<writer-gap-end>).before(here())).len()\n\
+           let next = query(selector(<writer-gap-end>).after(here()))\n\
+           (starts.len() > ends and starts.last().location().page() < page\n\
+             and next.len() > 0 and next.first().location().page() > page)\n\
+         }\n",
+    );
+    out.push_str(&format!(
+        "#let writer-page-label(body) = context if not writer-blank() {{ align({side}, text(size: {meta}pt, fill: luma(100), body)) }}\n\
+         #let writer-toc-footer = writer-page-label(context counter(page).display(\"i\"))\n\
+         #let writer-body-footer = writer-page-label(context {label})\n",
+        meta = num(META_TEXT_PT),
+    ));
+    let sides = match (layout.header, double) {
+        (Header::None, _) => {
+            out.push_str("#let writer-header = none\n");
+            return out;
+        }
+        (Header::Title, false) => format!("([#{title}], none)"),
+        (Header::TitleAndChapter, false) => format!("([#{title}], chapter)"),
+        (Header::Title, true) => format!("if calc.odd(here().page()) {{ (none, [#{title}]) }} else {{ ([#{title}], none) }}"),
+        (Header::TitleAndChapter, true) => {
+            format!("if calc.odd(here().page()) {{ (none, chapter) }} else {{ ([#{title}], none) }}")
+        }
+    };
+    let chapter_page = if layout.chapter_new_page {
+        "{ let next = query(selector(chapters).after(here())); next.len() > 0 and next.first().location().page() == here().page() }"
+    } else {
+        "false"
+    };
+    out.push_str(&format!(
+        "#let writer-header = context {{\n\
+           let chapters = heading.where(level: 1, outlined: true)\n\
+           if not {chapter_page} and not writer-blank() {{\n\
+             let before = query(selector(chapters).before(here()))\n\
+             let chapter = if before.len() > 0 {{ before.last().body }}\n\
+             let (left-side, right-side) = {sides}\n\
+             set text(size: {meta}pt, fill: luma(100))\n\
+             set par(first-line-indent: 0em, justify: false)\n\
+             block(width: 100%, inset: (bottom: 4pt), stroke: (bottom: 0.4pt + luma(160)),\n\
+               grid(columns: (1fr, 1fr), gutter: 1em, align(left, left-side), align(right, right-side)))\n\
+           }}\n\
+         }}\n",
+        meta = num(META_TEXT_PT),
+    ));
+    out
 }
 
 fn has_image(inlines: &[Inline]) -> bool {
@@ -785,16 +905,12 @@ mod tests {
     }
 
     fn test_writer(root: &Path) -> Writer<'_> {
-        Writer {
-            theme: Theme::pdf(),
-            root,
-            out: String::new(),
-            images: Vec::new(),
-            image_cache: HashMap::new(),
-            report: ExportReport::default(),
-            quote_font: String::new(),
-        }
+        Writer::new(root, &PdfLayout::default())
     }
+
+    /// 默认 A4、四边 25mm 的正文区（160mm × 247mm）。
+    const TEXT_WIDTH_PT: f64 = 160.0 / 25.4 * 72.0;
+    const TEXT_HEIGHT_PT: f64 = 247.0 / 25.4 * 72.0;
 
     #[test]
     fn repeated_images_share_bytes_but_keep_each_containers_size() {
@@ -830,7 +946,7 @@ mod tests {
             )],
         ));
         write_image(&path, 80, 40, ImageFormat::Png);
-        let (first, report) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (first, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert!(report.missing_images.is_empty());
         let first_images = images(&first);
         assert_eq!(first_images.len(), 2);
@@ -838,7 +954,7 @@ mod tests {
             .iter()
             .all(|image| (image.3 - 60.0).abs() < 0.1 && (image.4 - 30.0).abs() < 0.1));
         write_image(&path, 160, 80, ImageFormat::Png);
-        let (second, report) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (second, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert!(report.missing_images.is_empty());
         let second_images = images(&second);
         assert_eq!(second_images.len(), 2);
@@ -846,7 +962,7 @@ mod tests {
             .iter()
             .all(|image| (image.3 - 120.0).abs() < 0.1 && (image.4 - 60.0).abs() < 0.1));
         fs::write(&path, b"broken image").unwrap();
-        let (broken, report) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (broken, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert!(images(&broken).is_empty());
         assert_eq!(
             report.missing_images,
@@ -880,9 +996,9 @@ mod tests {
             };
             // 三个不同文件强制分别准备，作为相同内容的参照排版。
             let (reference, _) =
-                layout(&document(&second, &third), dir.path(), system_fonts()).unwrap();
+                layout(&document(&second, &third), dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
             let (reused, report) =
-                layout(&document(&first, &first), dir.path(), system_fonts()).unwrap();
+                layout(&document(&first, &first), dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
             assert!(report.missing_images.is_empty());
             assert_eq!(images(&reused).len(), 3);
             assert_eq!(reused.pages().len(), reference.pages().len());
@@ -1019,15 +1135,7 @@ mod tests {
         let (word, report) = crate::export::docx::export(&document, dir.path()).unwrap();
         println!("Word export: {:?}, {} bytes", started.elapsed(), word.len());
         assert!(report.missing_images.is_empty());
-        let mut writer = Writer {
-            theme: Theme::pdf(),
-            root: dir.path(),
-            out: String::new(),
-            images: Vec::new(),
-            image_cache: HashMap::new(),
-            report: ExportReport::default(),
-            quote_font: String::new(),
-        };
+        let mut writer = Writer::new(dir.path(), &PdfLayout::default());
         let started = std::time::Instant::now();
         writer.preamble(&document, fonts.book());
         for section in &document.sections {
@@ -1077,7 +1185,7 @@ mod tests {
         });
         let fonts = system_fonts();
         let started = std::time::Instant::now();
-        let (paged, _) = layout(&document, dir.path(), fonts).unwrap();
+        let (paged, _) = layout(&document, dir.path(), fonts, &PdfLayout::default()).unwrap();
         println!(
             "text layout: {:?}, {} pages",
             started.elapsed(),
@@ -1121,7 +1229,7 @@ mod tests {
             &[("a", vec![1], "Photo", "![Photo](../assets/photo.jpg)")],
         ));
         let started = std::time::Instant::now();
-        let (pdf, report) = export(&document, dir.path(), system_fonts()).unwrap();
+        let (pdf, report) = export(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         println!(
             "JPEG PDF: {:?}, {} bytes (source: {})",
             started.elapsed(),
@@ -1142,7 +1250,7 @@ mod tests {
             "",
             &[("a", vec![1], "", "![](../assets/gradient.png)")],
         ));
-        let (pdf, report) = export(&document, dir.path(), system_fonts()).unwrap();
+        let (pdf, report) = export(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert!(report.missing_images.is_empty());
         assert!(pdf.len() < fs::metadata(path).unwrap().len() as usize + 100_000);
         let text = String::from_utf8_lossy(&pdf);
@@ -1162,7 +1270,7 @@ mod tests {
             "",
             &[("a", vec![1], "", "![](../assets/alpha.png)")],
         ));
-        let (pdf, report) = export(&document, dir.path(), system_fonts()).unwrap();
+        let (pdf, report) = export(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert!(report.missing_images.is_empty());
         let text = String::from_utf8_lossy(&pdf);
         assert_eq!(text.matches("/Predictor 15").count(), 2);
@@ -1190,7 +1298,7 @@ mod tests {
                 ("b", vec![1, 1], "背景", ""),
             ],
         ));
-        let (pdf, report) = export(&document, dir.path(), system_fonts()).unwrap();
+        let (pdf, report) = export(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert!(pdf.starts_with(b"%PDF-"));
         assert_eq!(report.missing_images, vec!["../assets/无.png"]);
     }
@@ -1215,7 +1323,7 @@ mod tests {
         let url = format!("https://example.com/{}", "a".repeat(200));
         let markdown = format!("地址：{url}\n\n`{url}`\n\n```\n{url}\n```");
         let document = build(&request("", &[("a", vec![1], "链接", &markdown)]));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let page_width = paged.pages()[0].frame.width().to_pt();
         let right_margin = 25.0 / 25.4 * 72.0;
         let mut texts = 0;
@@ -1338,7 +1446,7 @@ mod tests {
             "",
             &[("a", vec![1], "标题甲", &"正文段落用于测量行距。".repeat(40))],
         );
-        let (paged, _) = layout(&build(&request), dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&build(&request), dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let items = placed(&paged);
 
         let heading: Vec<_> = items
@@ -1409,7 +1517,7 @@ mod tests {
                 ("c", vec![2], "第二章节", "第二章正文。"),
             ],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let texts = page_texts(&paged);
         // 封面：只有标题，没有页码。
         assert_eq!(texts[0], "封面标题");
@@ -1437,7 +1545,7 @@ mod tests {
         request.subtitle = "一项研究".into();
         request.author = "张三".into();
         let document = build(&request);
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert_eq!(page_texts(&paged)[0], "论文标题一项研究张三");
         let sizes: Vec<(String, f64)> = placed(&paged)
             .into_iter()
@@ -1452,11 +1560,217 @@ mod tests {
         assert_eq!(info.title.as_deref(), Some("论文标题"));
     }
 
+    fn layout_with(document: &Document, pdf_layout: PdfLayout) -> PagedDocument {
+        let dir = project();
+        layout(document, dir.path(), system_fonts(), &pdf_layout).unwrap().0
+    }
+
+    fn three_chapters(title: &str) -> Document {
+        build(&request(
+            title,
+            &[
+                ("a", vec![1], "绪论", &"绪论正文。".repeat(20)),
+                ("b", vec![1, 1], "背景", "背景正文。"),
+                ("c", vec![2], "方法", "方法正文。"),
+            ],
+        ))
+    }
+
+    #[test]
+    fn paper_margin_and_double_sided_binding() {
+        use crate::export::pdf_layout::{Margin, Paper};
+        let paged = layout_with(
+            &three_chapters("标题"),
+            PdfLayout { paper: Paper::B5, margin: Margin::Narrow, ..PdfLayout::default() },
+        );
+        let frame = &paged.pages()[0].frame;
+        assert!((frame.width().to_pt() - 176.0 / 25.4 * 72.0).abs() < 0.1);
+        assert!((frame.height().to_pt() - 250.0 / 25.4 * 72.0).abs() < 0.1);
+
+        let double = layout_with(
+            &three_chapters("标题"),
+            PdfLayout { binding: Binding::Double, ..PdfLayout::default() },
+        );
+        let texts = page_texts(&double);
+        // 封面（第 1 页）之后空一页，目录从右页开始；正文与每一章都从右页（奇数页）开始。
+        assert_eq!(texts[1], "");
+        assert!(texts[2].contains("目录"));
+        for chapter in ["1 绪论", "2 方法"] {
+            let page = texts.iter().position(|t| t.starts_with(chapter)).unwrap();
+            assert_eq!(page % 2, 0, "{chapter} on physical page {}", page + 1);
+        }
+        // 右页内侧（左边）30mm，左页内侧在右边。
+        let left_edge = |page: usize| {
+            placed(&double)
+                .into_iter()
+                .filter_map(|p| match p {
+                    Placed::Text { page: p, x, .. } if p == page => Some(x),
+                    _ => None,
+                })
+                .fold(f64::INFINITY, f64::min)
+        };
+        let body = texts.iter().position(|t| t.starts_with("1 绪论")).unwrap();
+        assert!((left_edge(body) - 30.0 / 25.4 * 72.0).abs() < 0.5, "{}", left_edge(body));
+
+        // 为凑右页插入的空白页上没有页眉与页码；有内容的页仍有页码。
+        for cover in [true, false] {
+            let paged = layout_with(
+                &three_chapters("标题"),
+                PdfLayout { binding: Binding::Double, cover, ..PdfLayout::default() },
+            );
+            let texts = page_texts(&paged);
+            let blanks = texts.iter().filter(|t| !t.contains("正文") && !t.contains("目录") && *t != "标题").count();
+            assert!(blanks >= 1, "{texts:?}");
+            for (page, text) in texts.iter().enumerate() {
+                let content = text.contains("正文") || text.contains("目录") || text == "标题";
+                assert!(content || text.is_empty(), "page {}: {text:?}", page + 1);
+            }
+            assert!(texts.iter().any(|t| t.contains("绪论正文") && t.ends_with('1')), "{texts:?}");
+            assert!(texts.iter().any(|t| t.contains("目录") && t.ends_with('i')), "{texts:?}");
+        }
+
+        // 跨多页的章节：每一页都有页码，后续页有页眉。
+        let long = build(&request("标题", &[("a", vec![1], "绪论", &"很长的正文用于跨页。".repeat(500))]));
+        let paged = layout_with(&long, PdfLayout { binding: Binding::Double, ..PdfLayout::default() });
+        let texts = page_texts(&paged);
+        let first = texts.iter().position(|t| t.starts_with("1 绪论")).unwrap();
+        assert!(texts.len() - first >= 3, "{}", texts.len());
+        for (number, text) in texts[first..].iter().enumerate() {
+            assert!(text.ends_with(&(number + 1).to_string()), "page {}: {text:?}", first + number + 1);
+        }
+        assert!(texts[first + 1].starts_with("标题"), "{}", texts[first + 1]);
+        assert!(texts[first + 2].starts_with("1 绪论"), "{}", texts[first + 2]);
+    }
+
+    #[test]
+    fn body_font_size_line_height_and_paragraph_spacing() {
+        use crate::export::pdf_layout::{BodySize, FontChoice, LineHeight};
+        let layout: PdfLayout = serde_json::from_value(serde_json::json!({
+            "paper": "a4", "margin": "normal", "binding": "single",
+            "bodyFont": "sans", "headingFont": "serif", "bodySize": 14,
+            "lineHeight": "loose", "paragraph": "spacing", "cover": true, "toc": false,
+            "tocDepth": 2, "chapterNewPage": true, "chapterNumber": "plain",
+            "header": "titleAndChapter", "pageNumber": "plain", "table": "threeLine"
+        }))
+        .unwrap();
+        assert_eq!(layout.body_font, FontChoice::Sans);
+        assert_eq!(layout.body_size, BodySize::try_from(14.0).unwrap());
+        assert_eq!(layout.line_height, LineHeight::Loose);
+        let document = build(&request("", &[("a", vec![1], "标题甲", &"正文段落用于测量行距。".repeat(40))]));
+        let items = placed(&layout_with(&document, layout));
+        let mut lines: Vec<(f64, f64)> = items
+            .iter()
+            .filter_map(|p| match p {
+                Placed::Text { x, y, size, family, text, .. } if text.contains("正文") => {
+                    assert_eq!(*size, 14.0);
+                    assert!(in_family(family, FontFamily::Sans), "body font {family}");
+                    Some((*y, *x))
+                }
+                Placed::Text { size, family, text, .. } if text.contains("标题甲") => {
+                    assert_eq!(*size, 21.0);
+                    assert!(in_family(family, FontFamily::Serif), "heading font {family}");
+                    None
+                }
+                _ => None,
+            })
+            .collect();
+        lines.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        lines.dedup_by(|a, b| (a.0 - b.0).abs() < 0.01);
+        assert!(lines.len() >= 3);
+        for pair in lines.windows(2) {
+            assert!((pair[1].0 - pair[0].0 - 28.0).abs() < 0.05, "line pitch {}", pair[1].0 - pair[0].0);
+        }
+        // 段间空行样式：首行不缩进。
+        assert!((lines[0].1 - MARGIN_PT).abs() < 0.5, "{}", lines[0].1);
+    }
+
+    #[test]
+    fn without_cover_the_title_block_leads_the_first_page() {
+        let document = {
+            let mut request = request("论文标题", &[("a", vec![1], "绪论", "正文。"), ("b", vec![2], "方法", "正文。")]);
+            request.author = "张三".into();
+            build(&request)
+        };
+        // 有目录：文档信息在目录页顶部。
+        let texts = page_texts(&layout_with(&document, PdfLayout { cover: false, ..PdfLayout::default() }));
+        assert!(texts[0].starts_with("论文标题张三目录"), "{}", texts[0]);
+        assert!(texts[1].starts_with("1 绪论"));
+        // 没有目录：第一章紧接文档信息，之后的章节仍另起一页。
+        let texts = page_texts(&layout_with(&document, PdfLayout { cover: false, toc: false, ..PdfLayout::default() }));
+        assert!(texts[0].starts_with("论文标题张三1 绪论"), "{}", texts[0]);
+        assert!(texts[1].starts_with("2 方法"), "{texts:?}");
+    }
+
+    #[test]
+    fn toc_depth_toc_off_and_chapters_without_new_pages() {
+        let document = three_chapters("标题");
+        let texts = page_texts(&layout_with(&document, PdfLayout { toc_depth: 1.try_into().unwrap(), ..PdfLayout::default() }));
+        assert!(texts[1].contains("1 绪论") && !texts[1].contains("背景"), "{}", texts[1]);
+
+        let texts = page_texts(&layout_with(
+            &document,
+            PdfLayout { toc: false, chapter_new_page: false, ..PdfLayout::default() },
+        ));
+        assert!(!texts.iter().any(|t| t.contains("目录")));
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(texts[1].contains("1 绪论") && texts[1].contains("2 方法"));
+    }
+
+    #[test]
+    fn chapter_number_styles() {
+        let document = three_chapters("标题");
+        let texts = page_texts(&layout_with(
+            &document,
+            PdfLayout { chapter_number: ChapterNumber::Chapter, ..PdfLayout::default() },
+        ));
+        assert!(texts[1].contains("第 1 章 绪论") && texts[1].contains("1.1 背景"), "{}", texts[1]);
+        assert!(texts[2].starts_with("第 1 章 绪论"));
+
+        let texts = page_texts(&layout_with(
+            &document,
+            PdfLayout { chapter_number: ChapterNumber::None, ..PdfLayout::default() },
+        ));
+        assert!(texts[2].starts_with("绪论") && texts[2].contains("背景"), "{}", texts[2]);
+        assert!(!texts[1].contains("1 绪论"));
+    }
+
+    #[test]
+    fn header_and_page_number_styles() {
+        let long = build(&request("文档", &[("a", vec![1], "绪论", &"很长的正文用于跨页。".repeat(400))]));
+        let texts = page_texts(&layout_with(
+            &long,
+            PdfLayout { page_number: PageNumber::Page, header: Header::Title, ..PdfLayout::default() },
+        ));
+        assert!(texts[2].ends_with("第 1 页"), "{}", texts[2]);
+        // 页眉只有文档标题，不含章节名。
+        assert!(texts[3].starts_with("文档页。") && texts[3].ends_with("第 2 页"), "{}", texts[3]);
+
+        let texts = page_texts(&layout_with(
+            &long,
+            PdfLayout { page_number: PageNumber::Total, header: Header::None, ..PdfLayout::default() },
+        ));
+        let total = texts.len() - 2;
+        // 没有页眉：页面直接从正文开始。
+        assert!(texts[3].starts_with("页。") && texts[3].ends_with(&format!("2 / {total}")), "{}", texts[3]);
+    }
+
+    #[test]
+    fn grid_tables_use_a_uniform_stroke() {
+        let dir = project();
+        let mut writer = Writer::new(dir.path(), &PdfLayout { table: TableStyle::Grid, ..PdfLayout::default() });
+        let document = build(&request("", &[("a", vec![1], "表", "| 甲 | 乙 |\n| - | - |\n| 1 | 2 |")]));
+        writer.preamble(&document, system_fonts().book());
+        writer.section(&document.sections[0]);
+        assert!(writer.out.contains("#set table(stroke: 0.5pt + luma(160)"));
+        assert!(!writer.out.contains("stroke: writer-three-line("));
+        assert!(layout_with(&document, PdfLayout { table: TableStyle::Grid, ..PdfLayout::default() }).pages().len() == 2);
+    }
+
     #[test]
     fn untitled_documents_have_no_cover() {
         let dir = project();
         let document = build(&request("", &[("a", vec![1], "章", "正文。")]));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let texts = page_texts(&paged);
         assert_eq!(paged.pages().len(), 2);
         assert!(texts[0].contains("目录"));
@@ -1469,7 +1783,7 @@ mod tests {
         let paragraph = "首行缩进的段落。".repeat(12);
         let markdown = format!("{paragraph}\n\n- 列表项\n\n> 引用段落");
         let document = build(&request("", &[("a", vec![1], "章", &markdown)]));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let lines: Vec<(f64, f64, String)> = placed(&paged)
             .into_iter()
             .filter_map(|p| match p {
@@ -1511,7 +1825,7 @@ mod tests {
                 "![](../assets/小.png)\n\n![宽图](../assets/宽.png)",
             )],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let page_width = paged.pages()[0].frame.width().to_pt();
         let images = images(&paged);
         assert_eq!(images.len(), 2);
@@ -1536,7 +1850,7 @@ mod tests {
                 &format!("{}\n\n![竖图的图注](../assets/竖图.png)", "正文。".repeat(30)),
             )],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let page_height = paged.pages()[0].frame.height().to_pt();
         let images = images(&paged);
         assert_eq!(images.len(), 1);
@@ -1566,7 +1880,7 @@ mod tests {
             "",
             &[("a", vec![1], "引", "> ![宽](../assets/宽.png)")],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let (_, x, _, width, height) = images(&paged)[0];
         // 引用有左侧缩进：图片缩小到引用内的可用宽度，不越出正文区右边界。
         assert!(x > MARGIN_PT + 5.0, "{x}");
@@ -1613,7 +1927,7 @@ mod tests {
                 "| 图 | 说明 |\n| --- | --- |\n| ![长](../assets/长.png) | 很长的图 |",
             )],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert_eq!(images(&paged).len(), 1);
         assert_inside_text_area(&paged);
     }
@@ -1631,7 +1945,7 @@ mod tests {
         ] {
             let markdown = format!("| 图 | 说明 |\n| --- | --- |\n| {cell} | 很长的图 |");
             let document = build(&request("", &[("a", vec![1], "表", &markdown)]));
-            let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+            let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
             assert_eq!(images(&paged).len(), 1, "{cell}");
             assert_inside_text_area(&paged);
         }
@@ -1645,7 +1959,7 @@ mod tests {
             "",
             &[("a", vec![1], "表", "| ![长](../assets/长.png) | 说明 |\n| --- | --- |\n| 1 | 2 |")],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let (_, _, _, _, height) = images(&paged)[0];
         assert!((height - TEXT_HEIGHT_PT / 4.0).abs() < 0.5, "{height}");
         assert_inside_text_area(&paged);
@@ -1662,7 +1976,7 @@ mod tests {
         );
         for markdown in [markdown.clone(), format!("> {}", markdown.replace('\n', "\n> "))] {
             let document = build(&request("", &[("a", vec![1], "表", &markdown)]));
-            let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+            let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
             assert_eq!(images(&paged).len(), 1);
             assert_inside_text_area(&paged);
         }
@@ -1677,7 +1991,7 @@ mod tests {
             markdown.push_str(&format!("| {i} | ![图](../assets/图.png) |\n"));
         }
         let document = build(&request("", &[("a", vec![1], "表", &markdown)]));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert!(paged.pages().len() > 1);
         assert_eq!(images(&paged).len(), 12);
         assert_inside_text_area(&paged);
@@ -1697,7 +2011,7 @@ mod tests {
             "",
             &[("a", vec![1], "细", "![细](../assets/细.png)\n\n文字 ![细](../assets/细.png) 文字")],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert_eq!(images(&paged).len(), 2);
         for (_, _, y, _, height) in images(&paged) {
             assert!(y >= MARGIN_PT - 0.5, "{y}");
@@ -1714,7 +2028,7 @@ mod tests {
             "",
             &[("a", vec![1], "段", "文字 ![长](../assets/长.png) 文字")],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert_inside_text_area(&paged);
     }
 
@@ -1727,7 +2041,7 @@ mod tests {
             "",
             &[("a", vec![1], "图", &format!("![{caption}](../assets/竖图.png)"))],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert_inside_text_area(&paged);
         // 图片与整段图注在同一页。
         let image_page = images(&paged)[0].0;
@@ -1755,7 +2069,7 @@ mod tests {
                  文字 ![长](../assets/长.png) 文字",
             )],
         ));
-        let (paged, _) = layout(&document, dir.path(), system_fonts()).unwrap();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         let images = images(&paged);
         assert_eq!(images.len(), 2, "{images:?}");
         // 表格单元格：按列数等分正文宽度、去掉内边距（453.5 / 3 − 12 磅），保持比例，不按文字行高压成小图。
@@ -1784,7 +2098,7 @@ mod tests {
                 text,
                 &[("a", vec![1], text, &format!("{text}\n\n- {text}\n\n| {text} |\n| - |\n| {text} |\n\n`{text}`\n\n```{text}\n{text}\n```"))],
             ));
-            let result = export(&document, dir.path(), system_fonts());
+            let result = export(&document, dir.path(), system_fonts(), &PdfLayout::default());
             assert!(result.is_ok(), "{text:?}: {result:?}");
         }
     }
@@ -1792,14 +2106,14 @@ mod tests {
     #[test]
     fn empty_deep_and_long_documents() {
         let dir = project();
-        let (pdf, _) = export(&build(&request("", &[])), dir.path(), system_fonts()).unwrap();
+        let (pdf, _) = export(&build(&request("", &[])), dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
         assert!(pdf.starts_with(b"%PDF-"));
 
         let deep = build(&request(
             "深",
             &[("d", vec![1; 32], "第 32 层", "# 正文标题")],
         ));
-        assert!(export(&deep, dir.path(), system_fonts()).is_ok());
+        assert!(export(&deep, dir.path(), system_fonts(), &PdfLayout::default()).is_ok());
 
         let owned: Vec<(String, Vec<u32>, String, String)> = (1..=200)
             .map(|i| {
@@ -1819,6 +2133,7 @@ mod tests {
             &build(&request("长文档", &chapters)),
             dir.path(),
             system_fonts(),
+            &PdfLayout::default(),
         )
         .unwrap();
         assert!(
@@ -1838,11 +2153,11 @@ mod tests {
         let dir = project();
         let chinese = build(&request("论文", &[("a", vec![1], "绪论", "正文")]));
         assert_eq!(
-            export(&chinese, dir.path(), fonts),
+            export(&chinese, dir.path(), fonts, &PdfLayout::default()),
             Err(ExportError::NoCjkFont)
         );
         let english = build(&request("Paper", &[("a", vec![1], "Intro", "Body text.")]));
-        assert!(export(&english, dir.path(), fonts).is_ok());
+        assert!(export(&english, dir.path(), fonts, &PdfLayout::default()).is_ok());
     }
 
     #[test]
@@ -1856,7 +2171,8 @@ mod tests {
 #[path = "../../vendor/krilla/src/graphics/png_predictor.rs"]
 mod png_predictor_tests;
 
-/// 手动检查用：`WRITER_SAMPLE_DIR=<目录> cargo test write_sample_pdf -- --ignored`
+/// 手动检查用：`WRITER_SAMPLE_DIR=<目录> cargo test write_sample_pdf -- --ignored`。
+/// 可选 `WRITER_SAMPLE_LAYOUT=<JSON>` 覆盖部分排版配置（字段同前端 PdfLayout）。
 #[cfg(test)]
 #[test]
 #[ignore]
@@ -1897,7 +2213,22 @@ fn write_sample_pdf() {
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
     };
-    let (bytes, report) = export(&build(&request), &root, font_store(None)).unwrap();
+    let (bytes, report) = export(&build(&request), &root, font_store(None), &sample_layout()).unwrap();
     assert!(report.missing_images.is_empty());
     std::fs::write(out.join("sample.pdf"), bytes).unwrap();
 }
+
+#[cfg(test)]
+fn sample_layout() -> PdfLayout {
+    let Ok(overrides) = std::env::var("WRITER_SAMPLE_LAYOUT") else {
+        return PdfLayout::default();
+    };
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/pdf_layout_default.json");
+    let mut layout: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let overrides: serde_json::Value = serde_json::from_str(&overrides).expect("WRITER_SAMPLE_LAYOUT");
+    for (key, value) in overrides.as_object().expect("object") {
+        layout[key] = value.clone();
+    }
+    serde_json::from_value(layout).expect("valid layout")
+}
+

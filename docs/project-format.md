@@ -85,7 +85,7 @@
 - 单张图片尺寸、对齐、位置等信息不进入 manifest、Markdown、资源 metadata 或其他布局存储。
 - PDF 文档级排版配置使用新的 `pdf` 字段（见 3.2），不沿用旧 `style`，随正常项目保存事务提交。
 
-### 3.2 文档信息与 PDF 排版配置（已确定，尚未实施）
+### 3.2 文档信息与 PDF 排版配置（已实施）
 
 ```json
 {
@@ -94,7 +94,7 @@
   "title": "我的论文",
   "subtitle": "副标题",
   "author": "张三",
-  "pdf": { "paragraph": "indent", "toc": true, "tocDepth": 2, "chapterNumber": "chapter" },
+  "pdf": { "paper": "b5", "toc": false, "chapterNumber": "chapter" },
   "chapters": [],
   "files": {}
 }
@@ -102,7 +102,8 @@
 
 - `subtitle`、`author`：可选字符串，属于文档内容（`docs/pdf-layout.md` 第 2 节）。
   空字符串等同于缺省，保存时不写出。
-- `pdf`：可选对象，只保存用户改过的项；没有改动时不写出。字段与取值：
+- `pdf`：可选对象，只保存用户改过的项，按下表的顺序写出；没有改动时不写出。
+  改回默认值的项不再保存（之后跟随默认值）。字段与取值（默认值见 `src-tauri/fixtures/pdf_layout_default.json`）：
 
   | 字段 | 取值 |
   |---|---|

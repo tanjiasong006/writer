@@ -20,11 +20,10 @@ import {
  */
 export function createTauriProjectStorage(): ProjectStorage {
   return {
-    async create(path, document) {
+    async create(path, { document, pdfLayout }) {
       const contents = Object.fromEntries(document.contents)
-      return call(() =>
-        invoke('project_create', { path, request: { manifest: buildManifest(document), contents } }),
-      ).then(toVoid)
+      const manifest = buildManifest(document, pdfLayout)
+      return call(() => invoke('project_create', { path, request: { manifest, contents } })).then(toVoid)
     },
 
     async open(path) {
@@ -39,15 +38,14 @@ export function createTauriProjectStorage(): ProjectStorage {
       return decoded
     },
 
-    async save(path, document, changed) {
+    async save(path, { document, pdfLayout }, changed) {
       const contents: Record<ChapterId, string> = {}
       for (const id of changed) {
         const text = document.contents.get(id)
         if (text !== undefined) contents[id] = text
       }
-      return call(() =>
-        invoke('project_save', { path, request: { manifest: buildManifest(document), contents } }),
-      ).then(toVoid)
+      const manifest = buildManifest(document, pdfLayout)
+      return call(() => invoke('project_save', { path, request: { manifest, contents } })).then(toVoid)
     },
 
     async close(path) {
@@ -129,12 +127,15 @@ export function decodeOpened(raw: unknown): StorageResult<OpenedProject> {
     texts.set(id, text)
   }
 
-  const { info, tree } = parsed.manifest
+  const { info, pdfLayout, tree } = parsed.manifest
   const document = createDocument(info.title, tree, texts)
   if (!document.ok) return invalid(document.reason)
 
   const orphans = Array.isArray(orphanFiles)
     ? orphanFiles.filter((name): name is string => typeof name === 'string')
     : []
-  return { ok: true, value: { document: setDocumentInfo(document.document, info), orphanFiles: orphans } }
+  return {
+    ok: true,
+    value: { document: setDocumentInfo(document.document, info), pdfLayout, orphanFiles: orphans },
+  }
 }

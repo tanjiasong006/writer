@@ -113,6 +113,29 @@ test('文档信息：副标题或作者不是字符串时拒绝打开', () => {
   assert.equal(issueOf(manifestJson({ author: ['张三'] })).code, 'author-invalid')
 })
 
+test('PDF 排版配置：没有改动时不写出；只写出合法的项，按固定顺序', () => {
+  assert.equal('pdf' in buildManifest(emptyDocument('论文')), false)
+  assert.equal('pdf' in buildManifest(emptyDocument('论文'), {}), false)
+  const manifest = buildManifest(emptyDocument('论文'), { table: 'grid', paper: 'b5' })
+  assert.equal(JSON.stringify(manifest.pdf), '{"paper":"b5","table":"grid"}')
+})
+
+test('PDF 排版配置：有问题不阻止打开，只忽略有问题的部分', () => {
+  const layoutOf = (pdf: unknown) => {
+    const result = parseManifest(manifestJson({ pdf }))
+    assert.equal(result.ok, true)
+    return result.ok ? result.manifest.pdfLayout : null
+  }
+  assert.deepEqual(layoutOf(undefined), {})
+  assert.deepEqual(layoutOf('a4'), {})
+  assert.deepEqual(layoutOf(['a4']), {})
+  assert.deepEqual(layoutOf(null), {})
+  assert.deepEqual(
+    layoutOf({ paper: 'b5', margin: 'huge', bodySize: '12', toc: 'no', tocDepth: 3, future: 1 }),
+    { paper: 'b5', tocDepth: 3 },
+  )
+})
+
 test('buildManifest：空文档', () => {
   const manifest = buildManifest(emptyDocument(''))
   assert.deepEqual(manifest.chapters, [])
@@ -241,7 +264,7 @@ test('旧项目的 style（已取消的文档样式）：无论内容如何都�
     const parsed = parseManifest(manifestJson({ style }))
     assert.ok(parsed.ok, JSON.stringify(style))
     if (!parsed.ok) return
-    assert.deepEqual(Object.keys(parsed.manifest).sort(), ['files', 'info', 'tree'])
+    assert.deepEqual(Object.keys(parsed.manifest).sort(), ['files', 'info', 'pdfLayout', 'tree'])
   }
   const document = replaceTree(emptyDocument('我的论文'), tree)
   assert.equal('style' in buildManifest(document), false)
