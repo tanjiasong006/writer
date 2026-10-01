@@ -5,8 +5,10 @@
 //! - 正文内的 `#` 标题叠加在章节层级之下，不带编号。
 //! - 所有写入 XML 的文本先去掉 XML 1.0 不允许的控制字符，否则 Word 会拒绝打开整个文件。
 //! - 图片缺失或损坏时输出占位文字并记录在报告中，绝不 panic。
-//! - 排版使用 Word 的默认输出参数（`export::theme`）：正文写入 Normal（文档默认），标题、图注使用内置样式
-//!   （Heading 1..9、Caption），接收者可以统一修改样式、使用导航窗格与生成目录。
+//! - 排版使用默认输出参数（`export::theme`，与 PDF 默认样式一致，docs/decisions.md 第 5 节）：字体、字号与行距
+//!   写入 Normal（文档默认），正文段落、列表、标题、图注使用内置样式（Body Text、List Paragraph、Heading 1..9、
+//!   Caption），接收者可以统一修改样式、使用导航窗格与生成目录。
+//! - 有文档信息时第一页是封面（不显示页眉页码，正文从第 1 页开始）；一级章节另起一页。
 //! - 图片按统一规则确定尺寸（`export::images`）：保持比例、不放大，不超过所在容器的宽度与正文区高度；
 //!   独立成段的图片居中，为图注预留空间并与图注保持在同一页，实际分页由 Word / WPS 完成。
 
@@ -14,11 +16,13 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 
 use docx_rs::{
-    AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, Footer, Hyperlink,
+    AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, Footer, Header, Hyperlink,
     HyperlinkType, IndentLevel, Level, LevelJc, LevelOverride, LevelText, LineSpacing,
-    LineSpacingType, NumberFormat, Numbering, NumberingId, PageMargin, PageNum, Paragraph,
-    ParagraphBorder, ParagraphBorderPosition, Pic, Run, RunFonts, Shading, ShdType,
-    SpecialIndentType, Start, Style, StyleType, Table, TableCell, TableRow, WidthType,
+    LineSpacingType, NumberFormat, Numbering, NumberingId, PageMargin, PageNum, PageNumType,
+    Paragraph, ParagraphBorder, ParagraphBorderPosition, ParagraphBorders, Pic, Run, RunFonts,
+    Shading, ShdType, SpecialIndentType, Start, Style, StyleType, Table, TableBorder,
+    TableBorderPosition, TableBorders, TableCell, TableCellBorder, TableCellBorderPosition,
+    TableCellBorders, TableRow, WidthType,
 };
 
 use super::fonts::{docx_fonts, FontFamily};
@@ -59,6 +63,23 @@ fn half_points(pt: f64) -> usize {
 
 /// 副标题的字号（磅）。
 const SUBTITLE_PT: f64 = 16.0;
+/// 封面上标题之前的留白：正文区高度的 28%，标题约在页面 1/3 高处（与 PDF 封面一致）。
+const COVER_TOP: u32 = TEXT_HEIGHT * 28 / 100;
+/// 一级章节另起一页后，标题上方的留白（磅，约 3em）。
+const CHAPTER_TOP_PT: f64 = 36.0;
+/// 页眉、页脚文字的字号（磅）。
+const META_PT: f64 = 9.0;
+
+// 颜色与 PDF 一致：正文纯黑，辅助信息只用灰阶，链接深蓝。
+const INFO_COLOR: &str = "3C3C3C";
+const QUOTE_COLOR: &str = "505050";
+const META_COLOR: &str = "646464";
+const COVER_LINE_COLOR: &str = "787878";
+const RULE_COLOR: &str = "A0A0A0";
+const QUOTE_BAR_COLOR: &str = "C8C8C8";
+const INLINE_CODE_FILL: &str = "EEEEEE";
+const CODE_FILL: &str = "F5F5F5";
+const LINK_COLOR: &str = "1F4E9A";
 
 /// 磅 → twip（1/20 磅）。
 fn twips(pt: f64) -> u32 {
@@ -78,7 +99,11 @@ pub fn export(
         items: Vec::new(),
     };
 
-    // 文档开头：标题、副标题、作者，各用自己的段落样式；空的不输出。
+    // 封面：标题、细线、副标题、作者，各用自己的段落样式；空的不输出。
+    // 第一个一级章节另起一页，封面因此独占第一页。
+    let cover = [&document.title, &document.subtitle, &document.author]
+        .iter()
+        .any(|text| !text.trim().is_empty());
     for (style, text) in [
         ("Title", &document.title),
         ("Subtitle", &document.subtitle),
@@ -91,12 +116,17 @@ pub fn export(
                     .add_run(Run::new().add_text(xml_safe(text.trim()))),
             ));
         }
+        if style == "Title" && cover {
+            writer
+                .items
+                .push(Item::Paragraph(short_rule(0.4, 5, COVER_LINE_COLOR)));
+        }
     }
     for section in &document.sections {
         writer.section(section);
     }
 
-    let mut docx = base_document(&writer.theme);
+    let mut docx = base_document(&writer.theme, document.title.trim(), cover);
     for numbering in writer.numberings.drain(..) {
         docx = docx.add_numbering(numbering);
     }
@@ -277,7 +307,7 @@ impl Writer<'_> {
                 // 与 PDF 一致的浅灰底色。
                 p.property = p
                     .property
-                    .shading(Shading::new().shd_type(ShdType::Clear).fill("F3F4F6"));
+                    .shading(Shading::new().shd_type(ShdType::Clear).fill(CODE_FILL));
                 self.items.push(Item::Paragraph(p));
             }
             Block::Table {
@@ -285,27 +315,23 @@ impl Writer<'_> {
                 header,
                 rows,
             } => self.table(alignments, header, rows),
-            Block::Rule => {
-                let mut p = Paragraph::new();
-                p.property = p.property.set_border(
-                    ParagraphBorder::new(ParagraphBorderPosition::Bottom)
-                        .val(BorderType::Single)
-                        .size(6)
-                        .color("D1D5DB"),
-                );
-                self.items.push(Item::Paragraph(p));
-            }
+            Block::Rule => self
+                .items
+                .push(Item::Paragraph(short_rule(0.3, 4, RULE_COLOR))),
         }
     }
 
-    /// 普通段落：在引用中使用 Quote 样式，并按列表 / 引用层级缩进。
+    /// 普通段落：正文使用 Body Text（首行缩进），列表中使用 List Paragraph，引用中使用 Quote，
+    /// 并按列表 / 引用层级缩进。
     fn paragraph_for(&self, context: BlockContext) -> Paragraph {
-        let p = if context.quote_level > 0 {
-            Paragraph::new().style("Quote")
+        let style = if context.quote_level > 0 {
+            "Quote"
+        } else if context.in_list {
+            "ListParagraph"
         } else {
-            Paragraph::new()
+            "BodyText"
         };
-        self.indent(p, context)
+        self.indent(Paragraph::new().style(style), context)
     }
 
     fn indent(&self, p: Paragraph, context: BlockContext) -> Paragraph {
@@ -350,11 +376,13 @@ impl Writer<'_> {
             for block in item {
                 match block {
                     Block::Paragraph(inlines) if first => {
-                        let mut p = Paragraph::new()
+                        let p = Paragraph::new()
+                            .style(if context.quote_level > 0 {
+                                "Quote"
+                            } else {
+                                "ListParagraph"
+                            })
                             .numbering(NumberingId::new(numbering_id), IndentLevel::new(level));
-                        if context.quote_level > 0 {
-                            p = p.style("Quote");
-                        }
                         let bounds = text_bounds(content_width_pt(context, level + 1));
                         let p = self.inlines(p, inlines, RunStyle::default(), bounds);
                         self.items.push(Item::Paragraph(p));
@@ -431,8 +459,16 @@ impl Writer<'_> {
                         let cell = TableCell::new()
                             .add_paragraph(p)
                             .width(width, WidthType::Dxa);
+                        // 三线表：表头下方一条细线。
                         if is_header {
-                            cell.shading(Shading::new().shd_type(ShdType::Clear).fill("F3F4F6"))
+                            cell.set_borders(
+                                TableCellBorders::with_empty().set(
+                                    TableCellBorder::new(TableCellBorderPosition::Bottom)
+                                        .border_type(BorderType::Single)
+                                        .size(4)
+                                        .color("000000"),
+                                ),
+                            )
                         } else {
                             cell
                         }
@@ -449,9 +485,21 @@ impl Writer<'_> {
         for row in rows {
             table_rows.push(make_row(self, row, RunStyle::default(), false));
         }
+        // 三线表：顶线与底线 1 磅，无竖线与内部横线（与 PDF 默认一致）。
+        let rule = |position| {
+            TableBorder::new(position)
+                .border_type(BorderType::Single)
+                .size(8)
+                .color("000000")
+        };
         let table = Table::new(table_rows)
             .set_grid(vec![width; columns])
-            .width(TEXT_WIDTH as usize, WidthType::Dxa);
+            .width(TEXT_WIDTH as usize, WidthType::Dxa)
+            .set_borders(
+                TableBorders::with_empty()
+                    .set(rule(TableBorderPosition::Top))
+                    .set(rule(TableBorderPosition::Bottom)),
+            );
         self.items.push(Item::Table(table));
         // 紧跟的段落与表格之间留出间距。
         self.items.push(Item::Paragraph(Paragraph::new()));
@@ -556,9 +604,7 @@ impl Writer<'_> {
                 )),
                 Inline::Link { url, children } => {
                     let text = crate::render::markdown::plain_text(children);
-                    let run = styled(Run::new().add_text(xml_safe(&text)), style)
-                        .color("2563EB")
-                        .underline("single");
+                    let run = styled(Run::new().add_text(xml_safe(&text)), style).color(LINK_COLOR);
                     if is_safe_url(url) {
                         p.add_hyperlink(
                             Hyperlink::new(url.as_str(), HyperlinkType::External).add_run(run),
@@ -593,7 +639,12 @@ fn styled(mut run: Run, style: RunStyle) -> Run {
     if style.code {
         run = run
             .fonts(fonts(FontFamily::Mono))
-            .shading(Shading::new().shd_type(ShdType::Clear).fill("F3F4F6"));
+            .size(half_points(Theme::default().body.size * 0.9))
+            .shading(
+                Shading::new()
+                    .shd_type(ShdType::Clear)
+                    .fill(INLINE_CODE_FILL),
+            );
     }
     run
 }
@@ -626,7 +677,7 @@ pub fn xml_safe(text: &str) -> String {
         .collect()
 }
 
-fn base_document(theme: &Theme) -> Docx {
+fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
     let body = &theme.body;
     // 行距：相邻基线距离 = 字号 × 行距倍数。用"最小值"而不是"固定值"：行内图片等较高的内容不会被裁掉。
     let body_line = LineSpacing::new()
@@ -651,18 +702,83 @@ fn base_document(theme: &Theme) -> Docx {
         .footer(
             Footer::new().add_paragraph(
                 Paragraph::new()
+                    .style("Footer")
                     .align(AlignmentType::Center)
                     .add_page_num(PageNum::new()),
             ),
-        )
+        );
+    // 页眉：文档标题，下接细线。
+    if !title.is_empty() {
+        let mut p = Paragraph::new()
+            .style("Header")
+            .add_run(Run::new().add_text(xml_safe(title)));
+        p.property = p.property.set_borders(
+            ParagraphBorders::with_empty().set(
+                ParagraphBorder::new(ParagraphBorderPosition::Bottom)
+                    .val(BorderType::Single)
+                    .size(3)
+                    .space(4)
+                    .color(RULE_COLOR),
+            ),
+        );
+        docx = docx.header(Header::new().add_paragraph(p));
+    }
+    // 封面不显示页眉和页码，并记为第 0 页，正文从第 1 页开始。
+    if cover {
+        docx = docx
+            .first_header(Header::new().add_paragraph(Paragraph::new()))
+            .first_footer(Footer::new().add_paragraph(Paragraph::new()))
+            .page_num_type(PageNumType::new().start(0));
+    }
+
+    let mut quote = Style::new("Quote", StyleType::Paragraph)
+        .name("Quote")
+        .based_on("Normal")
+        .fonts(fonts(theme.blockquote.font))
+        .size(half_points(theme.blockquote.size))
+        .color(QUOTE_COLOR)
+        .align(AlignmentType::Both)
+        .indent(Some(LIST_INDENT), None, None, None)
+        // 与前后的正文、表格隔开；相邻的引用段落之间同样留出间距。
+        .line_spacing(
+            LineSpacing::new()
+                .before(twips(body.size * 0.5))
+                .after(twips(body.size * 0.5)),
+        );
+    // 左侧 2 磅浅灰竖线。
+    quote.paragraph_property = quote.paragraph_property.set_borders(
+        ParagraphBorders::with_empty().set(
+            ParagraphBorder::new(ParagraphBorderPosition::Left)
+                .val(BorderType::Single)
+                .size(16)
+                .space(8)
+                .color(QUOTE_BAR_COLOR),
+        ),
+    );
+
+    // 页眉、页脚：内置 header / footer 样式，9 磅灰色无衬线。
+    for (id, name) in [("Header", "header"), ("Footer", "footer")] {
+        docx = docx.add_style(
+            Style::new(id, StyleType::Paragraph)
+                .name(name)
+                .based_on("Normal")
+                .fonts(fonts(FontFamily::Sans))
+                .size(half_points(META_PT))
+                .color(META_COLOR),
+        );
+    }
+
+    docx = docx
         .add_style(
             Style::new("Title", StyleType::Paragraph)
                 .name("Title")
                 .based_on("Normal")
+                .next("Normal")
                 .fonts(fonts(theme.title.font))
                 .size(half_points(theme.title.size))
                 .bold()
                 .align(AlignmentType::Center)
+                .line_spacing(LineSpacing::new().before(COVER_TOP))
                 .q_format(true),
         )
         .add_style(
@@ -671,17 +787,41 @@ fn base_document(theme: &Theme) -> Docx {
                 .based_on("Normal")
                 .fonts(fonts(theme.title.font))
                 .size(half_points(SUBTITLE_PT))
-                .color("4B5563")
+                .color(INFO_COLOR)
                 .align(AlignmentType::Center)
+                .line_spacing(LineSpacing::new().before(twips(body.size * 1.2)))
                 .q_format(true),
         )
         .add_style(
             Style::new("Author", StyleType::Paragraph)
                 .name("Author")
                 .based_on("Normal")
+                .fonts(fonts(theme.title.font))
                 .size(half_points(body.size))
-                .color("4B5563")
-                .align(AlignmentType::Center),
+                .color(INFO_COLOR)
+                .align(AlignmentType::Center)
+                .line_spacing(LineSpacing::new().before(twips(body.size * 3.0))),
+        )
+        .add_style(
+            // 正文段落：两端对齐，首行缩进 2 字符。
+            Style::new("BodyText", StyleType::Paragraph)
+                .name("Body Text")
+                .based_on("Normal")
+                .align(AlignmentType::Both)
+                .indent(
+                    None,
+                    Some(SpecialIndentType::FirstLine(twips(body.size * 2.0) as i32)),
+                    None,
+                    None,
+                )
+                .q_format(true),
+        )
+        .add_style(
+            Style::new("ListParagraph", StyleType::Paragraph)
+                .name("List Paragraph")
+                .based_on("Normal")
+                .align(AlignmentType::Both)
+                .q_format(true),
         )
         .add_style(
             Style::new("Code", StyleType::Paragraph)
@@ -693,18 +833,11 @@ fn base_document(theme: &Theme) -> Docx {
                     LineSpacing::new()
                         .line_rule(LineSpacingType::Auto)
                         .line(276)
-                        .after(twips(body.size * body.paragraph_spacing)),
+                        .before(twips(body.size * 0.5))
+                        .after(twips(body.size * 0.5)),
                 ),
         )
-        .add_style(
-            Style::new("Quote", StyleType::Paragraph)
-                .name("Quote")
-                .based_on("Normal")
-                .fonts(fonts(theme.blockquote.font))
-                .size(half_points(theme.blockquote.size))
-                .color("4B5563")
-                .indent(Some(LIST_INDENT), None, None, None),
-        )
+        .add_style(quote)
         .add_style(
             Style::new("TableText", StyleType::Paragraph)
                 .name("Table Text")
@@ -724,30 +857,38 @@ fn base_document(theme: &Theme) -> Docx {
                 .based_on("Normal")
                 .fonts(fonts(theme.caption.font))
                 .size(half_points(theme.caption.size))
-                .color("6B7280")
+                .color(META_COLOR)
                 .align(AlignmentType::Center),
         );
 
     for level in 1..=MAX_HEADING {
         let heading = theme.heading(level);
-        docx = docx.add_style(
-            Style::new(format!("Heading{level}"), StyleType::Paragraph)
-                .name(format!("heading {level}"))
-                .based_on("Normal")
-                .next("Normal")
-                .fonts(fonts(heading.font))
-                .size(half_points(heading.size))
-                .bold()
-                .outline_lvl(level - 1)
-                .line_spacing(
-                    LineSpacing::new()
-                        .line_rule(LineSpacingType::Auto)
-                        .line(288)
-                        .before(twips(heading.size * heading.spacing_before))
-                        .after(twips(heading.size * heading.spacing_after)),
-                )
-                .q_format(true),
-        );
+        // 一级章节另起一页，标题上方留白。
+        let before = if level == 1 {
+            twips(CHAPTER_TOP_PT)
+        } else {
+            twips(heading.size * heading.spacing_before)
+        };
+        let mut style = Style::new(format!("Heading{level}"), StyleType::Paragraph)
+            .name(format!("heading {level}"))
+            .based_on("Normal")
+            .next("BodyText")
+            .fonts(fonts(heading.font))
+            .size(half_points(heading.size))
+            .bold()
+            .outline_lvl(level - 1)
+            .line_spacing(
+                LineSpacing::new()
+                    .line_rule(LineSpacingType::Auto)
+                    .line(288)
+                    .before(before)
+                    .after(twips(heading.size * heading.spacing_after)),
+            )
+            .q_format(true);
+        if level == 1 {
+            style.paragraph_property = style.paragraph_property.page_break_before(true);
+        }
+        docx = docx.add_style(style);
     }
 
     let bullets = ["•", "◦", "▪"];
@@ -797,6 +938,21 @@ fn heading(level: usize) -> Paragraph {
         .style(&format!("Heading{level}"))
         .keep_next(true)
         .keep_lines(true)
+}
+
+/// 居中的短细线：占正文宽度的 fraction，size 以 1/8 磅计。
+fn short_rule(fraction: f64, size: usize, color: &str) -> Paragraph {
+    let side = (f64::from(TEXT_WIDTH) * (1.0 - fraction) / 2.0).round() as i32;
+    let mut p = Paragraph::new().indent(Some(side), None, Some(side), None);
+    p.property = p.property.set_borders(
+        ParagraphBorders::with_empty().set(
+            ParagraphBorder::new(ParagraphBorderPosition::Bottom)
+                .val(BorderType::Single)
+                .size(size)
+                .color(color),
+        ),
+    );
+    p
 }
 
 /// 让表头行在表格跨页时于每页重复。docx-rs 没有 tblHeader 的接口：
@@ -991,7 +1147,7 @@ mod tests {
         assert_eq!(xml.matches("<w:tblHeader />").count(), 1);
         assert_eq!(xml.matches("<w:cantSplit />").count(), 1);
         // 代码块有底色。
-        assert!(xml.contains(r#"<w:shd w:val="clear" w:color="auto" w:fill="F3F4F6" />"#));
+        assert!(xml.contains(r#"<w:shd w:val="clear" w:color="auto" w:fill="F5F5F5" />"#));
     }
 
     #[test]
@@ -1150,7 +1306,7 @@ mod tests {
         assert!(xml.contains(r#"cx="5731510" cy="2865755""#));
         // 竖长图按完整正文区高度（697.9 磅）扣除前后间距、余量与一行图注后缩小，比例不变。
         let (cx, cy) = extents(&xml)[2];
-        let limit = 697.9 - 12.0 * 2.0 - 4.0 - 21.6;
+        let limit = 697.9 - 12.0 * 2.0 - 4.0 - 21.0;
         assert!((cy / EMU_PER_PT - limit).abs() < 0.1, "{cy}");
         assert!((cx / cy - 0.25).abs() < 1e-3);
     }
@@ -1195,44 +1351,58 @@ mod tests {
         );
         let styles = part(&bytes, "word/styles.xml");
 
-        // 正文（Normal / 文档默认）：宋体类字体、12 磅（半磅 24）、行距至少 21.6 磅（432 twip）、段后 6 磅。
+        // 正文（Normal / 文档默认）：宋体类字体、12 磅（半磅 24）、行距至少 21 磅（420 twip）、段间不额外留空。
         let defaults = &styles
             [styles.find("<w:docDefaults>").unwrap()..styles.find("</w:docDefaults>").unwrap()];
         assert!(defaults.contains(r#"w:ascii="Times New Roman""#), "{defaults}");
         assert!(defaults.contains(r#"w:eastAsia="SimSun""#));
         assert!(defaults.contains(r#"<w:sz w:val="24" />"#));
         assert!(
-            defaults.contains(r#"w:line="432""#) && defaults.contains(r#"w:lineRule="atLeast""#)
+            defaults.contains(r#"w:line="420""#) && defaults.contains(r#"w:lineRule="atLeast""#)
         );
-        assert!(defaults.contains(r#"w:after="120""#));
+        assert!(defaults.contains(r#"w:after="0""#), "{defaults}");
 
-        // 标题：内置 Heading 1..9（名称 heading N），带大纲级别；第 3 级之后沿用第 3 级的字号与间距。
+        // 正文段落：Body Text，两端对齐，首行缩进 2 字符（24 磅）。
+        let body_text = style_xml(&styles, "BodyText");
+        assert!(body_text.contains(r#"w:val="Body Text""#), "{body_text}");
+        assert!(body_text.contains(r#"<w:jc w:val="both" />"#));
+        assert!(body_text.contains(r#"w:firstLine="480""#));
+
+        // 标题：内置 Heading 1..9（名称 heading N），带大纲级别；一级标题另起一页；
+        // 第 4 级之后沿用第 4 级的字号与间距。
         let h1 = style_xml(&styles, "Heading1");
         assert!(h1.contains(r#"w:val="heading 1""#), "{h1}");
         assert!(h1.contains(r#"w:eastAsia="SimHei""#));
-        assert!(h1.contains(r#"<w:sz w:val="32" />"#));
+        assert!(h1.contains(r#"<w:sz w:val="36" />"#));
         assert!(h1.contains(r#"<w:outlineLvl w:val="0" />"#));
-        let h3 = style_xml(&styles, "Heading3");
+        assert!(h1.contains("<w:pageBreakBefore />"), "{h1}");
+        assert!(!style_xml(&styles, "Heading2").contains("<w:pageBreakBefore"));
+        let h4 = style_xml(&styles, "Heading4");
         let h7 = style_xml(&styles, "Heading7");
         assert_eq!(
-            h3.replace("Heading3", "X")
-                .replace("heading 3", "x")
-                .replace("w:val=\"2\"", "L"),
+            h4.replace("Heading4", "X")
+                .replace("heading 4", "x")
+                .replace("w:val=\"3\"", "L"),
             h7.replace("Heading7", "X")
                 .replace("heading 7", "x")
                 .replace("w:val=\"6\"", "L")
         );
-        // 引用：楷体，西文沿用衬线。
+        // 引用：楷体，西文沿用衬线；左侧 2 磅浅灰竖线。
         let quote = style_xml(&styles, "Quote");
         assert!(quote.contains(r#"w:eastAsia="KaiTi""#), "{quote}");
         assert!(quote.contains(r#"w:ascii="Times New Roman""#));
+        assert!(
+            quote.contains(r#"<w:pBdr><w:left w:val="single" w:space="8" w:sz="16" w:color="C8C8C8" /></w:pBdr>"#),
+            "{quote}"
+        );
         // 图注：内置 Caption（名称 caption），居中。
         let caption = style_xml(&styles, "Caption");
         assert!(caption.contains(r#"w:val="caption""#), "{caption}");
         assert!(caption.contains(r#"<w:sz w:val="20" />"#));
-        assert!(style_xml(&styles, "TableText").contains(r#"<w:sz w:val="22" />"#));
+        assert!(style_xml(&styles, "TableText").contains(r#"<w:sz w:val="21" />"#));
 
         let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains(r#"<w:pStyle w:val="BodyText" />"#));
         assert!(xml.contains(r#"<w:pStyle w:val="TableText" />"#));
         assert!(xml.contains(r#"<w:pStyle w:val="Caption" />"#));
         // 正文段落不写逐段的字体与字号：由 Normal 决定，接收者可以统一修改。
@@ -1266,9 +1436,9 @@ mod tests {
             )],
         );
         let (cx, cy) = extents(&part(&bytes, "word/document.xml"))[0];
-        // 正文区 697.9 磅，减去表头（一行 11 磅表格文字按 1.5 倍行距上限 + 段落间距 4）、
+        // 正文区 697.9 磅，减去表头（一行 10.5 磅表格文字按 1.5 倍行距上限 + 段落间距 4）、
         // 本行段落间距 4 与余量 4。
-        let limit = 697.9 - (16.5 + 4.0) - 4.0 - 4.0;
+        let limit = 697.9 - (15.75 + 4.0) - 4.0 - 4.0;
         assert!((cy / EMU_PER_PT - limit).abs() < 0.1, "{}", cy / EMU_PER_PT);
         assert!((cy / cx - 20.0).abs() < 0.01);
     }
@@ -1283,8 +1453,8 @@ mod tests {
             &[("a", vec![1], "图", &format!("![{caption}](../assets/竖图.png)"))],
         );
         let (_, cy) = extents(&part(&bytes, "word/document.xml"))[0];
-        // 四个 30 字符的单词按折行上限各占一行：4 × 21.6 磅（正文最小行距）。
-        let limit = 697.9 - 12.0 * 2.0 - 4.0 - 4.0 * 21.6;
+        // 四个 30 字符的单词按折行上限各占一行：4 × 21 磅（正文最小行距）。
+        let limit = 697.9 - 12.0 * 2.0 - 4.0 - 4.0 * 21.0;
         assert!((cy / EMU_PER_PT - limit).abs() < 0.1, "{}", cy / EMU_PER_PT);
     }
 
@@ -1354,6 +1524,63 @@ mod tests {
     }
 
     #[test]
+    fn document_info_forms_a_cover_page_without_header_or_page_number() {
+        let dir = project();
+        let (bytes, _) = export_ok(&dir, &[("a", vec![1], "绪论", "正文")]);
+        let xml = part(&bytes, "word/document.xml");
+        let sect = &xml[xml.find("<w:sectPr>").unwrap()..];
+        // 封面使用单独的首页页眉页脚（空），并记为第 0 页，正文从第 1 页开始。
+        assert!(sect.contains("<w:titlePg />"), "{sect}");
+        assert!(sect.contains(r#"<w:pgNumType w:start="0" />"#), "{sect}");
+        assert!(sect.contains(r#"<w:headerReference w:type="first""#));
+        assert!(sect.contains(r#"<w:footerReference w:type="first""#));
+        // 页眉：文档标题，使用内置 header 样式；页脚页码使用 footer 样式。
+        let header = part(&bytes, "word/header1.xml");
+        assert!(header.contains(r#"<w:pStyle w:val="Header" />"#), "{header}");
+        assert!(header.contains("示例论文"));
+        assert!(part(&bytes, "word/footer1.xml").contains(r#"<w:pStyle w:val="Footer" />"#));
+        assert!(style_xml(&part(&bytes, "word/styles.xml"), "Header").contains(r#"<w:sz w:val="18" />"#));
+    }
+
+    /// 没有文档信息时没有封面。文档第一段的"段前分页"不会产生空白页，第一章仍在第一页。
+    #[test]
+    fn without_document_info_there_is_no_cover() {
+        let dir = project();
+        let mut request = request(&[("a", vec![1], "绪论", "正文"), ("b", vec![2], "方法", "")]);
+        request.title = String::new();
+        let (bytes, _) = export(&build(&request), dir.path()).unwrap();
+        let xml = part(&bytes, "word/document.xml");
+        assert!(!xml.contains("<w:titlePg />"));
+        assert!(!xml.contains("<w:pgNumType"));
+        assert!(!xml.contains("headerReference"));
+        assert!(xml.find("1 绪论").unwrap() < xml.find("2 方法").unwrap());
+    }
+
+    #[test]
+    fn tables_are_three_line_and_rules_are_short() {
+        let dir = project();
+        let (bytes, _) = export_ok(
+            &dir,
+            &[("a", vec![1], "表", "| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n\n---")],
+        );
+        let xml = part(&bytes, "word/document.xml");
+        // 顶线、底线 1 磅，表头下 0.5 磅，没有竖线与其他横线。
+        assert!(xml.contains(
+            r#"<w:tblBorders><w:top w:val="single" w:sz="8" w:space="0" w:color="000000" /><w:bottom w:val="single" w:sz="8" w:space="0" w:color="000000" /></w:tblBorders>"#
+        ));
+        assert_eq!(
+            xml.matches(r#"<w:tcBorders><w:bottom w:val="single" w:sz="4""#).count(),
+            2
+        );
+        assert_eq!(xml.matches("<w:tcBorders>").count(), 2);
+        // 分隔线：居中，约为正文宽度的 30%，只有下边线。
+        assert!(xml.contains(r#"<w:ind w:left="3159" w:right="3159" />"#), "{xml}");
+        assert!(xml.contains(
+            r#"<w:pBdr><w:bottom w:val="single" w:space="0" w:sz="4" w:color="A0A0A0" /></w:pBdr>"#
+        ));
+    }
+
+    #[test]
     fn many_chapters() {
         let dir = project();
         let owned: Vec<(String, Vec<u32>, String, String)> = (1..=500)
@@ -1417,12 +1644,13 @@ fn write_sample_docx() {
     };
     let request = RenderRequest {
         title: "Writer 示例文档".into(),
+        subtitle: "长文档写作与输出".into(),
+        author: "示例作者".into(),
         chapters: vec![
             chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.jpg)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
-        ..Default::default()
     };
     let (bytes, report) = export(&build(&request), &root).unwrap();
     assert!(report.missing_images.is_empty());

@@ -239,9 +239,9 @@ impl PdfLayout {
         self.body_size.0 / 12.0
     }
 
-    /// 由配置得到输出参数：从 PDF 默认值出发，替换正文与标题的字体族（引用固定为楷体）、行距与段距，字号按比例缩放。
+    /// 由配置得到输出参数：从默认输出参数出发，替换正文与标题的字体族（引用固定为楷体）、行距与段距，字号按比例缩放。
     pub fn theme(&self) -> Theme {
-        let base = Theme::pdf();
+        let base = Theme::default();
         let scale = self.scale();
         let font = |choice: FontChoice| match choice {
             FontChoice::Serif => FontId::Serif,
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn default_theme_is_the_pdf_default() {
-        assert_eq!(PdfLayout::default().theme(), Theme::pdf());
+        assert_eq!(PdfLayout::default().theme(), Theme::default());
     }
 
     #[test]
