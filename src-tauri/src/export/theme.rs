@@ -9,6 +9,8 @@
 pub enum FontId {
     Serif,
     Sans,
+    /// 楷体：只用于引用。
+    Kai,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,7 +67,7 @@ const fn heading(font: FontId, size: f64, spacing_before: f64, spacing_after: f6
 }
 
 impl Default for Theme {
-    /// 默认输出参数：宋体类正文、黑体类标题，适合正式交付的长文档。
+    /// 默认输出参数：宋体类正文、黑体类标题、楷体引用，适合正式交付的长文档。
     fn default() -> Self {
         Theme {
             body: BodyStyle {
@@ -83,7 +85,7 @@ impl Default for Theme {
             heading3: heading(FontId::Sans, 13.0, 1.0, 0.4),
             heading4: heading(FontId::Sans, 13.0, 1.0, 0.4),
             blockquote: TextStyle {
-                font: FontId::Serif,
+                font: FontId::Kai,
                 size: 12.0,
             },
             code_block: 10.0,

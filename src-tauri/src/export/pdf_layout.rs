@@ -239,7 +239,7 @@ impl PdfLayout {
         self.body_size.0 / 12.0
     }
 
-    /// 由配置得到输出参数：从 PDF 默认值出发，替换字体族、行距与段距，字号按比例缩放。
+    /// 由配置得到输出参数：从 PDF 默认值出发，替换正文与标题的字体族（引用固定为楷体）、行距与段距，字号按比例缩放。
     pub fn theme(&self) -> Theme {
         let base = Theme::pdf();
         let scale = self.scale();
@@ -277,7 +277,7 @@ impl PdfLayout {
             heading3: heading(base.heading3),
             heading4: heading(base.heading4),
             blockquote: super::theme::TextStyle {
-                font: body_font,
+                font: base.blockquote.font,
                 size: base.blockquote.size * scale,
             },
             code_block: base.code_block * scale,
@@ -362,6 +362,7 @@ mod tests {
         assert_eq!(theme.body.paragraph_spacing, 0.5);
         assert_eq!(theme.heading1.font, FontId::Serif);
         assert_eq!(theme.heading1.size, 21.0);
+        assert_eq!(theme.blockquote.font, FontId::Kai, "quotes stay Kai whatever the body font");
         assert_eq!(theme.table, 10.5 * 14.0 / 12.0);
     }
 }

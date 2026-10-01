@@ -1,7 +1,7 @@
 //! 导出字体配置：全项目唯一的字体来源（docs/decisions.md 第 6 节）。
 //!
-//! 字体按"字体族"配置：衬线（宋体类）、无衬线（黑体类）、等宽。输出参数（`export::theme`）为每类元素
-//! 选择衬线或无衬线；等宽只用于代码。每个字体族是一条有序的候选字体列表：拉丁字体在前、中文字体在后，
+//! 字体按"字体族"配置：衬线（宋体类）、无衬线（黑体类）、楷体、等宽。输出参数（`export::theme`）为每类元素
+//! 选择衬线或无衬线；楷体只用于引用，等宽只用于代码。每个字体族是一条有序的候选字体列表：拉丁字体在前、中文字体在后，
 //! 覆盖 macOS / Windows / Linux 的常见字体。排版引擎按顺序逐字形回退。
 //! 打包字体目录（`bundled_font_dirs`）始终参与查找，未来放入开源中文字体即可保证各平台一致。
 //! 编辑环境的字体栈独立配置，不以与这里一致为约束。
@@ -13,6 +13,8 @@ use super::theme::FontId;
 pub enum FontFamily {
     Serif,
     Sans,
+    /// 楷体：只用于引用；本机没有楷体时退回衬线。
+    Kai,
     Mono,
 }
 
@@ -21,6 +23,7 @@ impl From<FontId> for FontFamily {
         match font {
             FontId::Serif => FontFamily::Serif,
             FontId::Sans => FontFamily::Sans,
+            FontId::Kai => FontFamily::Kai,
         }
     }
 }
@@ -69,6 +72,33 @@ pub fn families(family: FontFamily) -> &'static [&'static str] {
             "SimSun",
             "Noto Serif CJK SC",
         ],
+        FontFamily::Kai => &[
+            // 拉丁：楷体自带的西文字形不适合正文，沿用衬线
+            "Times New Roman",
+            "Liberation Serif",
+            "DejaVu Serif",
+            "Libertinus Serif",
+            // 中文：macOS（按需下载的系统字体）
+            "Kaiti SC",
+            "STKaiti",
+            // Windows
+            "KaiTi",
+            // Linux
+            "AR PL UKai CN",
+            // 没有楷体时退回宋体
+            "Songti SC",
+            "STSong",
+            "SimSun",
+            "NSimSun",
+            "Noto Serif CJK SC",
+            "Source Han Serif SC",
+            "Noto Serif SC",
+            "PingFang SC",
+            "Microsoft YaHei",
+            "Noto Sans CJK SC",
+            "Source Han Sans SC",
+            "WenQuanYi Micro Hei",
+        ],
         FontFamily::Mono => &[
             "Menlo",
             "Consolas",
@@ -100,6 +130,10 @@ pub fn docx_fonts(family: FontFamily) -> DocxFonts {
         FontFamily::Sans => DocxFonts {
             latin: "Arial",
             east_asia: "SimHei",
+        },
+        FontFamily::Kai => DocxFonts {
+            latin: "Times New Roman",
+            east_asia: "KaiTi",
         },
         FontFamily::Mono => DocxFonts {
             latin: "Consolas",

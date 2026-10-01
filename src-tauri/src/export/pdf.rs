@@ -1643,6 +1643,38 @@ mod tests {
     }
 
     #[test]
+    fn quotes_use_kai_and_fall_back_to_serif() {
+        use crate::export::pdf_layout::FontChoice;
+        let book = system_fonts().book();
+        // 本机有楷体时中文用楷体；没有时退回宋体类，不缺字。
+        let kai: Vec<&str> = ["kaiti sc", "stkaiti", "kaiti", "ar pl ukai cn"]
+            .into_iter()
+            .filter(|name| book.contains_family(name))
+            .collect();
+        let document = build(&request("", &[("a", vec![1], "章", "正文\n\n> 引用文字")]));
+        for body_font in [FontChoice::Serif, FontChoice::Sans] {
+            let layout = PdfLayout {
+                body_font,
+                ..PdfLayout::default()
+            };
+            let families: Vec<String> = placed(&layout_with(&document, layout))
+                .into_iter()
+                .filter_map(|p| match p {
+                    Placed::Text { family, text, .. } if text.contains("引用") => Some(family),
+                    _ => None,
+                })
+                .collect();
+            assert!(!families.is_empty());
+            for family in &families {
+                assert!(in_family(family, FontFamily::Kai), "quote font {family}");
+                if !kai.is_empty() {
+                    assert!(kai.contains(&family.as_str()), "quote font {family}, available Kai {kai:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn body_font_size_line_height_and_paragraph_spacing() {
         use crate::export::pdf_layout::{BodySize, FontChoice, LineHeight};
         let layout: PdfLayout = serde_json::from_value(serde_json::json!({

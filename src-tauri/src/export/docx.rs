@@ -1222,6 +1222,10 @@ mod tests {
                 .replace("heading 7", "x")
                 .replace("w:val=\"6\"", "L")
         );
+        // 引用：楷体，西文沿用衬线。
+        let quote = style_xml(&styles, "Quote");
+        assert!(quote.contains(r#"w:eastAsia="KaiTi""#), "{quote}");
+        assert!(quote.contains(r#"w:ascii="Times New Roman""#));
         // 图注：内置 Caption（名称 caption），居中。
         let caption = style_xml(&styles, "Caption");
         assert!(caption.contains(r#"w:val="caption""#), "{caption}");
