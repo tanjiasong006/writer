@@ -65,6 +65,9 @@ export interface DocumentOutput {
     targetPath: string,
     pdfLayout: PdfLayout,
   ): Promise<OutputResult<ExportReport>>
+
+  /** 按 pdfLayout 排版 request，返回前几页的 SVG（PDF 样张）。不写任何文件。 */
+  previewPdf(projectPath: string, request: RenderRequest, pdfLayout: PdfLayout): Promise<OutputResult<readonly string[]>>
 }
 
 /** 导出当前文档；内容与 PDF 排版配置取自同一时刻。 */
@@ -78,6 +81,43 @@ export function exportDocument(
 ): Promise<OutputResult<ExportReport>> {
   const request = buildRenderRequest(document)
   return output.exportDocument(projectPath, request, format, targetPath, resolvePdfLayout(pdfLayout))
+}
+
+/** PDF 样张最多取的一级章节数。 */
+const SAMPLE_TOP_CHAPTERS = 2
+/** PDF 样张的正文字数上限：足够排出样张显示的几页，排版耗时与文档长度无关。 */
+const SAMPLE_MARKDOWN_LENGTH = 12000
+
+/**
+ * 排版设置中的 PDF 样张（docs/pdf-layout.md 第 5 节）：取文档开头（前两个一级章节，正文总长有上限），
+ * 内容在打开设置时捕获一次，之后按每次的排版配置重新排版。目录与页码只反映样张内容。
+ */
+export function createPdfPreview(
+  output: DocumentOutput,
+  projectPath: string,
+  document: WriterDocument,
+): (settings: PdfLayoutSettings) => Promise<OutputResult<readonly string[]>> {
+  const request = buildPdfSample(buildRenderRequest(document))
+  return (settings) => output.previewPdf(projectPath, request, resolvePdfLayout(settings))
+}
+
+export function buildPdfSample(request: RenderRequest): RenderRequest {
+  const chapters: RenderChapter[] = []
+  let topChapters = 0
+  let budget = SAMPLE_MARKDOWN_LENGTH
+  for (const chapter of request.chapters) {
+    if (chapter.number.length === 1 && ++topChapters > SAMPLE_TOP_CHAPTERS) break
+    if (chapter.markdown.length <= budget) {
+      budget -= chapter.markdown.length
+      chapters.push(chapter)
+      continue
+    }
+    // 超出上限：在段落边界截断（整段都超出时直接截断），之后不再取章节。
+    const cut = chapter.markdown.lastIndexOf('\n\n', budget)
+    chapters.push({ ...chapter, markdown: chapter.markdown.slice(0, cut > 0 ? cut : budget) })
+    break
+  }
+  return { ...request, chapters }
 }
 
 /** 按章节树先序（即阅读顺序）展开文档。 */

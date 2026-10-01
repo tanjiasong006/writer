@@ -53,3 +53,13 @@ test('Rust 返回的结构化错误原样传递，未知错误归为 unknown', a
     error: { code: 'unknown', message: 'boom' },
   })
 })
+
+test('PDF 样张：携带排版配置，返回各页 SVG', async () => {
+  invokeMock.mockResolvedValue(['<svg/>', 1, '<svg/>'])
+  const output = createTauriDocumentOutput()
+  expect(await output.previewPdf('/p', request, layout)).toEqual({ ok: true, value: ['<svg/>', '<svg/>'] })
+  expect(invokeMock).toHaveBeenCalledWith('preview_pdf', { path: '/p', document: request, layout })
+
+  invokeMock.mockRejectedValue({ code: 'no-cjk-font' })
+  expect(await output.previewPdf('/p', request, layout)).toEqual({ ok: false, error: { code: 'no-cjk-font' } })
+})

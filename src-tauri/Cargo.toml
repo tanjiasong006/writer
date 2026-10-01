@@ -29,6 +29,7 @@ typst = "0.15"
 typst-pdf = "0.15"
 typst-kit = { version = "0.15", default-features = false, features = ["scan-fonts", "embedded-fonts"] }
 typst-layout = "0.15"
+typst-svg = "0.15"
 comemo = "0.5"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 

@@ -34,6 +34,7 @@ pub fn run() {
             commands::project_import_asset,
             commands::export_docx,
             commands::export_pdf,
+            commands::preview_pdf,
             commands::reveal_in_file_manager,
         ])
         .build(context)

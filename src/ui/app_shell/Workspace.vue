@@ -7,7 +7,7 @@ import { findChapter } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { hasContent } from '../../domain/document/document.ts'
 import type { PdfLayoutSettings } from '../../domain/pdf_layout/pdf_layout.ts'
-import { exportDocument } from '../../application/document_output.ts'
+import { createPdfPreview, exportDocument } from '../../application/document_output.ts'
 import ChapterManager from '../chapter_tree/ChapterManager.vue'
 import SaveStatus from './SaveStatus.vue'
 import DocumentInfoDialog from './DocumentInfoDialog.vue'
@@ -73,6 +73,10 @@ const documentTitle = ref<InstanceType<typeof DocumentTitle> | null>(null)
 const editingInfo = ref(false)
 /** PDF 排版设置：从导出 PDF 进入时完成后继续导出；从菜单进入时只保存设置。 */
 const layoutDialog = ref<'export' | 'save' | null>(null)
+/** 排版设置中的样张：打开设置时捕获一次当前内容（对话框是模态的，期间内容不变）。 */
+const layoutPreview = computed(() =>
+  layoutDialog.value ? createPdfPreview(output, props.session.path, document.value) : null,
+)
 const reader = ref<InstanceType<typeof DocumentReader> | null>(null)
 
 const { selectedId, collapsedIds } = useUiState(shell, props.session.path, () => document.value.tree)
@@ -673,9 +677,10 @@ async function createFirstChapter(): Promise<void> {
     />
 
     <PdfLayoutDialog
-      v-if="layoutDialog"
+      v-if="layoutDialog && layoutPreview"
       :settings="session.pdfLayout"
       :action="layoutDialog"
+      :preview="layoutPreview"
       @submit="finishLayout"
       @cancel="layoutDialog = null"
     />

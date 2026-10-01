@@ -9,11 +9,12 @@ import {
   type PdfLayoutKey,
   type PdfLayoutSettings,
 } from '../../domain/pdf_layout/pdf_layout.ts'
+import type { OutputResult } from '../../application/document_output.ts'
 import SegmentedControl from '../common/SegmentedControl.vue'
-import PdfLayoutSchematic from './PdfLayoutSchematic.vue'
+import PdfLayoutPreview from './PdfLayoutPreview.vue'
 
 /**
- * PDF 排版设置（docs/pdf-layout.md 第 4 节）：文档级的少量分档选项，旁边是随设置变化的页面示意。
+ * PDF 排版设置（docs/pdf-layout.md 第 4 节）：文档级的少量分档选项，旁边是随设置即时重新排版的样张。
  *
  * - 修改先作用于草稿：完成（或导出）时提交，取消 / Esc 放弃。"恢复默认"清空全部改动。
  * - action 为 export 时主按钮是"导出…"（从导出 PDF 进入），否则是"完成"（从菜单进入）。
@@ -23,6 +24,8 @@ import PdfLayoutSchematic from './PdfLayoutSchematic.vue'
 const props = defineProps<{
   settings: PdfLayoutSettings
   action: 'export' | 'save'
+  /** 按草稿设置生成样张（各页 SVG）。 */
+  preview: (settings: PdfLayoutSettings) => Promise<OutputResult<readonly string[]>>
 }>()
 
 const emit = defineEmits<{
@@ -33,6 +36,8 @@ const emit = defineEmits<{
 const draft = shallowRef(props.settings)
 const layout = computed(() => resolvePdfLayout(draft.value))
 const dialog = ref<HTMLElement | null>(null)
+/** 样张全尺寸查看打开时，按键由查看层处理。 */
+const viewerOpen = ref(false)
 let previousFocus: HTMLElement | null = null
 
 function set<K extends PdfLayoutKey>(key: K, value: PdfLayout[K]): void {
@@ -72,6 +77,7 @@ function submit(): void {
  * 按键也不落到正文、章节树或全局快捷键上。
  */
 function onKeydown(event: KeyboardEvent): void {
+  if (viewerOpen.value) return
   if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
@@ -125,7 +131,12 @@ onBeforeUnmount(() => {
       <p id="pdf-layout-text" class="pdf-layout__text">随文档保存，每次导出 PDF 时使用。</p>
 
       <div class="pdf-layout__body">
-        <PdfLayoutSchematic class="pdf-layout__schematic" :layout="layout" />
+        <PdfLayoutPreview
+          class="pdf-layout__preview"
+          :settings="draft"
+          :preview="preview"
+          @viewer="viewerOpen = $event"
+        />
 
         <div class="pdf-layout__options">
           <section class="pdf-layout__group" aria-labelledby="pdf-layout-page">
@@ -324,7 +335,7 @@ onBeforeUnmount(() => {
 .pdf-layout {
   display: flex;
   flex-direction: column;
-  width: 640px;
+  width: 720px;
   max-width: 100%;
   max-height: 100%;
   box-sizing: border-box;
@@ -359,7 +370,7 @@ onBeforeUnmount(() => {
   color: var(--color-text-secondary);
 }
 
-/* 示意在左，选项在右；窗口较矮时只有选项滚动，示意保持可见。 */
+/* 样张在左，选项在右；对话框高度由选项决定，样张与选项各自滚动。 */
 .pdf-layout__body {
   display: flex;
   gap: var(--space-8);
@@ -367,10 +378,9 @@ onBeforeUnmount(() => {
   margin-bottom: var(--space-7);
 }
 
-.pdf-layout__schematic {
+.pdf-layout__preview {
   flex: none;
-  width: 184px;
-  padding-top: var(--space-6);
+  width: 264px;
 }
 
 .pdf-layout__options {

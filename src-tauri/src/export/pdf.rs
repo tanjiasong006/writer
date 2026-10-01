@@ -110,6 +110,30 @@ pub fn export(
     result
 }
 
+/// 排版设置中的样张最多显示的页数。
+const PREVIEW_MAX_PAGES: usize = 8;
+
+/// 样张：与导出相同的排版，前若干页渲染为 SVG（排版设置中显示，docs/pdf-layout.md 第 5 节）。
+/// 内容由调用方取文档开头的一部分，这里只限制返回的页数。
+pub fn preview(
+    document: &Document,
+    project_root: &Path,
+    fonts: &'static FontStore,
+    pdf_layout: &PdfLayout,
+) -> Result<Vec<String>, ExportError> {
+    let result = layout(document, project_root, fonts, pdf_layout).map(|(paged, _)| {
+        let options = typst_svg::SvgOptions::default();
+        paged
+            .pages()
+            .iter()
+            .take(PREVIEW_MAX_PAGES)
+            .map(|page| typst_svg::svg(page, &options))
+            .collect()
+    });
+    comemo::evict(0);
+    result
+}
+
 fn render_failed(errors: &[typst::diag::SourceDiagnostic]) -> ExportError {
     let message = errors
         .iter()
@@ -1506,6 +1530,19 @@ mod tests {
     }
 
     #[test]
+    fn preview_renders_at_most_the_first_pages_as_svg() {
+        use crate::export::pdf_layout::Paper;
+        let dir = project();
+        let long = "很长的正文用于跨页。".repeat(3000);
+        let document = build(&request("样张", &[("a", vec![1], "第一章节", &long)]));
+        let layout = PdfLayout { paper: Paper::A5, ..PdfLayout::default() };
+        let pages = preview(&document, dir.path(), system_fonts(), &layout).unwrap();
+        assert_eq!(pages.len(), PREVIEW_MAX_PAGES);
+        // A5：148mm × 210mm。
+        assert!(pages[0].starts_with("<svg") && pages[0].contains("viewBox=\"0 0 419.5"), "{}", &pages[0][..200]);
+    }
+
+    #[test]
     fn cover_contents_and_chapters_each_start_a_page() {
         let dir = project();
         let long = "很长的正文用于跨页。".repeat(400);
@@ -2263,4 +2300,3 @@ fn sample_layout() -> PdfLayout {
     }
     serde_json::from_value(layout).expect("valid layout")
 }
-

@@ -193,6 +193,11 @@ test('导出 PDF：先打开排版设置；修改后按"导出…"保存设置�
   await flushPromises()
   expect(dialog().exists()).toBe(true)
   await choose('纸张', 'B5')
+  await flushPromises()
+  // 样张取当前文档开头，按草稿设置重新排版。
+  expect(services.output.previews.map((p) => p.pdfLayout.paper)).toEqual(['a4', 'b5'])
+  expect(services.output.previews[0].request.title).toBe('毕业论文')
+  expect(dialog().findAll('.preview__page')).toHaveLength(1)
   await button(wrapper, '取消').trigger('click')
   await flushPromises()
   expect(dialog().exists()).toBe(false)

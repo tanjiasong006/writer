@@ -199,3 +199,22 @@ pub async fn export_pdf(
         message: error.to_string(),
     })?
 }
+
+/// PDF 样张：按排版配置排版文档开头的一部分，返回前几页的 SVG。不写任何文件。
+#[tauri::command]
+pub async fn preview_pdf(
+    app: tauri::AppHandle,
+    path: PathBuf,
+    document: RenderRequest,
+    layout: PdfLayout,
+) -> Result<Vec<String>, ExportError> {
+    let resource_dir = app.path().resource_dir().ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        let fonts = export::pdf::font_store(resource_dir.as_deref());
+        export::pdf::preview(&render::build(&document), &path, fonts, &layout)
+    })
+    .await
+    .map_err(|error| ExportError::RenderFailed {
+        message: error.to_string(),
+    })?
+}

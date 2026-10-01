@@ -9,7 +9,8 @@ afterEach(() => {
 })
 
 async function render(settings: PdfLayoutSettings = {}, action: 'export' | 'save' = 'export') {
-  const wrapper = mount(PdfLayoutDialog, { props: { settings, action }, attachTo: document.body })
+  const preview = async () => ({ ok: true as const, value: ['<svg/>'] })
+  const wrapper = mount(PdfLayoutDialog, { props: { settings, action, preview }, attachTo: document.body })
   mounted.push(wrapper)
   await flushPromises()
   return wrapper
@@ -81,4 +82,26 @@ test('键盘：Esc 取消；焦点在复选框上时 Enter 等同主按钮；Tab
   expect(document.activeElement?.textContent?.trim()).toBe('A4')
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true }))
   expect(document.activeElement).toBe(primary)
+})
+
+test('样张全尺寸查看：Esc 只关闭查看层，Enter 不提交；关闭按钮同样回到设置', async () => {
+  const wrapper = await render()
+  await wrapper.find('.preview__page').trigger('click')
+  await flushPromises()
+  expect(document.querySelector('.viewer')).not.toBeNull()
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  await flushPromises()
+  expect(document.querySelector('.viewer')).toBeNull()
+  expect(wrapper.emitted('cancel')).toBeUndefined()
+  expect(wrapper.emitted('submit')).toBeUndefined()
+
+  await wrapper.find('.preview__page').trigger('click')
+  await flushPromises()
+  ;(document.querySelector('[aria-label="关闭样张"]') as HTMLButtonElement).click()
+  await flushPromises()
+  expect(document.querySelector('.viewer')).toBeNull()
+  // 回到设置后按键照常：Esc 取消。
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  expect(wrapper.emitted('cancel')).toHaveLength(1)
 })

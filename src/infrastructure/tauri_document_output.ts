@@ -22,6 +22,16 @@ export function createTauriDocumentOutput(): DocumentOutput {
         : []
       return { ok: true, value: { missingImages: missing } }
     },
+    async previewPdf(projectPath, request, pdfLayout) {
+      const result = await call(() =>
+        invoke<unknown>('preview_pdf', { path: projectPath, document: request, layout: pdfLayout }),
+      )
+      if (!result.ok) return result
+      const pages = Array.isArray(result.value)
+        ? result.value.filter((page): page is string => typeof page === 'string')
+        : []
+      return { ok: true, value: pages }
+    },
   }
 }
 
