@@ -43,6 +43,8 @@
   /* 交互填充：hover 弱于 selected，pressed 介于二者之间。 */
   --color-fill-hover: rgba(0, 0, 0, 0.045);
   --color-fill-pressed: rgba(0, 0, 0, 0.08);
+  /* 分段控件中选中的一段：像抬起的按钮。 */
+  --color-control-selected: #ffffff;
 
   /* 强调色：只用于"当前"与"焦点"，不做大面积装饰。 */
   --color-accent: #2f66d0;
@@ -154,6 +156,7 @@
 
     --color-fill-hover: rgba(255, 255, 255, 0.055);
     --color-fill-pressed: rgba(255, 255, 255, 0.1);
+    --color-control-selected: rgba(255, 255, 255, 0.16);
 
     --color-accent: #3b78de;
     --color-accent-hover: #4a86e8;

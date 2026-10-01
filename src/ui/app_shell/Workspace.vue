@@ -6,10 +6,12 @@ import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { findChapter } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import { hasContent } from '../../domain/document/document.ts'
+import type { PdfLayoutSettings } from '../../domain/pdf_layout/pdf_layout.ts'
 import { exportDocument } from '../../application/document_output.ts'
 import ChapterManager from '../chapter_tree/ChapterManager.vue'
 import SaveStatus from './SaveStatus.vue'
 import DocumentInfoDialog from './DocumentInfoDialog.vue'
+import PdfLayoutDialog from './PdfLayoutDialog.vue'
 import DocumentTitle from './DocumentTitle.vue'
 import ChapterEditor from '../editor/ChapterEditor.vue'
 import DocumentReader, { type ReadingPosition } from '../reader/DocumentReader.vue'
@@ -69,6 +71,8 @@ const chapters = ref<InstanceType<typeof ChapterManager> | null>(null)
 const documentTitle = ref<InstanceType<typeof DocumentTitle> | null>(null)
 /** 文档信息对话框是否打开。 */
 const editingInfo = ref(false)
+/** PDF 排版设置：从导出 PDF 进入时完成后继续导出；从菜单进入时只保存设置。 */
+const layoutDialog = ref<'export' | 'save' | null>(null)
 const reader = ref<InstanceType<typeof DocumentReader> | null>(null)
 
 const { selectedId, collapsedIds } = useUiState(shell, props.session.path, () => document.value.tree)
@@ -132,7 +136,20 @@ const EXPORT_ITEMS: readonly MenuEntry[] = [
 async function openExportMenu(event: MouseEvent): Promise<void> {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   const chosen = await showButtonMenu('export', EXPORT_ITEMS, { rect, align: 'end' }, event.detail === 0)
-  if (chosen === 'docx' || chosen === 'pdf') void exportAs(chosen)
+  if (chosen === 'docx') void exportAs('docx')
+  else if (chosen === 'pdf') {
+    // 等菜单关闭、焦点回到导出按钮后再打开：对话框关闭时把焦点还到这里。
+    await nextTick()
+    layoutDialog.value = 'export'
+  }
+}
+
+/** PDF 排版设置完成：保存设置；从导出 PDF 进入时接着选择保存位置并导出。 */
+function finishLayout(settings: PdfLayoutSettings): void {
+  const action = layoutDialog.value
+  props.session.setPdfLayout(settings)
+  layoutDialog.value = null
+  if (action === 'export') void exportAs('pdf')
 }
 
 /** 插入图片：选择文件 → 复制进项目 assets/ → 在发起请求的章节中插入引用。 */
@@ -349,7 +366,10 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
           void exportAs('docx')
           return
         case 'export-pdf':
-          void exportAs('pdf')
+          layoutDialog.value = 'export'
+          return
+        case 'pdf-layout':
+          layoutDialog.value = 'save'
           return
       }
       return
@@ -650,6 +670,14 @@ async function createFirstChapter(): Promise<void> {
       :keyboard="menu.current.value.keyboard"
       @select="menu.select"
       @close="menu.close"
+    />
+
+    <PdfLayoutDialog
+      v-if="layoutDialog"
+      :settings="session.pdfLayout"
+      :action="layoutDialog"
+      @submit="finishLayout"
+      @cancel="layoutDialog = null"
     />
 
     <DocumentInfoDialog

@@ -97,6 +97,15 @@ export async function renameDocument(wrapper: VueWrapper, title: string) {
   await flushPromises()
 }
 
+/** 经工具栏的导出菜单导出 PDF：打开排版设置，按"导出…"后选择保存位置并导出。 */
+export async function exportPdf(wrapper: VueWrapper) {
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出为 PDF…').trigger('click')
+  await flushPromises()
+  await button(wrapper, '导出…').trigger('click')
+  await flushPromises()
+}
+
 /** 工具栏中的文档名（显示文字）。 */
 export function documentTitle(wrapper: VueWrapper): string {
   return wrapper.find('.document-title__text').text()

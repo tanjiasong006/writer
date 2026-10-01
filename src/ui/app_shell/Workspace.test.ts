@@ -19,6 +19,7 @@ import {
   rowTexts,
   menuItem,
   documentMenu,
+  exportPdf,
   saveState,
   renameDocument,
   documentTitle,
@@ -167,12 +168,77 @@ test('导出 PDF：携带项目中保存的排版配置（与默认值合并后�
   const wrapper = await mountApp(services)
   await flushPromises()
 
-  await button(wrapper, '导出').trigger('click')
-  await button(wrapper, '导出为 PDF…').trigger('click')
-  await flushPromises()
+  await exportPdf(wrapper)
 
   expect(services.output.exports).toHaveLength(1)
   expect(services.output.exports[0].pdfLayout).toEqual({ ...DEFAULT_PDF_LAYOUT, toc: false, paper: 'b5' })
+})
+
+test('导出 PDF：先打开排版设置；修改后按"导出…"保存设置并按新设置导出；取消则不导出也不修改', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.exportPath = '/导出/毕业论文.pdf'
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  const dialog = () => wrapper.find('.pdf-layout')
+  const choose = (label: string, option: string) =>
+    dialog()
+      .find(`[role="radiogroup"][aria-label="${label}"]`)
+      .findAll('[role="radio"]')
+      .find((radio) => radio.text() === option)!
+      .trigger('click')
+
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出为 PDF…').trigger('click')
+  await flushPromises()
+  expect(dialog().exists()).toBe(true)
+  await choose('纸张', 'B5')
+  await button(wrapper, '取消').trigger('click')
+  await flushPromises()
+  expect(dialog().exists()).toBe(false)
+  expect(services.output.exports).toHaveLength(0)
+  expect(saveState(wrapper)).not.toBe('dirty')
+
+  await button(wrapper, '导出').trigger('click')
+  await button(wrapper, '导出为 PDF…').trigger('click')
+  await flushPromises()
+  await choose('纸张', 'B5')
+  await button(wrapper, '导出…').trigger('click')
+  await flushPromises()
+  expect(dialog().exists()).toBe(false)
+  expect(services.output.exports).toHaveLength(1)
+  expect(services.output.exports[0].pdfLayout.paper).toBe('b5')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ...MOD }))
+  await flushPromises()
+  expect(services.storage.committedPdfLayout(PATH)).toEqual({ paper: 'b5' })
+})
+
+test('菜单栏"PDF 排版设置…"：完成后只保存设置，不导出；"导出为 PDF…"同样先打开设置', async () => {
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.enableAppMenu()
+  const wrapper = await mountApp(services)
+  await flushPromises()
+
+  expect(appMenuItem(services, 'file:pdf-layout').label).toBe('PDF 排版设置…')
+  services.shell.chooseMenuItem('file:pdf-layout')
+  await flushPromises()
+  const cover = wrapper.findAll('.pdf-layout label').find((label) => label.text() === '封面')!.find('input')
+  await cover.setValue(false)
+  await button(wrapper, '完成').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.pdf-layout').exists()).toBe(false)
+  expect(services.output.exports).toHaveLength(0)
+  expect(saveState(wrapper)).toBe('dirty')
+  services.shell.chooseMenuItem('file:save')
+  await flushPromises()
+  expect(services.storage.committedPdfLayout(PATH)).toEqual({ cover: false })
+
+  services.shell.chooseMenuItem('file:export-pdf')
+  await flushPromises()
+  expect(wrapper.find('.pdf-layout').exists()).toBe(true)
+  const selected = wrapper.findAll('.pdf-layout label').find((label) => label.text() === '封面')!.find('input')
+  expect((selected.element as HTMLInputElement).checked).toBe(false)
 })
 
 test('文档信息：从文档名菜单打开，Enter 完成后保存副标题与作者；Esc 放弃，焦点回到原处', async () => {
@@ -465,9 +531,7 @@ test('没有文档样式与图片布局入口；导出请求只携带内容与�
   expect(wrapper.find('[aria-label="图片布局"]').exists()).toBe(false)
   expect(saveState(wrapper)).not.toBe('dirty')
 
-  await button(wrapper, '导出').trigger('click')
-  await button(wrapper, '导出为 PDF…').trigger('click')
-  await flushPromises()
+  await exportPdf(wrapper)
   const { request } = services.output.exports[0]
   expect(Object.keys(request).sort()).toEqual(['author', 'chapters', 'subtitle', 'title'])
   expect(request.chapters[0].markdown).toBe('![装置](../assets/装置.png)\n')
@@ -502,22 +566,16 @@ test('导出：取消选择位置不导出；失败时显示原因；图片缺�
   const wrapper = await mountApp(services)
   await flushPromises()
 
-  await button(wrapper, '导出').trigger('click')
-  await button(wrapper, '导出为 PDF…').trigger('click')
-  await flushPromises()
+  await exportPdf(wrapper)
   expect(services.output.exports).toHaveLength(0)
 
   services.shell.exportPath = '/导出/a.pdf'
   services.output.failNext({ code: 'no-cjk-font' })
-  await button(wrapper, '导出').trigger('click')
-  await button(wrapper, '导出为 PDF…').trigger('click')
-  await flushPromises()
+  await exportPdf(wrapper)
   expect(wrapper.find('.workspace__error').text()).toContain('中文的字体')
 
   services.output.missingImages = ['../assets/丢失.png']
-  await button(wrapper, '导出').trigger('click')
-  await button(wrapper, '导出为 PDF…').trigger('click')
-  await flushPromises()
+  await exportPdf(wrapper)
   expect(wrapper.find('.workspace__notice').text()).toContain('1 张图片无法嵌入')
 })
 
