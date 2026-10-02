@@ -1,10 +1,15 @@
 import { expect, test } from 'vitest'
 import type { ImageResolver } from '../editor/image_view.ts'
 import { renderChapterBody } from './chapter_body.ts'
+import { chapterRefLabels, type ChapterRefLabel } from '../editor/chapter_ref_view.ts'
 
-function render(text: string, resolve: ImageResolver = (reference) => `asset://${reference}`): HTMLElement {
+function render(
+  text: string,
+  resolve: ImageResolver = (reference) => `asset://${reference}`,
+  refLabel: ChapterRefLabel = () => null,
+): HTMLElement {
   const container = document.createElement('div')
-  container.append(renderChapterBody(text, resolve))
+  container.append(renderChapterBody(text, resolve, refLabel))
   return container
 }
 
@@ -50,4 +55,16 @@ test('识别不出语言的代码块原样显示', () => {
   const body = render('```\n样本 A → 样本 B\n```\n')
   expect(body.querySelector('pre > code')!.innerHTML).toBe('样本 A → 样本 B')
   expect(body.querySelector('pre')!.hasAttribute('data-language')).toBe(false)
+})
+
+test('章节引用按章节树生成文字；失效时显示链接文字并标记', () => {
+  const tree = [{ id: 'a', title: '方法', children: [{ id: 'b', title: '数据', children: [] }] }]
+  const body = render(
+    '见[旧](writer:chapter/b)与[旧](writer:chapter/a?show=title)，[原来的目标](writer:chapter/x)。\n',
+    undefined,
+    chapterRefLabels(tree),
+  )
+  const refs = [...body.querySelectorAll('.chapter-ref')]
+  expect(refs.map((ref) => ref.textContent)).toEqual(['1.1 数据', '方法', '原来的目标'])
+  expect(refs.map((ref) => ref.classList.contains('is-broken'))).toEqual([false, false, true])
 })

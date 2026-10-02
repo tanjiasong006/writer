@@ -14,6 +14,7 @@ import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import { useMenu } from '../common/use_menu.ts'
 import { editSelectedCaption, figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
+import { NO_CHAPTER_REFS, chapterRefNodeViews, type ChapterRefLabel } from './chapter_ref_view.ts'
 import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from './editor_theme.ts'
 import { topBlock, type BlockPosition } from './block_position.ts'
 import './document_body.css'
@@ -29,6 +30,7 @@ import './document_body.css'
  *   不进入撤销历史、不重建视图，也不读取项目数据。
  * - 图片按统一规则适应编辑区域，没有单张图片的尺寸 / 对齐设置；图片的插入、选择、删除属于正文编辑。
  *   独立成段的图片下方显示并编辑图注（image_view.ts），图注文本框中的按键与右键不交给正文。
+ * - 章节引用的文字按 refLabel（当前章节树）显示与写出；refLabel 变化只更新显示，不产生 change。
  * - 编辑器自己没有工具栏：命令的可用 / 勾选状态以 tools 发出，由工作区的工具栏与菜单栏显示，
  *   它们通过 runCommand 执行命令。右键菜单列出与点击处相关的操作。
  */
@@ -40,6 +42,8 @@ const props = defineProps<{
   title: string
   /** 正文中图片引用的显示地址；不提供时图片显示为占位。 */
   resolveImage?: ImageResolver
+  /** 章节引用的文字（按当前章节树生成）；不提供时引用显示为失效。 */
+  refLabel?: ChapterRefLabel
 }>()
 
 const emit = defineEmits<{
@@ -62,6 +66,15 @@ const depth = computed(() => Math.max(1, props.number.split('.').filter(Boolean)
 const themeStyle = computed(() => ({ ...THEME_VARS, ...editorHeadingVars(depth.value) }))
 
 const documents = new ChapterDocuments()
+documents.refLabel = props.refLabel ?? NO_CHAPTER_REFS
+const chapterRefs = chapterRefNodeViews(documents.refLabel)
+watch(
+  () => props.refLabel,
+  (label) => {
+    documents.refLabel = label ?? NO_CHAPTER_REFS
+    chapterRefs.setLabel(documents.refLabel)
+  },
+)
 /** 每个章节离开时的滚动位置；回到该章节时恢复，继续在原处写作。 */
 const scrolls = new Map<ChapterId, number>()
 let view: EditorView | null = null
@@ -105,7 +118,11 @@ onMounted(() => {
     dispatchTransaction,
     scrollThreshold: CARET_MARGIN,
     scrollMargin: CARET_MARGIN,
-    nodeViews: { image: imageNodeView(resolveImage), figure: figureNodeView(resolveImage) },
+    nodeViews: {
+      image: imageNodeView(resolveImage),
+      figure: figureNodeView(resolveImage),
+      chapter_ref: chapterRefs.nodeView,
+    },
     attributes: { class: 'chapter-editor__content document-body', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '正文' },
   })
   showState(state)
@@ -534,6 +551,19 @@ defineExpose({
 .chapter-editor__body :deep(.editor-figure__caption-input) {
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* 章节引用是一个整体：不可文字选择，单击整体选中，选中时与选中的文字同样着色。 */
+.chapter-editor__body :deep(.chapter-ref) {
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+.chapter-editor__body :deep(.chapter-ref.ProseMirror-selectednode) {
+  outline: none;
+  border-radius: 2px;
+  background: var(--color-doc-selection);
 }
 
 /* 选中的图片只在图片本身外画一个框（不用 ProseMirror 默认画在外层容器上的框）。 */

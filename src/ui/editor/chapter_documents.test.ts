@@ -67,3 +67,15 @@ test('没有打开的章节不能记录状态', () => {
   const state = documents.stateFor('a', 'A')
   expect(() => documents.update('b', state)).toThrow()
 })
+
+test('章节引用：写出时链接文字是当前生成的文字；只有编辑才写出，失效引用保留原来的链接文字', () => {
+  const documents = new ChapterDocuments()
+  const original = '见[旧编号](writer:chapter/a)与[原目标](writer:chapter/gone)'
+  const state = documents.stateFor('c', original)
+  documents.refLabel = (href) => (href === 'writer:chapter/a' ? '2.1 方法' : null)
+  // 只是章节树变化：没有新的正文。
+  expect(documents.isCurrent('c', original)).toBe(true)
+  expect(documents.update('c', typeAtEnd(state, '。'))).toBe(
+    '见[2.1 方法](writer:chapter/a)与[原目标](writer:chapter/gone)。',
+  )
+})

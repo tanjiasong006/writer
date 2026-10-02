@@ -8,6 +8,7 @@ import {
 } from 'prosemirror-markdown'
 import { marks, nodes, schema } from './schema.ts'
 import { parseChapterRefAddress } from '../../domain/chapter_reference/chapter_reference.ts'
+import type { ChapterRefLabel } from './chapter_ref_view.ts'
 
 /**
  * 正文持久化格式（Markdown）与编辑器文档之间的转换。
@@ -42,9 +43,16 @@ export function parseChapter(text: string): ParsedChapter {
   return { doc: parser.parse(body), format }
 }
 
-/** 把编辑器文档写成章节正文。 */
-export function serializeChapter(doc: Node, format: TextFormat = DEFAULT_FORMAT): string {
-  const markdown = serializeMarkdown(doc)
+/**
+ * 把编辑器文档写成章节正文。refLabel 给出章节引用当前的文字，写作链接文字（缓存）；
+ * 不提供或引用失效时保留原来的链接文字（docs/decisions.md 第 9 节）。
+ */
+export function serializeChapter(
+  doc: Node,
+  format: TextFormat = DEFAULT_FORMAT,
+  refLabel: ChapterRefLabel | null = null,
+): string {
+  const markdown = serializeMarkdown(doc, refLabel)
   const body = markdown.length > 0 && format.finalNewline ? `${markdown}\n` : markdown
   return (format.bom ? '\uFEFF' : '') + (format.crlf ? body.replaceAll('\n', '\r\n') : body)
 }
@@ -402,7 +410,7 @@ function serializeTable(state: MarkdownSerializerState, node: Node): void {
 /** 单元格内容按段落序列化，再转义竖线（GFM 在行内解析之前处理 \|，代码中同样适用）。 */
 function cellMarkdown(cell: Node): string {
   const paragraph = nodes.paragraph.create(null, cell.content)
-  return serializeMarkdown(nodes.doc.create(null, paragraph)).replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()
+  return serializeMarkdown(nodes.doc.create(null, paragraph), writingRefLabel).replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()
 }
 
 const baseNodes = defaultMarkdownSerializer.nodes
@@ -441,7 +449,8 @@ const serializer = new MarkdownSerializer(
       state.write(imageMarkdown(state, node))
     },
     chapter_ref(state, node) {
-      state.write(`[${state.esc(node.attrs.cached)}](${destination(node.attrs.href)})`)
+      const text = writingRefLabel?.(node.attrs.href) ?? node.attrs.cached
+      state.write(`[${state.esc(text)}](${destination(node.attrs.href)})`)
     },
     // 与只含这张图片的段落写法相同：Markdown 中没有新的语法。
     figure(state, node) {
@@ -481,11 +490,11 @@ const serializer = new MarkdownSerializer(
  * 顶层块之间与整篇序列化相同：一个空行；相邻的同类列表之间两个空行。
  * 块的写法只取决于它自身，以及它在相邻同类列表中是否使用交替标记（记在 alternateTopLevel 中）。
  */
-function serializeMarkdown(doc: Node): string {
+function serializeMarkdown(doc: Node, refLabel: ChapterRefLabel | null): string {
   let out = ''
   let previous: Node | null = null
   doc.forEach((block, _, index) => {
-    const text = serializeBlock(block, isList(block) && alternateMarker(block, doc, index))
+    const text = serializeBlock(block, isList(block) && alternateMarker(block, doc, index), refLabel)
     if (text.length === 0) return
     if (previous) out += isList(block) && previous.type === block.type ? '\n\n\n' : '\n\n'
     out += text
@@ -496,15 +505,32 @@ function serializeMarkdown(doc: Node): string {
 
 /** 单独序列化时应使用交替标记的顶层列表所在的文档。 */
 const alternateTopLevel = new WeakSet<Node>()
-const blockMarkdown = new WeakMap<Node, { readonly alternate: boolean; readonly text: string }>()
+const blockMarkdown = new WeakMap<
+  Node,
+  { readonly alternate: boolean; readonly refLabel: ChapterRefLabel | null; readonly text: string }
+>()
 
-function serializeBlock(block: Node, alternate: boolean): string {
+/**
+ * 正在写出的块中章节引用的文字（序列化是同步的，节点写法无法另传参数）。
+ * 写出前的调整（representable）不使用它：往返检查比较的是文档中保存的链接文字。
+ */
+let writingRefLabel: ChapterRefLabel | null = null
+
+function serializeBlock(block: Node, alternate: boolean, refLabel: ChapterRefLabel | null): string {
   const cached = blockMarkdown.get(block)
-  if (cached && cached.alternate === alternate) return cached.text
-  const doc = representable(nodes.doc.create(null, block))
-  if (alternate) alternateTopLevel.add(doc)
-  const text = serializer.serialize(doc).replace(/\s+$/, '')
-  blockMarkdown.set(block, { alternate, text })
+  if (cached && cached.alternate === alternate && cached.refLabel === refLabel) return cached.text
+  const outer = writingRefLabel
+  writingRefLabel = null
+  let text: string
+  try {
+    const doc = representable(nodes.doc.create(null, block))
+    if (alternate) alternateTopLevel.add(doc)
+    writingRefLabel = refLabel
+    text = serializer.serialize(doc).replace(/\s+$/, '')
+  } finally {
+    writingRefLabel = outer
+  }
+  blockMarkdown.set(block, { alternate, refLabel, text })
   return text
 }
 
@@ -698,6 +724,7 @@ function adjustEmphasis(block: Node): Node {
 export function appendImage(text: string, reference: string, alt: string): string {
   const image = serializeMarkdown(
     nodes.doc.create(null, nodes.figure.create({ src: reference, alt })),
+    null,
   )
   const lead = text.length === 0 ? '' : text.endsWith('\n\n') ? '' : text.endsWith('\n') ? '\n' : '\n\n'
   return `${text}${lead}${image}\n`

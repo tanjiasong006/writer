@@ -221,11 +221,19 @@
   font-size: 0.9em;
 }
 
-.document-body a[data-href] {
+.document-body a[data-href],
+.document-body .chapter-ref {
   color: var(--color-accent-text);
   text-decoration: underline;
   text-decoration-color: var(--color-accent-fill-strong);
   text-underline-offset: 0.18em;
+}
+
+/* 失效的章节引用：显示原来的链接文字，以警示色与虚线下划线区分。 */
+.document-body .chapter-ref.is-broken {
+  color: var(--color-danger-text);
+  text-decoration-style: dotted;
+  text-decoration-color: var(--color-danger);
 }
 
 .document-body hr {

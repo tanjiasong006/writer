@@ -565,3 +565,38 @@ test('图注：选中图片后从右键菜单进入编辑（添加 / 编辑图�
   await flushPromises()
   expect(document.activeElement).toBe(captionOf(view))
 })
+
+test('章节引用：按 refLabel 显示，refLabel 变化只更新显示；编辑后写出当前文字', async () => {
+  const content = '见[旧编号](writer:chapter/a)与[原目标](writer:chapter/gone)\n'
+  const label = (title: string) => (href: string) => (href === 'writer:chapter/a' ? `2.1 ${title}` : null)
+  const wrapper = mountEditor({ chapterId: 'c', content })
+  await wrapper.setProps({ refLabel: label('方法') })
+  const view = viewOf(wrapper)
+  const refs = () => [...view.dom.querySelectorAll('.chapter-ref')]
+  expect(refs().map((ref) => ref.textContent)).toEqual(['2.1 方法', '原目标'])
+  expect(refs().map((ref) => ref.classList.contains('is-broken'))).toEqual([false, true])
+
+  const undoBefore = undoDepth(view.state)
+  await wrapper.setProps({ refLabel: label('研究方法') })
+  expect(refs()[0]!.textContent).toBe('2.1 研究方法')
+  expect(wrapper.emitted('change')).toBeUndefined()
+  expect(undoDepth(view.state)).toBe(undoBefore)
+
+  type(view, '。')
+  expect(wrapper.emitted('change')).toEqual([
+    ['c', '见[2.1 研究方法](writer:chapter/a)与[原目标](writer:chapter/gone)。\n'],
+  ])
+})
+
+test('单击章节引用整体选中它', () => {
+  const wrapper = mountEditor({ chapterId: 'c', content: '见[2.1](writer:chapter/a)节\n' })
+  const view = viewOf(wrapper)
+  const ref = view.dom.querySelector('.chapter-ref')!
+  const event = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 })
+  ref.dispatchEvent(event)
+  expect(event.defaultPrevented).toBe(true)
+  const { selection } = view.state
+  expect(selection).toBeInstanceOf(NodeSelection)
+  expect((selection as NodeSelection).node.type.name).toBe('chapter_ref')
+  expect(ref.classList.contains('ProseMirror-selectednode')).toBe(true)
+})

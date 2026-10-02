@@ -20,6 +20,7 @@
 | `selection.ts` | 自绘选区底色：WebKit 原生底色从段落中间开始选择时第一行偏高，改为每行一整行行高、行与行首尾相接。 |
 | `figure_editing.ts` | 独立成段的图片（figure 节点）的编辑：Enter、Backspace / Delete，以及把只剩一张图片的段落转成 figure。 |
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |
+| `chapter_ref_view.ts` | 章节引用的显示：按章节树生成文字（`chapterRefLabels`）、节点视图、只读展示与单击选中。 |
 | `image_view.ts` | 图片节点视图（figure 与行内图片）：按项目资源显示，无法显示时占位；figure 下方显示并编辑图注。 |
 | `editor_theme.ts` | 编辑环境的正文展示参数（目前只有默认值）→ CSS 变量；与 Word / PDF 的输出参数无关。 |
 | `ChapterEditor.vue` | 挂载 EditorView、响应章节切换、发出 change；右键菜单。编辑器没有自己的工具栏：它发出 `tools` 供工作区与菜单显示，通过 `runCommand` 接受内容编辑命令。 |
@@ -63,6 +64,9 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
   地址解析见 `domain/chapter_reference`。节点保存原样的地址（格式错误的也保留）与链接文字（缓存）；
   写出时地址原样写回。可以带粗体等强调，按 Markdown 定界规则写出（紧挨中文等无法表达时去掉）；
   链接与行内代码无法包裹引用，写出时去掉。粘贴的 HTML 中地址是引用的链接成为引用。
+  显示的文字由 `refLabel`（`chapter_ref_view.ts`，按当前章节树生成）给出，不存进文档：refLabel 变化只更新显示，
+  不产生 change、不进入撤销历史；编辑写出时链接文字（缓存）是当时生成的文字。失效引用显示原来的链接文字并加 `is-broken`。
+  单击整体选中引用；全文阅读使用同一个 refLabel。
 - 编辑环境主题来自应用级偏好，以展示参数作用在组件上：不改变文档、不产生 change、不进入正文撤销历史、不重建视图。
   不读取项目样式，不影响 Word / PDF 输出；默认提供美观、易读的内容展示。
 - 图片按统一展示规则适应编辑区域；不提供单张图片的尺寸 / 对齐 / 位置控制，不保存局部布局状态，不发出 `image-layout`。

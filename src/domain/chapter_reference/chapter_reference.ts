@@ -48,3 +48,13 @@ function decode(encoded: string): string | null {
     return null
   }
 }
+
+/**
+ * 引用显示的文字。number 是该输出中编号的写法（如 "2.1"、"第 2 章"），不显示编号时为 null。
+ * 不显示编号时只显示标题；标题为空时只显示编号。
+ */
+export function chapterRefText(number: string | null, title: string, show: ChapterRefShow): string {
+  if (number === null) return title
+  if (title === '' || show === 'number') return number
+  return show === 'title' ? title : `${number} ${title}`
+}

@@ -6,6 +6,7 @@ import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from '../
 import { topBlock, type BlockPosition } from '../editor/block_position.ts'
 import type { ImageResolver } from '../editor/image_view.ts'
 import { renderChapterBody } from './chapter_body.ts'
+import { chapterRefLabels } from '../editor/chapter_ref_view.ts'
 import '../editor/document_body.css'
 
 /** 全文中的阅读位置：章节 + 章节中的块。 */
@@ -23,7 +24,8 @@ export interface ReadingPosition extends BlockPosition {
  * - initialPosition 与 position() 按块对齐编辑器中的位置，进入与离开时眼前的文字停在原处。
  * - 滚动区可以获得焦点：方向键、空格、Page Up / Down 直接滚动；Esc 或 Enter 结束阅读（exit），
  *   回到当前位置继续编辑。
- * - 只在正文变化的章节重新生成 DOM（阅读时通常不会变化，章节树中改名、移动时只更新标题与顺序）。
+ * - 只在正文变化的章节重新生成 DOM（阅读时通常不会变化，章节树中改名、移动时只更新标题与顺序）；
+ *   章节树变化时含章节引用的章节也重新生成（引用文字随之更新）。
  */
 const props = defineProps<{
   tree: ChapterTree
@@ -71,15 +73,24 @@ const THEME_VARS = editorThemeCssVars(DEFAULT_EDITOR_THEME)
 
 const resolve: ImageResolver = (reference) => props.resolveImage?.(reference) ?? null
 
-/** 正文 DOM：只在该章节的正文变化时重新生成。 */
+const refLabel = computed(() => chapterRefLabels(props.tree))
+
+/** 正文 DOM：只在该章节的正文变化、或章节树变化且其中有引用时重新生成。 */
 const vChapterBody: Directive<HTMLElement, string> = {
   mounted(element, { value }) {
-    element.replaceChildren(renderChapterBody(value, resolve))
+    element.replaceChildren(renderChapterBody(value, resolve, refLabel.value))
+    labels.set(element, refLabel.value)
   },
   updated(element, { value, oldValue }) {
-    if (value !== oldValue) element.replaceChildren(renderChapterBody(value, resolve))
+    const stale = labels.get(element) !== refLabel.value && element.querySelector('.chapter-ref') !== null
+    if (value === oldValue && !stale) return
+    element.replaceChildren(renderChapterBody(value, resolve, refLabel.value))
+    labels.set(element, refLabel.value)
   },
 }
+
+/** 每个正文元素生成时使用的引用文字。 */
+const labels = new WeakMap<HTMLElement, unknown>()
 
 const scroller = ref<HTMLElement | null>(null)
 

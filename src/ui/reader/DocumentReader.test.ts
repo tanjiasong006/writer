@@ -136,3 +136,13 @@ test('只有正文变化的章节重新生成；标题变化只更新标题', as
   expect(wrapper.find('.document-reader__heading').text()).toBe('1引言')
   expect(wrapper.findAll('.document-reader__body')[2].text()).toBe('改写')
 })
+
+test('章节引用的文字随章节树更新', async () => {
+  const wrapper = mountReader({ contents: new Map([['a', '见[旧](writer:chapter/b)'], ['a1', ''], ['b', '']]) })
+  const ref = () => wrapper.find('.chapter-ref').text()
+  expect(ref()).toBe('2 方法')
+  await wrapper.setProps({ tree: [tree[1]!, tree[0]!] })
+  expect(ref()).toBe('1 方法')
+  await wrapper.setProps({ tree: [{ ...tree[1]!, title: '研究方法' }, tree[0]!] })
+  expect(ref()).toBe('1 研究方法')
+})

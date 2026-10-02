@@ -16,7 +16,12 @@ parseChapterRefAddress(href: string):
   | { kind: 'ref'; id: ChapterId; show: ChapterRefShow }
 
 chapterRefAddress(id, show): string   // 规范写法，默认格式省略 ?show
+
+// 引用显示的文字。number 是该输出中编号的写法（"2.1"、"第 2 章"），不显示编号时为 null。
+chapterRefText(number: string | null, title: string, show): string
 ```
+
+- 文字规则（编辑展示、Word、PDF 相同）：不显示编号时只有标题；标题为空时只有编号；否则按显示格式。
 
 ## 不变量
 

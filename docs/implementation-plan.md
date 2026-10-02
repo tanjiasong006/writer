@@ -741,6 +741,19 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   大写协议（普通链接）、表格与任务列表中的引用。
 - 编辑器中暂以链接文字显示引用（第 2 步按章节树生成）。
 
+### 第 2 步：编辑器展示（完成，2026-10-02）
+
+- Domain `chapterRefText`：文字规则（不显示编号时只有标题；标题为空时只有编号），编辑展示与输出共用。
+- `ui/editor/chapter_ref_view.ts`：`chapterRefLabels(tree)` 生成地址 → 文字；节点视图在章节树变化时（`setLabel`）
+  直接更新显示，不经过事务；失效引用显示链接文字并加 `is-broken`（警示色、虚线下划线）。样式与正文链接相同。
+- 写出：`serializeChapter(doc, format, refLabel)` 用当前文字作为链接文字；块缓存按 refLabel 区分，
+  写出前的往返检查仍比较文档中保存的链接文字。章节树变化本身不产生新正文。
+- 单击引用整体选中（插件在 mousedown 时选中，WebKit / Chrome 默认不选中行内的不可编辑节点），选中时与选中文字同色。
+- 全文阅读：`renderChapterBody` 使用同一个 refLabel；章节树变化时只重新生成含引用的章节。
+- 验证：Domain、ChapterDocuments、ChapterEditor（只更新显示不产生 change、编辑写出当前文字、单击选中）、全文阅读测试；
+  新增 Story（编辑器 ChapterReferences，可模拟章节树变化；阅读器 Default 的“结论”一章）。
+  Storybook（Chrome）中目视检查了正常 / 失效引用、章节树变化后的更新、选中状态与全文阅读；深色外观与 Tauri（WebKit）未目视检查。
+
 ## 后续（MVP 之外，按价值排序）
 
 0. 富文本粘贴的后续能力（不是迁移回归）：识别 Word / WPS 的列表段落（目前是带 · 的普通段落）；

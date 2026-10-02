@@ -3,6 +3,7 @@ import type { EditorState } from 'prosemirror-state'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { parseChapter, serializeChapter, type TextFormat } from './markdown.ts'
 import { createEditorState } from './plugins.ts'
+import type { ChapterRefLabel } from './chapter_ref_view.ts'
 
 /**
  * 应用状态（章节正文 Markdown）与编辑器状态（每个章节一个 EditorState）之间的适配。
@@ -11,6 +12,7 @@ import { createEditorState } from './plugins.ts'
  * - 正文只在文档真正改变时重新生成；只移动光标、改变选区不产生新正文。
  * - 编辑后又回到载入时的文档（例如全部撤销），给出载入时的原文而不是重新序列化的结果：
  *   没有真正修改的章节不会被规范化（docs/decisions.md 第 2 节）。
+ * - 章节引用的链接文字（缓存）按写出时的 refLabel 生成；章节树变化本身不产生新正文（docs/decisions.md 第 9 节）。
  */
 interface Entry {
   readonly state: EditorState
@@ -22,6 +24,9 @@ interface Entry {
 
 export class ChapterDocuments {
   private readonly entries = new Map<ChapterId, Entry>()
+
+  /** 写出正文时章节引用的文字。 */
+  refLabel: ChapterRefLabel | null = null
 
   /**
    * 章节的编辑器状态。缓存的状态与正文一致时沿用（保留撤销历史），
@@ -52,7 +57,7 @@ export class ChapterDocuments {
       return null
     }
     const { baseline } = entry
-    const text = state.doc.eq(baseline.doc) ? baseline.text : serializeChapter(state.doc, baseline.format)
+    const text = state.doc.eq(baseline.doc) ? baseline.text : serializeChapter(state.doc, baseline.format, this.refLabel)
     this.entries.set(chapterId, { ...entry, state, text })
     return text === entry.text ? null : text
   }

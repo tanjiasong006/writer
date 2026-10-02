@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { chapterRefAddress, parseChapterRefAddress } from './chapter_reference.ts'
+import { chapterRefAddress, chapterRefText, parseChapterRefAddress } from './chapter_reference.ts'
 
 test('普通链接不是引用', () => {
   expect(parseChapterRefAddress('https://example.com')).toEqual({ kind: 'link' })
@@ -52,4 +52,13 @@ test('规范写法省略默认格式，并能解析回原值', () => {
       expect(parseChapterRefAddress(chapterRefAddress(id, show))).toEqual({ kind: 'ref', id, show })
     }
   }
+})
+
+test('引用文字：按显示格式；不显示编号时只有标题，标题为空时只有编号', () => {
+  expect(chapterRefText('2.1', '方法', 'number-title')).toBe('2.1 方法')
+  expect(chapterRefText('2.1', '方法', 'number')).toBe('2.1')
+  expect(chapterRefText('2.1', '方法', 'title')).toBe('方法')
+  expect(chapterRefText(null, '方法', 'number')).toBe('方法')
+  expect(chapterRefText('2.1', '', 'title')).toBe('2.1')
+  expect(chapterRefText('2.1', '', 'number-title')).toBe('2.1')
 })

@@ -23,6 +23,7 @@ import { useExport } from './use_export.ts'
 import { useFocusRegion } from './use_focus_region.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
+import { chapterRefLabels } from '../editor/chapter_ref_view.ts'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
 import Toast from '../common/Toast.vue'
@@ -241,6 +242,8 @@ function chapterHasContent(chapterId: ChapterId): boolean {
  */
 const tree = computed(() => document.value.tree)
 const numbers = computed(() => computeChapterNumbers(tree.value))
+/** 章节引用的文字：随章节树变化，编辑正文时不变。 */
+const refLabel = computed(() => chapterRefLabels(tree.value))
 
 const selectedChapter = computed(() =>
   selectedId.value === null ? null : findChapter(tree.value, selectedId.value),
@@ -610,6 +613,7 @@ async function createFirstChapter(): Promise<void> {
           :number="selectedNumber"
           :title="selectedChapter.title"
           :resolve-image="resolveImage"
+          :ref-label="refLabel"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
           @request-image="insertImage"
           @tools="showTools"

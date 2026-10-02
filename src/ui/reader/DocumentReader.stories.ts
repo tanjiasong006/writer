@@ -87,7 +87,7 @@ const contents = new Map<ChapterId, string>([
     '定量部分使用Python完成清洗与统计，缺失项超过30%的问卷直接剔除，完整的编码手册见[附录B](https://example.com)。\n\n' +
       '```python\n# 缺失项超过 30% 的问卷直接剔除\ndf = df[df.isna().mean(axis=1) <= 0.3]\nprint(f"保留 {len(df)} 份")\n```\n\n- [x] 核对问卷编号\n- [ ] 补充访谈记录\n\n---\n\n## 正文中的 Markdown 标题是普通文字\n',
   ],
-  ['c', '全文完。\n'],
+  ['c', '研究对象见[旧](writer:chapter/a1?show=number)节，方法见[旧](writer:chapter/b)；已删除章节的引用：[4 讨论](writer:chapter/gone)。\n\n全文完。\n'],
 ])
 
 const resolveImage = (reference: string) =>

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import ChapterEditor from './ChapterEditor.vue'
+import { chapterRefLabels } from './chapter_ref_view.ts'
 
 const meta = {
   title: 'UI/Editor/ChapterEditor',
@@ -221,4 +222,41 @@ export const Long: Story = {
     title: '长章节',
     content: Array.from({ length: 200 }, (_, i) => `第 ${i + 1} 段：长文档需要稳定的滚动与输入体验。`).join('\n\n'),
   },
+}
+
+/**
+ * 章节引用：文字按章节树生成（链接文字只是缓存），失效引用显示原来的文字并以警示样式区分。
+ * 点“改名并移动目标章节”模拟章节树变化：引用文字立即更新，正文不变（不产生修改）。
+ */
+export const ChapterReferences: Story = {
+  args: {
+    chapterId: 'refs',
+    number: '3',
+    title: '结果',
+    content:
+      '如[旧编号](writer:chapter/method)所述，样本见[旧](writer:chapter/data?show=number)节；' +
+      '数据处理见[旧](writer:chapter/data?show=title)。\n\n' +
+      '**[旧编号](writer:chapter/method)** 中的方法同样适用。\n\n' +
+      '被删除章节的引用：[4.2 讨论](writer:chapter/deleted)。\n',
+  },
+  render: (args) => ({
+    components: { ChapterEditor },
+    setup() {
+      const content = ref(args.content)
+      const renamed = ref(false)
+      const refLabel = computed(() => {
+        const method = { id: 'method', title: renamed.value ? '研究设计' : '研究方法', children: [{ id: 'data', title: '数据来源', children: [] }] }
+        const intro = { id: 'intro', title: '绪论', children: [] }
+        return chapterRefLabels(renamed.value ? [method, intro] : [intro, method])
+      })
+      return { args, content, renamed, refLabel, update: (_id: string, text: string) => (content.value = text) }
+    },
+    template: `
+      <div style="height: 100vh; display: flex; flex-direction: column">
+        <div style="padding: 8px 16px; font-size: 13px">
+          <button type="button" @click="renamed = !renamed">{{ renamed ? '还原章节树' : '改名并移动目标章节' }}</button>
+        </div>
+        <ChapterEditor v-bind="args" style="flex: 1" :content="content" :ref-label="refLabel" @change="update" />
+      </div>`,
+  }),
 }
