@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { TextSelection, type Command, type EditorState } from 'prosemirror-state'
+import { NodeSelection, TextSelection, type Command, type EditorState } from 'prosemirror-state'
 import { closeHistory, redo, undo } from 'prosemirror-history'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { createEditorState } from './plugins.ts'
@@ -16,6 +16,8 @@ import {
   commandState,
   editorCommands,
   setCodeLanguage,
+  insertChapterRef,
+  setChapterRefShow,
 } from './commands.ts'
 import { nodes } from './schema.ts'
 
@@ -295,5 +297,25 @@ describe('代码语言', () => {
 
   test('不在代码块中时不可用', () => {
     expect(setCodeLanguage('python')(stateOf('正文', { cursorAfter: '正' }))).toBe(false)
+  })
+})
+
+describe('章节引用', () => {
+  test('插入到光标处，替换选中的文字；代码块中不能插入', () => {
+    const inserted = run(stateOf('见本节', { select: '本节' }), insertChapterRef('writer:chapter/a', '2.1 方法'))
+    expect(markdown(inserted)).toBe('见[2.1 方法](writer:chapter/a)\n')
+    expect(insertChapterRef('writer:chapter/a', '')(stateOf('```\ncode\n```', { cursorAfter: 'co' }))).toBe(false)
+  })
+
+  test('选中引用时更换目标并保留强调；更改显示格式；地址格式错误的不能更改格式', () => {
+    let state = stateOf('**[旧](writer:chapter/a)** 之后')
+    state = state.apply(state.tr.setSelection(NodeSelection.create(state.doc, 1)))
+    const changed = run(state, insertChapterRef('writer:chapter/b?show=title', '结果'))
+    expect(markdown(changed)).toBe('**[结果](writer:chapter/b?show=title)** 之后\n')
+    expect(markdown(run(changed, setChapterRefShow('number')))).toBe('**[结果](writer:chapter/b?show=number)** 之后\n')
+
+    let broken = stateOf('[坏](writer:chapter/)')
+    broken = broken.apply(broken.tr.setSelection(NodeSelection.create(broken.doc, 1)))
+    expect(setChapterRefShow('number')(broken)).toBe(false)
   })
 })

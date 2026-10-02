@@ -5,6 +5,7 @@ import { undo, redo, undoDepth } from 'prosemirror-history'
 import type { EditorView } from 'prosemirror-view'
 import { CellSelection } from 'prosemirror-tables'
 import ChapterEditor from './ChapterEditor.vue'
+import { chapterRefLabels } from './chapter_ref_view.ts'
 import { FONT_STACKS } from './editor_theme.ts'
 import { IS_MAC } from '../common/shortcuts.ts'
 
@@ -568,7 +569,8 @@ test('图注：选中图片后从右键菜单进入编辑（添加 / 编辑图�
 
 test('章节引用：按 refLabel 显示，refLabel 变化只更新显示；编辑后写出当前文字', async () => {
   const content = '见[旧编号](writer:chapter/a)与[原目标](writer:chapter/gone)\n'
-  const label = (title: string) => (href: string) => (href === 'writer:chapter/a' ? `2.1 ${title}` : null)
+  const label = (title: string) => (href: string) =>
+    href === 'writer:chapter/a' ? { text: `2.1 ${title}`, id: 'a', name: `2.1 ${title}` } : null
   const wrapper = mountEditor({ chapterId: 'c', content })
   await wrapper.setProps({ refLabel: label('方法') })
   const view = viewOf(wrapper)
@@ -599,4 +601,78 @@ test('单击章节引用整体选中它', () => {
   expect(selection).toBeInstanceOf(NodeSelection)
   expect((selection as NodeSelection).node.type.name).toBe('chapter_ref')
   expect(ref.classList.contains('ProseMirror-selectednode')).toBe(true)
+})
+
+test('⌘K：请求选择引用目标（选中引用时带上当前目标与格式）；insertChapterRef 插入当前生成的文字', async () => {
+  const wrapper = mountEditor({ chapterId: 'c', content: '见\n' })
+  await wrapper.setProps({
+    refLabel: (href: string) => (href.startsWith('writer:chapter/a') ? { text: '2.1 方法', id: 'a', name: '2.1 方法' } : null),
+  })
+  const view = viewOf(wrapper)
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
+  ;(wrapper.vm as unknown as { runCommand(command: string): void }).runCommand('chapter-ref')
+  const [chapterId, request] = wrapper.emitted('request-chapter-ref')![0] as [string, { current: unknown }]
+  expect(chapterId).toBe('c')
+  expect(request.current).toBeNull()
+
+  const api = wrapper.vm as unknown as { insertChapterRef(chapterId: string, href: string): boolean }
+  expect(api.insertChapterRef('other', 'writer:chapter/a')).toBe(false)
+  expect(api.insertChapterRef('c', 'writer:chapter/a?show=number')).toBe(true)
+  expect(wrapper.emitted('change')!.at(-1)).toEqual(['c', '见[2.1 方法](writer:chapter/a?show=number)\n'])
+
+  view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, 2)))
+  ;(wrapper.vm as unknown as { runCommand(command: string): void }).runCommand('chapter-ref')
+  expect((wrapper.emitted('request-chapter-ref')![1] as [string, { current: unknown }])[1].current).toEqual({
+    id: 'a',
+    show: 'number',
+  })
+})
+
+test('⌘ + 单击引用前往目标章节，不改变选区；失效引用不前往', async () => {
+  const wrapper = mountEditor({ chapterId: 'c', content: '见[旧](writer:chapter/a)与[失效](writer:chapter/gone)\n' })
+  await wrapper.setProps({
+    refLabel: (href: string) => (href === 'writer:chapter/a' ? { text: '2.1 方法', id: 'a', name: '2.1 方法' } : null),
+  })
+  const view = viewOf(wrapper)
+  const selection = view.state.selection
+  const [ref, broken] = [...view.dom.querySelectorAll('.chapter-ref')]
+  const click = (target: Element) =>
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, ...(IS_MAC ? { metaKey: true } : { ctrlKey: true }) }))
+  click(broken!)
+  expect(wrapper.emitted('open-chapter')).toBeUndefined()
+  click(ref!)
+  expect(wrapper.emitted('open-chapter')).toEqual([['a']])
+  expect(view.state.selection.eq(selection)).toBe(true)
+})
+
+test('右键点在章节引用上：选中它，可以前往、更改显示格式与目标', async () => {
+  const wrapper = mountEditor({ chapterId: 'c', content: '见[旧](writer:chapter/a)节\n' })
+  await wrapper.setProps({ refLabel: chapterRefLabels([{ id: 'x', title: '', children: [] }, { id: 'a', title: '方法', children: [] }]) })
+  const view = viewOf(wrapper)
+  view.posAtCoords = () => ({ pos: 2, inside: -1 })
+  const ref = () => view.dom.querySelector('.chapter-ref')!
+  const openMenu = () => ref().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+
+  openMenu()
+  await flushPromises()
+  expect(view.state.selection).toBeInstanceOf(NodeSelection)
+  const labels = wrapper.findAll('[role="menu"] .popup-menu__label').map((label) => label.text())
+  // 界面绘制的菜单把“显示格式”子菜单展开为一组项。
+  expect(labels.slice(0, 5)).toEqual(['前往“2 方法”', '编号 + 标题', '仅编号', '仅标题', '更改目标…'])
+  await chooseFromContextMenu(wrapper, '仅编号')
+  expect(wrapper.emitted('change')!.at(-1)![1]).toBe('见[2](writer:chapter/a?show=number)节\n')
+  expect(view.state.selection).toBeInstanceOf(NodeSelection)
+
+  openMenu()
+  await flushPromises()
+  await chooseFromContextMenu(wrapper, '前往“2 方法”')
+  expect(wrapper.emitted('open-chapter')).toEqual([['a']])
+
+  openMenu()
+  await flushPromises()
+  await chooseFromContextMenu(wrapper, '更改目标…')
+  expect((wrapper.emitted('request-chapter-ref')![0] as [string, { current: unknown }])[1].current).toEqual({
+    id: 'a',
+    show: 'number',
+  })
 })

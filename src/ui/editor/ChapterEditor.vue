@@ -6,15 +6,26 @@ import 'prosemirror-view/style/prosemirror.css'
 import 'prosemirror-gapcursor/style/gapcursor.css'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { ChapterDocuments } from './chapter_documents.ts'
-import { commandState, editorCommands, insertImage, setCodeLanguage, type CommandState, type EditorCommand } from './commands.ts'
+import {
+  commandState,
+  editorCommands,
+  insertChapterRef,
+  insertImage,
+  selectedChapterRef,
+  setChapterRefShow,
+  setCodeLanguage,
+  type CommandState,
+  type EditorCommand,
+} from './commands.ts'
 import { fenceLanguage } from './code_highlight.ts'
 import { editorContextMenu, listEntries } from './editor_menu.ts'
-import { SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
+import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import { useMenu } from '../common/use_menu.ts'
 import { editSelectedCaption, figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
-import { NO_CHAPTER_REFS, chapterRefNodeViews, type ChapterRefLabel } from './chapter_ref_view.ts'
+import { NO_CHAPTER_REFS, chapterRefNodeViews, chapterRefPos, type ChapterRefLabel } from './chapter_ref_view.ts'
+import { parseChapterRefAddress, type ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
 import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from './editor_theme.ts'
 import { topBlock, type BlockPosition } from './block_position.ts'
 import './document_body.css'
@@ -52,7 +63,22 @@ const emit = defineEmits<{
   'request-image': [chapterId: ChapterId]
   /** 编辑命令的可用 / 勾选状态（由上层的工具栏与菜单栏显示）。 */
   tools: [state: CommandState]
+  /**
+   * 插入章节引用（选中引用时是更改它）：由上层在 anchor 处选择目标后调用 insertChapterRef。
+   * current 是选中引用当前的目标与格式（失效或插入时为 null / 只有格式）。
+   */
+  'request-chapter-ref': [chapterId: ChapterId, request: ChapterRefRequest]
+  /** 前往章节引用的目标章节（⌘ + 单击、右键菜单“前往”）。 */
+  'open-chapter': [chapterId: ChapterId]
 }>()
+
+/** 选择引用目标时的上下文。 */
+export interface ChapterRefRequest {
+  /** 浮层的位置：光标（或选中引用）的左下角。 */
+  readonly anchor: { readonly x: number; readonly y: number }
+  /** 选中的引用当前的目标与格式；插入新引用时为 null。 */
+  readonly current: { readonly id: ChapterId | null; readonly show: ChapterRefShow } | null
+}
 
 /** 滚动容器（每个章节记住自己的滚动位置）。 */
 const scroller = ref<HTMLElement | null>(null)
@@ -161,6 +187,10 @@ function runCommand(command: EditorCommand): void {
     emit('request-image', currentId)
     return
   }
+  if (command === 'chapter-ref') {
+    requestChapterRef()
+    return
+  }
   editorCommands[command](view.state, view.dispatch)
   focus()
 }
@@ -188,7 +218,9 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
     const { doc, selection } = view.state
     const inside = hit.inside >= 0 ? doc.nodeAt(hit.inside) : null
     const onFigure = (event.target as Element).closest?.('.editor-figure') && inside?.type === nodes.figure
-    if (onFigure) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, hit.inside)))
+    const ref = chapterRefPos(view, event.target)
+    if (ref !== null) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, ref)))
+    else if (onFigure) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, hit.inside)))
     else if (!inSelection(selection, hit.pos) || selection instanceof NodeSelection) {
       view.dispatch(view.state.tr.setSelection(TextSelection.near(doc.resolve(hit.pos))))
     }
@@ -232,10 +264,12 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
   const { selection } = view.state
   const onFigure = selection instanceof NodeSelection && selection.node.type === nodes.figure
   const inCode = selection.$from.parent.type === nodes.code_block
+  const ref = selectedChapterRef(view.state)
   const entries = editorContextMenu(
     commandState(view.state),
     onFigure ? (selection.node.attrs.alt as string) : null,
     inCode ? fenceLanguage(selection.$from.parent.attrs.params as string) : null,
+    ref ? chapterRefMenu(ref.attrs.href as string) : null,
   )
   const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
@@ -249,6 +283,67 @@ function runMenuItem(id: string): void {
     focus()
   }
   else if (id === 'figure:caption' && view) editSelectedCaption(view)
+  else if (kind === 'chapter-ref' && view) {
+    const ref = selectedChapterRef(view.state)
+    if (value === 'open' && ref) openChapterRef(ref.attrs.href as string)
+    else if (value === 'show') {
+      setChapterRefShow(id.split(':')[2] as ChapterRefShow)(view.state, view.dispatch)
+      focus()
+    }
+  }
+}
+
+/** 选中引用的右键菜单内容：目标的完整名称与当前格式。 */
+function chapterRefMenu(href: string) {
+  const address = parseChapterRefAddress(href)
+  return {
+    name: documents.refLabel?.(href)?.name ?? null,
+    show: address.kind === 'ref' ? address.show : null,
+  }
+}
+
+/** 请求选择引用目标：在光标（或选中的引用）下方，选中引用时带上它当前的目标与格式。 */
+function requestChapterRef(): void {
+  if (!view) return
+  const { state } = view
+  if (!insertChapterRef('writer:chapter/_', '')(state)) return
+  const caret = view.coordsAtPos(state.selection.from)
+  const ref = selectedChapterRef(state)
+  const address = ref ? parseChapterRefAddress(ref.attrs.href as string) : null
+  const current =
+    address === null
+      ? null
+      : address.kind === 'ref'
+        ? { id: address.id, show: address.show }
+        : { id: null, show: 'number-title' as const }
+  emit('request-chapter-ref', currentId, { anchor: { x: caret.left, y: caret.bottom }, current })
+}
+
+/**
+ * 在光标处插入章节引用（选中引用时更改它）。chapterId 是发起请求时的章节；
+ * 期间切换了章节或光标处不能插入时不插入并返回 false。链接文字是当前生成的文字。
+ */
+function insertChapterRefAt(chapterId: ChapterId, href: string): boolean {
+  if (!view || chapterId !== currentId) return false
+  const cached = documents.refLabel?.(href)?.text ?? ''
+  if (!insertChapterRef(href, cached)(view.state, view.dispatch)) return false
+  focus()
+  return true
+}
+
+function openChapterRef(href: string): void {
+  const target = documents.refLabel?.(href)
+  if (target) emit('open-chapter', target.id)
+}
+
+/** ⌘ + 单击（Windows / Linux：Ctrl + 单击）引用：前往目标章节，不改变选区。 */
+function onMousedownCapture(event: MouseEvent): void {
+  if (!view || event.button !== 0 || !(IS_MAC ? event.metaKey : event.ctrlKey)) return
+  const pos = chapterRefPos(view, event.target)
+  if (pos === null) return
+  event.preventDefault()
+  event.stopPropagation()
+  openChapterRef(view.state.doc.nodeAt(pos)!.attrs.href as string)
 }
 
 function isCaption(target: EventTarget | null): boolean {
@@ -301,6 +396,15 @@ function readingPosition(): BlockPosition {
  * 从全文阅读回来：把该位置滚到与阅读时相同的高度，光标放在视口中第一个完整显示的块的开头，
  * 接着输入时正文不会跳到别处。
  */
+/** 前往章节（如从引用跳转过来）：光标放在正文开头，滚动到顶部，正文获得焦点。 */
+function revealStart(chapterId: ChapterId): void {
+  if (!view || !scroller.value || chapterId !== currentId) return
+  view.dispatch(view.state.tr.setSelection(Selection.atStart(view.state.doc)))
+  scroller.value.scrollTop = 0
+  focus()
+  scroller.value.scrollTop = 0
+}
+
 function revealPosition(position: BlockPosition): void {
   if (!view || !scroller.value) return
   const blocks = blockElements(view)
@@ -322,6 +426,8 @@ defineExpose({
   readingPosition,
   revealPosition,
   insertImage: insertImageAt,
+  insertChapterRef: insertChapterRefAt,
+  revealStart,
   runCommand,
   openMenuAtCaret,
   openListMenu,
@@ -340,7 +446,7 @@ defineExpose({
           {{ title || '未命名章节' }}
         </span>
       </h1>
-      <div class="chapter-editor__body">
+      <div class="chapter-editor__body" @mousedown.capture="onMousedownCapture">
         <div ref="mountPoint" class="chapter-editor__mount" @contextmenu="openContextMenu" @keydown="onKeydown"></div>
       </div>
     </div>

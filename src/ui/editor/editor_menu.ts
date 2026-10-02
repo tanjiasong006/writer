@@ -2,16 +2,19 @@ import type { MenuEntry } from '../../application/desktop_shell.ts'
 import type { CommandState, EditorCommand } from './commands.ts'
 import { SHORTCUTS } from '../common/shortcuts.ts'
 import { CODE_LANGUAGES, sameLanguage } from './code_highlight.ts'
+import type { ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
 
 /**
  * 正文的右键菜单：只列出与点击处直接相关的操作。
  *
  * - 选中的图片：添加 / 编辑图注、剪切 / 拷贝（图片没有单独的尺寸或对齐设置）。
+ * - 选中的章节引用：前往目标章节、显示格式（当前格式打勾）、更改目标、剪切 / 拷贝。
  * - 表格中：插入 / 删除行与列、删除表格，放在最前面。
  * - 代码块中：“代码语言”子菜单放在最前面（当前语言打勾）。
  * - 其余：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当前所在结构打勾）、插入表格与图片。
  *
- * 菜单项 id：`command:<EditorCommand>`；编辑图注是 `figure:caption`；代码语言是 `code-language:<语言>`（空为自动识别）。
+ * 菜单项 id：`command:<EditorCommand>`；编辑图注是 `figure:caption`；代码语言是 `code-language:<语言>`（空为自动识别）；
+ * 章节引用是 `chapter-ref:open` 与 `chapter-ref:show:<格式>`（更改目标是 `command:chapter-ref`）。
  * 快捷键与菜单栏一致，只作显示（右键菜单打开期间才生效）。
  */
 
@@ -33,6 +36,7 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   outdent: { label: '减少缩进', shortcut: SHORTCUTS.outdent },
   table: { label: '表格', shortcut: SHORTCUTS.insertTable },
   image: { label: '图片…', shortcut: SHORTCUTS.insertImage },
+  'chapter-ref': { label: '章节引用…', shortcut: SHORTCUTS.chapterRef },
   'row-before': { label: '在上方插入行' },
   'row-after': { label: '在下方插入行' },
   'column-before': { label: '在左侧插入列' },
@@ -84,15 +88,52 @@ function codeLanguageMenu(current: string): MenuEntry {
   }
 }
 
+/** 选中的章节引用：目标的完整名称（失效时为 null）与显示格式（地址格式错误时为 null）。 */
+export interface ChapterRefMenu {
+  readonly name: string | null
+  readonly show: ChapterRefShow | null
+}
+
+const SHOW_LABELS: ReadonlyArray<readonly [ChapterRefShow, string]> = [
+  ['number-title', '编号 + 标题'],
+  ['number', '仅编号'],
+  ['title', '仅标题'],
+]
+
+function chapterRefMenu(state: CommandState, ref: ChapterRefMenu): MenuEntry[] {
+  return [
+    ref.name === null
+      ? { id: 'chapter-ref:open', label: '前往（引用已失效）', disabled: true }
+      : { id: 'chapter-ref:open', label: `前往“${ref.name}”` },
+    {
+      id: 'chapter-ref-show',
+      label: '显示格式',
+      submenu: SHOW_LABELS.map(([show, label]) => ({
+        id: `chapter-ref:show:${show}`,
+        label,
+        checked: ref.show === show,
+        disabled: ref.show === null,
+      })),
+    },
+    commandEntry('chapter-ref', state, { label: '更改目标…' }),
+    { separator: true },
+    { role: 'cut' },
+    { role: 'copy' },
+  ]
+}
+
 /**
  * figureCaption：选中了独立成段的图片时是它的图注（可能为空），否则为 null。
  * codeLanguage：光标在代码块中时是它声明的语言（没有时为空字符串），否则为 null。
+ * chapterRef：选中了章节引用时是它的目标与格式，否则为 null。
  */
 export function editorContextMenu(
   state: CommandState,
   figureCaption: string | null,
   codeLanguage: string | null = null,
+  chapterRef: ChapterRefMenu | null = null,
 ): MenuEntry[] {
+  if (chapterRef !== null) return chapterRefMenu(state, chapterRef)
   if (figureCaption !== null) {
     return [
       { id: 'figure:caption', label: figureCaption === '' ? '添加图注' : '编辑图注' },
@@ -136,6 +177,7 @@ export function editorContextMenu(
       { separator: true },
       commandEntry('table', state, { label: '插入表格' }),
       commandEntry('image', state, { label: '插入图片…' }),
+      commandEntry('chapter-ref', state, { label: '插入章节引用…' }),
     )
   }
   return entries

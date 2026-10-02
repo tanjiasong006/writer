@@ -1,5 +1,5 @@
 import type { Node, NodeType, ResolvedPos } from 'prosemirror-model'
-import { TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state'
+import { NodeSelection, TextSelection, type Command, type EditorState, type Transaction } from 'prosemirror-state'
 import { chainCommands, lift, setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
 import { liftListItem, sinkListItem, wrapInList } from 'prosemirror-schema-list'
 import { redo as historyRedo, undo as historyUndo } from 'prosemirror-history'
@@ -18,6 +18,11 @@ import {
   type TableRect,
 } from 'prosemirror-tables'
 import { marks, nodes } from './schema.ts'
+import {
+  chapterRefAddress,
+  parseChapterRefAddress,
+  type ChapterRefShow,
+} from '../../domain/chapter_reference/chapter_reference.ts'
 
 /**
  * 正文编辑命令。都是标准的 ProseMirror Command：只根据 EditorState 计算事务，不依赖 DOM。
@@ -41,6 +46,7 @@ export type EditorCommand =
   | 'outdent'
   | 'table'
   | 'image'
+  | 'chapter-ref'
   | 'row-before'
   | 'row-after'
   | 'column-before'
@@ -263,6 +269,50 @@ export function insertImage(reference: string, alt: string): Command {
   }
 }
 
+/** 选中的章节引用；没有选中引用时为 null。 */
+export function selectedChapterRef(state: EditorState): Node | null {
+  const { selection } = state
+  return selection instanceof NodeSelection && selection.node.type === nodes.chapter_ref ? selection.node : null
+}
+
+/**
+ * 章节引用（docs/decisions.md 第 9 节）：在选区处插入，替换选中的内容；选中的是引用时更换它的目标与显示格式，
+ * 强调等格式保留。cached 是写入的链接文字（插入时生成的文字）。代码块中不能插入。
+ */
+export function insertChapterRef(href: string, cached: string): Command {
+  return (state, dispatch) => {
+    const { selection } = state
+    if (selectedChapterRef(state)) {
+      if (dispatch) dispatch(updateSelectedRef(state, { href, cached }).scrollIntoView())
+      return true
+    }
+    const { $from } = selection
+    if (!$from.parent.inlineContent || !$from.parent.canReplaceWith($from.index(), $from.index(), nodes.chapter_ref)) {
+      return false
+    }
+    if (dispatch) dispatch(state.tr.replaceSelectionWith(nodes.chapter_ref.create({ href, cached })).scrollIntoView())
+    return true
+  }
+}
+
+/** 更改选中引用的显示格式；地址格式错误的引用不能更改。 */
+export function setChapterRefShow(show: ChapterRefShow): Command {
+  return (state, dispatch) => {
+    const ref = selectedChapterRef(state)
+    const address = ref ? parseChapterRefAddress(ref.attrs.href as string) : null
+    if (!ref || address?.kind !== 'ref') return false
+    if (dispatch) dispatch(updateSelectedRef(state, { ...ref.attrs, href: chapterRefAddress(address.id, show) }))
+    return true
+  }
+}
+
+/** 更改选中引用的属性，引用仍保持选中（替换叶子节点会让节点选区变成光标）。 */
+function updateSelectedRef(state: EditorState, attrs: Record<string, unknown>): Transaction {
+  const pos = state.selection.from
+  const tr = state.tr.setNodeMarkup(pos, undefined, attrs)
+  return tr.setSelection(NodeSelection.create(tr.doc, pos))
+}
+
 /** 选区在表格的表头行中（GFM 表格的第一行，必须保留且只能是表头）。 */
 function inHeaderRow(state: EditorState): boolean {
   if (!isInTable(state)) return false
@@ -318,7 +368,7 @@ const removeColumn = thenSelectCell(
   (before, after) => ({ row: before.top, col: Math.min(before.left, after.width - 1) }),
 )
 
-export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image'>, Command>> = {
+export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image' | 'chapter-ref'>, Command>> = {
   undo,
   redo,
   bold: toggleBold,
@@ -365,6 +415,7 @@ export function commandState(state: EditorState): CommandState {
     outdent: plain(outdentListItem),
     table: plain(insertTable),
     image: plain(insertImage('', '')),
+    'chapter-ref': plain(insertChapterRef('writer:chapter/_', '')),
     'row-before': plain(rowBefore),
     'row-after': plain(rowAfter),
     'column-before': plain(columnBefore),

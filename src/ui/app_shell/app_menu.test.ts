@@ -24,6 +24,7 @@ function context(patch: Partial<AppMenuContext> = {}): AppMenuContext {
     exporting: false,
     hasChapters: true,
     reading: false,
+    canGoBack: false,
     appearance: 'system',
     ...patch,
   }
@@ -283,4 +284,19 @@ describe('菜单项 id', () => {
       expect(parseMenuItemId(id), id).toBeNull()
     }
   })
+})
+
+test('插入章节引用（⌘K）与返回上一位置', () => {
+  const insert = workspaceMenus(context()).find((menu) => menu.label === '插入')!
+  expect(insert.items).toContainEqual(
+    expect.objectContaining({ id: 'editor:chapter-ref', label: '章节引用…', shortcut: SHORTCUTS.chapterRef, disabled: false }),
+  )
+  const back = (patch: Partial<AppMenuContext>) =>
+    workspaceMenus(context(patch))
+      .find((menu) => menu.label === '显示')!
+      .items.find((item) => 'id' in item && item.id === 'view:back')
+  expect(back({})).toMatchObject({ label: '返回上一位置', disabled: true })
+  expect(back({ canGoBack: true })).toMatchObject({ disabled: false })
+  expect(back({ canGoBack: true, reading: true })).toMatchObject({ disabled: true })
+  expect(parseMenuItemId('view:back')).toEqual({ group: 'view', action: 'back' })
 })

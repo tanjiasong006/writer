@@ -872,3 +872,69 @@ test('全文阅读：删除所有章节后回到空文档的提示', async () =>
   expect(wrapper.find('.workspace__placeholder').text()).toContain('还没有章节')
   expect(button(wrapper, '全文阅读').attributes('disabled')).toBeDefined()
 })
+
+test('章节引用：⌘K 选择目标并插入；⌘ + 单击前往，提示中与菜单栏中返回', async () => {
+  const services = seededServices()
+  services.shell.enableAppMenu()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  const view = editorView(wrapper)
+  view.focus()
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
+
+  services.shell.chooseMenuItem('editor:chapter-ref')
+  await flushPromises()
+  const input = wrapper.find('.chapter-ref-picker input')
+  await input.setValue('方法')
+  await input.trigger('keydown', { key: 'Enter' })
+  await flushPromises()
+  expect(wrapper.find('.chapter-ref-picker').exists()).toBe(false)
+  expect(view.dom.querySelector('.chapter-ref')?.textContent).toBe('2 方法')
+
+  // ⌘ + 单击：前往“方法”，光标在开头；提示中可以返回。
+  view.dom.querySelector('.chapter-ref')!.dispatchEvent(
+    new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, ...MOD }),
+  )
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('2方法')
+  expect(editorView(wrapper).state.selection.from).toBe(1)
+  expect(wrapper.find('.workspace__jump').text()).toContain('已前往“2 方法”')
+  expect(appMenuItem(services, 'view:back').disabled).toBe(false)
+
+  await wrapper.find('.workspace__jump button').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1绪论')
+  expect(wrapper.find('.workspace__jump').exists()).toBe(false)
+  expect(appMenuItem(services, 'view:back').disabled).toBe(true)
+
+  // 再次前往后用菜单栏返回。
+  editorView(wrapper).dom.querySelector('.chapter-ref')!.dispatchEvent(
+    new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0, ...MOD }),
+  )
+  await flushPromises()
+  services.shell.chooseMenuItem('view:back')
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1绪论')
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ...MOD }))
+  await flushPromises()
+  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言[2 方法](writer:chapter/b)')
+})
+
+test('章节引用：取消选择不改变正文，焦点回到正文', async () => {
+  const services = seededServices()
+  services.shell.enableAppMenu()
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  const view = editorView(wrapper)
+  view.focus()
+  const before = editorText(wrapper)
+  services.shell.chooseMenuItem('editor:chapter-ref')
+  await flushPromises()
+  await wrapper.find('.chapter-ref-picker input').trigger('keydown', { key: 'Escape' })
+  await flushPromises()
+  expect(wrapper.find('.chapter-ref-picker').exists()).toBe(false)
+  expect(editorText(wrapper)).toBe(before)
+  expect(saveState(wrapper)).toBe('saved')
+  expect(document.activeElement).toBe(view.dom)
+})

@@ -24,6 +24,7 @@ export interface ReadingPosition extends BlockPosition {
  * - initialPosition 与 position() 按块对齐编辑器中的位置，进入与离开时眼前的文字停在原处。
  * - 滚动区可以获得焦点：方向键、空格、Page Up / Down 直接滚动；Esc 或 Enter 结束阅读（exit），
  *   回到当前位置继续编辑。
+ * - 单击章节引用滚动到目标章节的开头（失效的引用不响应）。
  * - 只在正文变化的章节重新生成 DOM（阅读时通常不会变化，章节树中改名、移动时只更新标题与顺序）；
  *   章节树变化时含章节引用的章节也重新生成（引用文字随之更新）。
  */
@@ -156,6 +157,13 @@ function onScroll(): void {
   })
 }
 
+/** 单击章节引用：滚动到目标章节开头，之后随滚动成为当前章节。 */
+function onClick(event: MouseEvent): void {
+  const ref = (event.target as Element).closest?.('.chapter-ref:not(.is-broken)')
+  const target = ref instanceof HTMLElement ? refLabel.value(ref.dataset.chapterRef ?? '') : null
+  if (target) reveal({ chapterId: target.id, block: -1, offset: 0 })
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if (event.target !== scroller.value) return
   if (event.key !== 'Escape' && event.key !== 'Enter') return
@@ -191,6 +199,7 @@ defineExpose({ position, focus })
     aria-label="全文阅读"
     @scroll="onScroll"
     @keydown="onKeydown"
+    @click="onClick"
   >
     <section
       v-for="chapter in chapters"
@@ -209,6 +218,10 @@ defineExpose({ position, focus })
 </template>
 
 <style scoped>
+.document-reader :deep(.chapter-ref:not(.is-broken)) {
+  cursor: pointer;
+}
+
 .document-reader {
   height: 100%;
   box-sizing: border-box;

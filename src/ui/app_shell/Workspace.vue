@@ -13,7 +13,10 @@ import SaveStatus from './SaveStatus.vue'
 import DocumentInfoDialog from './DocumentInfoDialog.vue'
 import PdfLayoutDialog from './PdfLayoutDialog.vue'
 import DocumentTitle from './DocumentTitle.vue'
-import ChapterEditor from '../editor/ChapterEditor.vue'
+import ChapterEditor, { type ChapterRefRequest } from '../editor/ChapterEditor.vue'
+import ChapterRefPicker from '../editor/ChapterRefPicker.vue'
+import { chapterRefAddress, type ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
+import { useChapterJumps } from './use_chapter_jumps.ts'
 import DocumentReader, { type ReadingPosition } from '../reader/DocumentReader.vue'
 import { useServices } from '../services.ts'
 import { useSession } from './use_session.ts'
@@ -245,6 +248,36 @@ const numbers = computed(() => computeChapterNumbers(tree.value))
 /** 章节引用的文字：随章节树变化，编辑正文时不变。 */
 const refLabel = computed(() => chapterRefLabels(tree.value))
 
+/** 选择章节引用的目标：发起请求的章节与位置（docs/decisions.md 第 9 节）。 */
+const refPicker = shallowRef<{ readonly chapterId: ChapterId; readonly request: ChapterRefRequest } | null>(null)
+
+function requestChapterRef(chapterId: ChapterId, request: ChapterRefRequest): void {
+  refPicker.value = { chapterId, request }
+}
+
+function pickChapterRef(id: ChapterId, show: ChapterRefShow): void {
+  const picker = refPicker.value
+  refPicker.value = null
+  if (picker && editor.value?.insertChapterRef(picker.chapterId, chapterRefAddress(id, show))) return
+  editor.value?.focus()
+}
+
+function cancelChapterRef(): void {
+  refPicker.value = null
+  editor.value?.focus()
+}
+
+const jumps = useChapterJumps({
+  selectedId,
+  exists: (id) => findChapter(tree.value, id) !== null,
+  name: (id) => {
+    const title = findChapter(tree.value, id)?.title || '未命名章节'
+    return `${(numbers.value.get(id) ?? []).join('.')} ${title}`
+  },
+  revealStart: (id) => editor.value?.revealStart(id),
+  focus: () => editor.value?.focus(),
+})
+
 const selectedChapter = computed(() =>
   selectedId.value === null ? null : findChapter(tree.value, selectedId.value),
 )
@@ -332,6 +365,7 @@ const menus = computed(() =>
     exporting: exporting.value !== null,
     hasChapters: tree.value.length > 0,
     reading: reading.value,
+    canGoBack: jumps.canGoBack.value,
     appearance: props.appearance,
   }),
 )
@@ -396,6 +430,7 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
     case 'view':
       if (command.action === 'sidebar') void setSidebarVisible(!sidebarVisible.value)
       else if (command.action === 'reader') toggleReading()
+      else if (command.action === 'back') void jumps.back()
       else switchFocus()
       return
     case 'appearance':
@@ -616,6 +651,8 @@ async function createFirstChapter(): Promise<void> {
           :ref-label="refLabel"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
           @request-image="insertImage"
+          @request-chapter-ref="requestChapterRef"
+          @open-chapter="jumps.jump"
           @tools="showTools"
         />
         <div v-else class="workspace__placeholder" :inert="reading || undefined">
@@ -658,6 +695,12 @@ async function createFirstChapter(): Promise<void> {
         <Toast v-if="actionError" class="workspace__error" tone="error" @dismiss="actionError = null">
           {{ actionError }}
         </Toast>
+        <Toast v-if="jumps.notice.value" class="workspace__jump" @dismiss="jumps.dismiss">
+          {{ jumps.notice.value }}
+          <template #actions>
+            <button type="button" @click="jumps.back">返回</button>
+          </template>
+        </Toast>
         <Toast v-if="exportNotice" class="workspace__notice" @dismiss="exportNotice = null">
           {{ exportNotice.message }}
           <template #actions>
@@ -668,6 +711,15 @@ async function createFirstChapter(): Promise<void> {
         </Toast>
       </div>
     </main>
+
+    <ChapterRefPicker
+      v-if="refPicker"
+      :tree="tree"
+      :anchor="refPicker.request.anchor"
+      :current="refPicker.request.current"
+      @pick="pickChapterRef"
+      @cancel="cancelChapterRef"
+    />
 
     <PopupMenu
       v-if="menu.current.value"

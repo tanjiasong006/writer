@@ -67,6 +67,8 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
   显示的文字由 `refLabel`（`chapter_ref_view.ts`，按当前章节树生成）给出，不存进文档：refLabel 变化只更新显示，
   不产生 change、不进入撤销历史；编辑写出时链接文字（缓存）是当时生成的文字。失效引用显示原来的链接文字并加 `is-broken`。
   单击整体选中引用；全文阅读使用同一个 refLabel。
+  插入 / 更改引用：编辑器只发出 `request-chapter-ref`（位置与选中引用当前的目标、格式），目标由上层选择后调用
+  `insertChapterRef(chapterId, href)`；⌘ + 单击与右键菜单“前往”发出 `open-chapter`，跳转由上层完成，`revealStart` 把光标放在正文开头。
 - 编辑环境主题来自应用级偏好，以展示参数作用在组件上：不改变文档、不产生 change、不进入正文撤销历史、不重建视图。
   不读取项目样式，不影响 Word / PDF 输出；默认提供美观、易读的内容展示。
 - 图片按统一展示规则适应编辑区域；不提供单张图片的尺寸 / 对齐 / 位置控制，不保存局部布局状态，不发出 `image-layout`。

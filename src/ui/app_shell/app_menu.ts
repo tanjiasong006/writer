@@ -29,13 +29,15 @@ export interface AppMenuContext {
   readonly hasChapters: boolean
   /** 是否在全文阅读中。 */
   readonly reading: boolean
+  /** 是否有可以返回的位置（从章节引用前往别处之后）。 */
+  readonly canGoBack: boolean
   readonly appearance: Appearance
 }
 
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
-const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader'] as const
+const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
 const APPEARANCES = ['system', 'light', 'dark'] as const satisfies readonly Appearance[]
 
@@ -248,7 +250,7 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
     },
     {
       label: '插入',
-      items: [editorItem('table'), editorItem('image')],
+      items: [editorItem('table'), editorItem('image'), editorItem('chapter-ref')],
     },
     {
       // 与正文右键菜单中表格的操作相同，光标在表格中时可用。没有自然的"⌘ + 单键"，不设快捷键。
@@ -308,6 +310,8 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
           checked: context.reading,
           disabled: !context.hasChapters,
         },
+        // 从章节引用前往别处之后回到出发的位置（docs/decisions.md 第 9 节）。⌘[ 已用于减少缩进，不设快捷键。
+        { id: 'view:back', label: '返回上一位置', disabled: !context.canGoBack || context.reading },
         { separator: true },
         // 在章节树与正文之间切换；名称说明这次按下会去哪里。输入框（重命名）中不可用，先确认或放弃输入。
         {

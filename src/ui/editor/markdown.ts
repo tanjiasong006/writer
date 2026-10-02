@@ -449,7 +449,7 @@ const serializer = new MarkdownSerializer(
       state.write(imageMarkdown(state, node))
     },
     chapter_ref(state, node) {
-      const text = writingRefLabel?.(node.attrs.href) ?? node.attrs.cached
+      const text = writingRefLabel?.(node.attrs.href)?.text ?? node.attrs.cached
       state.write(`[${state.esc(text)}](${destination(node.attrs.href)})`)
     },
     // 与只含这张图片的段落写法相同：Markdown 中没有新的语法。

@@ -146,3 +146,16 @@ test('章节引用的文字随章节树更新', async () => {
   await wrapper.setProps({ tree: [{ ...tree[1]!, title: '研究方法' }, tree[0]!] })
   expect(ref()).toBe('1 研究方法')
 })
+
+test('单击章节引用滚动到目标章节开头；失效引用不响应', async () => {
+  const wrapper = mountReader({
+    contents: new Map([['a', '见[旧](writer:chapter/b)与[失效](writer:chapter/gone)'], ['a1', ''], ['b', '甲\n']]),
+  })
+  const scroller = wrapper.element as HTMLElement
+  const [ref, broken] = wrapper.findAll('.chapter-ref')
+  await broken!.trigger('click')
+  expect(scroller.scrollTop).toBe(0)
+  await ref!.trigger('click')
+  const section = wrapper.find('[data-chapter-id="b"]').element
+  expect(section.getBoundingClientRect().top).toBe(0)
+})

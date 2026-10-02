@@ -21,7 +21,7 @@ test('正文中：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当�
     'cut', 'copy', 'paste', '-',
     '粗体', '斜体', '删除线', '行内代码', '-',
     '列表', '引用', '代码块', '-',
-    '插入表格', '插入图片…',
+    '插入表格', '插入图片…', '插入章节引用…',
   ])
   expect(labels(submenuOf(entries, '列表'))).toEqual(['无序列表', '有序列表', '任务列表'])
   const bullet = submenuOf(entries, '列表').find((entry) => 'label' in entry && entry.label === '无序列表')
@@ -76,4 +76,16 @@ test('手写的其他语言名列在自动识别之后并打勾', () => {
 
 test('不在代码块中没有代码语言菜单', () => {
   expect(labels(editorContextMenu(commandState(stateAt('正文\n', 1)), null))).not.toContain('代码语言')
+})
+
+test('选中的章节引用：前往、显示格式（当前格式打勾）、更改目标；失效时不能前往', () => {
+  const state = commandState(stateAt('见[2.1](writer:chapter/a?show=number)\n', 1))
+  const entries = editorContextMenu(state, null, null, { name: '2.1 方法', show: 'number' })
+  expect(labels(entries)).toEqual(['前往“2.1 方法”', '显示格式', '更改目标…', '-', 'cut', 'copy'])
+  const formats = submenuOf(entries, '显示格式')
+  expect(formats.map((entry) => 'checked' in entry && entry.checked)).toEqual([false, true, false])
+
+  const broken = editorContextMenu(state, null, null, { name: null, show: null })
+  expect(broken[0]).toMatchObject({ label: '前往（引用已失效）', disabled: true })
+  expect(submenuOf(broken, '显示格式').every((entry) => 'disabled' in entry && entry.disabled)).toBe(true)
 })
