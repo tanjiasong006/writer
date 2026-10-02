@@ -212,6 +212,17 @@ test('粘贴：单元格中的多段压成一行；只接受正文中的相对�
   expect(markdown(view)).toBe('| 第一段 **第二段** | 乙 |\n| --- | --- |\n| 1 | 2 |\n\n图：![本地](../assets/a.png)\n')
 })
 
+test('粘贴：章节引用保留为引用（包括表格单元格中的）', () => {
+  const view = viewOf('')
+  view.pasteHTML(
+    '<table><tr><td><p>见<a href="writer:chapter/a">2.1 方法</a></p></td></tr></table>' +
+      '<p>另见<span class="chapter-ref" data-chapter-ref="writer:chapter/b?show=number">3</span></p>',
+  )
+  expect(markdown(view)).toBe(
+    '| 见[2.1 方法](writer:chapter/a) |\n| --- |\n\n另见[3](writer:chapter/b?show=number)\n',
+  )
+})
+
 test('Tab / Shift+Tab 永远由编辑器处理：普通段落、第一个列表项中什么也不做，焦点不会移出正文', () => {
   const view = viewOf('段落')
   cursorAfter(view, '段')

@@ -577,7 +577,8 @@ impl<'a> Writer<'a> {
         let mut out = String::new();
         for inline in inlines {
             match inline {
-                Inline::Text(text) => {
+                // 章节引用暂按链接文字输出（生成文字与文档内跳转见实施计划“章节交叉引用”第 3 步）。
+                Inline::Text(text) | Inline::ChapterRef { cached: text, .. } => {
                     out.push('#');
                     out.push_str(&string(&breakable(text)));
                 }

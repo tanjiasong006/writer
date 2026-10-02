@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import type { Mark, Node } from 'prosemirror-model'
 import { parseChapter, serializeChapter } from './markdown.ts'
 import { nodes } from './schema.ts'
+import { parseChapterRefAddress } from '../../domain/chapter_reference/chapter_reference.ts'
 
 /**
  * 编辑器 ⇄ Rust 导出的内容契约（docs/decisions.md 第 8 节"编辑与输出的内容契约验证"）。
@@ -29,6 +30,7 @@ type SemInline =
   | { text: string; marks?: string[] }
   | { code: string; marks?: string[] }
   | { image: string; alt: string; marks?: string[] }
+  | { ref: { id: string; show: string } | null; cached: string; marks?: string[] }
   | { break: true }
 type SemItem = { task: boolean | null; blocks: SemBlock[] }
 type SemBlock =
@@ -65,7 +67,11 @@ function inlines(node: Node): SemInline[] {
   node.forEach((child) => {
     const marks = markNames(child.marks)
     if (child.type === nodes.hard_break) out.push({ break: true })
-    else if (child.type === nodes.image) {
+    else if (child.type === nodes.chapter_ref) {
+      const address = parseChapterRefAddress(child.attrs.href as string)
+      const ref = address.kind === 'ref' ? { id: address.id, show: address.show } : null
+      out.push(withMarks({ ref, cached: child.attrs.cached as string }, marks))
+    } else if (child.type === nodes.image) {
       out.push(withMarks({ image: child.attrs.src as string, alt: child.attrs.alt as string }, marks))
     } else if (child.marks.some((mark) => mark.type.name === 'code')) out.push(withMarks({ code: child.text! }, marks))
     else out.push(withMarks({ text: child.text! }, marks))

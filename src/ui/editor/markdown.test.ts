@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import type { Node } from 'prosemirror-model'
+import { DOMParser as PMDOMParser, type Node } from 'prosemirror-model'
 import { EditorState } from 'prosemirror-state'
 import { appendImage, parseChapter, parseMarkdown, serializeChapter } from './markdown.ts'
 import { marks, nodes, schema } from './schema.ts'
@@ -496,5 +496,49 @@ describe('appendImage', () => {
     const appended = appendImage('', '../assets/实验 图.png', '图[1]')
     expect(appended).toBe('![图\\[1\\]](<../assets/实验 图.png>)\n')
     expect(parseMarkdown(appended).child(0).attrs).toMatchObject({ src: '../assets/实验 图.png', alt: '图[1]' })
+  })
+})
+
+describe('章节引用', () => {
+  const ref = (href: string, cached: string, ...markNames: Array<keyof typeof marks>) =>
+    nodes.chapter_ref.create({ href, cached }, null, markNames.map((name) => marks[name].create()))
+
+  test('引用写成标准链接，地址原样保留', () => {
+    const written = expectStable(
+      doc.create(null, p.create(null, [text('见'), ref('writer:chapter/a?show=page', '[2.1] *方法*'), text('。')])),
+    )
+    expect(written).toBe('见[\\[2.1\\] \\*方法\\*](writer:chapter/a?show=page)。\n')
+  })
+
+  test('引用的粗体按 Markdown 定界规则写出：紧挨中文时不能表达，去掉粗体，文字不变', () => {
+    const edge = doc.create(null, p.create(null, [ref('writer:chapter/a', '方法', 'strong'), text(' 之后')]))
+    expect(expectStable(edge)).toBe('**[方法](writer:chapter/a)** 之后\n')
+
+    const inner = doc.create(null, p.create(null, [text('见'), ref('writer:chapter/a', '方法', 'strong'), text('一节')]))
+    const written = write(inner)
+    expect(written).toBe('见[方法](writer:chapter/a)一节\n')
+    expect(parseMarkdown(written).toJSON()).toEqual(
+      doc.create(null, p.create(null, [text('见'), ref('writer:chapter/a', '方法'), text('一节')])).toJSON(),
+    )
+  })
+
+  test('引用上的链接与行内代码无法表达，写出时去掉，引用不变', () => {
+    const linked = ref('writer:chapter/a', '方法').mark([marks.link.create({ href: 'https://a.com' })])
+    const coded = ref('writer:chapter/b', '结果').mark([marks.code.create()])
+    expect(write(doc.create(null, p.create(null, [linked, text('与'), coded])))).toBe(
+      '[方法](writer:chapter/a)与[结果](writer:chapter/b)\n',
+    )
+  })
+
+  test('粘贴的 HTML：地址是引用的链接成为引用，编辑器复制出的引用原样读回', () => {
+    const html = document.createElement('div')
+    html.innerHTML =
+      '<p>见<a href="writer:chapter/a?show=number">2.1</a>与<span class="chapter-ref" data-chapter-ref="writer:chapter/b">3 结果</span></p>'
+    const parsed = PMDOMParser.fromSchema(schema).parse(html)
+    expect(parsed.toJSON()).toEqual(
+      doc
+        .create(null, p.create(null, [text('见'), ref('writer:chapter/a?show=number', '2.1'), text('与'), ref('writer:chapter/b', '3 结果')]))
+        .toJSON(),
+    )
   })
 })

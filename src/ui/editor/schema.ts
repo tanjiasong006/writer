@@ -15,7 +15,7 @@ import { tableNodes } from 'prosemirror-tables'
  *
  * 只包含正文持久化格式（Markdown，docs/decisions.md 第 2 节）能表达、且导出
  * （Rust pulldown-cmark）能渲染的结构：段落、引用、列表（含任务列表标记）、代码块、
- * 分隔线、表格、图片（独占一段的 figure 与行内图片）、硬换行，以及粗体、斜体、删除线、行内代码、链接。
+ * 分隔线、表格、图片（独占一段的 figure 与行内图片）、硬换行、章节引用，以及粗体、斜体、删除线、行内代码、链接。
  * 不能用 Markdown 表达的结构（合并单元格、单元格内多段落等）不进入 schema。
  * 正文不支持标题与 HTML（docs/decisions.md 第 8 节）：结构由章节树表达，Markdown 中的标题与 HTML 都是文字。
  */
@@ -29,7 +29,7 @@ function parseAlign(value: string | null | undefined): Align | null {
 const table = tableNodes({
   tableGroup: 'block',
   // GFM 表格的单元格只能是一行行内内容：不允许硬换行与块级内容。
-  cellContent: '(text | image)*',
+  cellContent: '(text | image | chapter_ref)*',
   cellAttributes: {
     align: {
       default: null,
@@ -55,7 +55,7 @@ function inlineCellContent(dom: HTMLElement | globalThis.Node, schema: Schema): 
     parts.push(node)
   }
   parsed.descendants((node) => {
-    if (node.isText || node.type === schema.nodes.image) push(node)
+    if (node.isText || node.type === schema.nodes.image || node.type === schema.nodes.chapter_ref) push(node)
     else if (node.type === schema.nodes.figure) push(schema.nodes.image.create(node.attrs))
     else if (node.isBlock || node.type === schema.nodes.hard_break) space = true
     return !node.isText
@@ -229,6 +229,40 @@ export const schema = new Schema({
       draggable: true,
       parseDOM: [{ tag: 'img[src]', getAttrs: imageDOMAttrs }],
       toDOM: (node): DOMOutputSpec => ['img', imageOutputAttrs(node)],
+    },
+
+    /**
+     * 章节交叉引用（docs/decisions.md 第 9 节）：Markdown 中是地址为 `writer:chapter/…` 的链接。
+     * 行内的原子节点：整体选中、删除，文字不能编辑。href 是原样写回的地址（格式错误的也保留）；
+     * cached 是 Markdown 中的链接文字，只是缓存，目标失效时用来提示原来的目标。
+     * 可以带粗体等强调；链接与行内代码无法在 Markdown 中包裹它，写出时去掉（见 markdown.ts）。
+     */
+    chapter_ref: {
+      inline: true,
+      group: 'inline',
+      atom: true,
+      attrs: {
+        href: { validate: 'string' },
+        cached: { default: '', validate: 'string' },
+      },
+      leafText: (node) => node.attrs.cached as string,
+      parseDOM: [
+        {
+          tag: 'span[data-chapter-ref]',
+          getAttrs: (dom) => ({ href: dom.getAttribute('data-chapter-ref'), cached: dom.textContent ?? '' }),
+        },
+        // 从其他地方粘贴的、地址是引用的链接。
+        {
+          tag: 'a[href^="writer:"]',
+          priority: 60,
+          getAttrs: (dom) => ({ href: dom.getAttribute('href'), cached: dom.textContent ?? '' }),
+        },
+      ],
+      toDOM: (node): DOMOutputSpec => [
+        'span',
+        { class: 'chapter-ref', 'data-chapter-ref': node.attrs.href },
+        node.attrs.cached,
+      ],
     },
 
     hard_break: {

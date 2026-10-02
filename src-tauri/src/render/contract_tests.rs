@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 
+use super::chapter_reference::RefShow;
 use super::markdown::{parse, Align, Block, Inline};
 
 fn fixtures() -> PathBuf {
@@ -48,6 +49,19 @@ fn runs(inlines: &[Inline], marks: &[String], out: &mut Vec<Value>) {
             Inline::Emphasis(children) => nested("emphasis".into(), children, out),
             Inline::Strike(children) => nested("strike".into(), children, out),
             Inline::Link { url, children } => nested(format!("link:{url}"), children, out),
+            Inline::ChapterRef { target, cached } => {
+                let target = target.as_ref().map(|target| {
+                    let show = match target.show {
+                        RefShow::NumberTitle => "number-title",
+                        RefShow::Number => "number",
+                        RefShow::Title => "title",
+                    };
+                    json!({ "id": target.id, "show": show })
+                });
+                out.push(with_marks(object(
+                    json!({ "ref": target, "cached": cached }),
+                )))
+            }
         }
     }
 }

@@ -222,7 +222,8 @@
   和 Rust `render::contract_tests`（`render::markdown` IR 的契约测试）；`vite.config.js` 设 `update: "none"`。
   语义格式：块为 `{type: paragraph|heading|figure|quote|code|rule|list|table, …}`，列表项为
   `{task: null|true|false, blocks}`；行内为文字 / 行内代码 / 图片片段加排序后的标记集合
-  （`strong`、`emphasis`、`strike`、`link:<url>`），相邻同标记文字合并，硬换行为 `{break: true}`。
+  （`strong`、`emphasis`、`strike`、`link:<url>`），相邻同标记文字合并，硬换行为 `{break: true}`；
+  章节引用为 `{ref: {id, show} | null, cached}`（地址格式错误时 `ref` 为 null，可带标记）。
   两端各自在测试侧投影：Rust 的软换行记为空格、任务标记（☐ / ☑）记为 `task`、同种强调的嵌套视为同一标记。
 - `buildRenderRequest` 的 Application 测试负责章节顺序、标题层级与自动编号；
   Word / PDF 的输出测试负责把共享 IR 正确转成各自输出。移除 HTML 预览不取消这些验证责任。

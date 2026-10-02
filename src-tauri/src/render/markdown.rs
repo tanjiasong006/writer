@@ -9,6 +9,8 @@ use std::iter::Peekable;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd};
 
+use super::chapter_reference::{parse_address, Address, RefTarget};
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     Paragraph(Vec<Inline>),
@@ -48,6 +50,12 @@ pub enum Inline {
     Link {
         url: String,
         children: Vec<Inline>,
+    },
+    /// 章节交叉引用（docs/decisions.md 第 9 节）：地址以 `writer:` 开头的链接。
+    /// target 为 None 表示地址格式错误；cached 是链接文字（缓存），只在目标失效时使用。
+    ChapterRef {
+        target: Option<RefTarget>,
+        cached: String,
     },
     /// src 为正文中的原始引用（如 ../assets/图.png），由各渲染器自行解析。
     Image {
@@ -319,10 +327,23 @@ fn inline_from_start(tag: Tag, events: &mut Events) -> Option<Inline> {
         Tag::Emphasis => Inline::Emphasis(inlines(events, TagEnd::Emphasis)),
         Tag::Strong => Inline::Strong(inlines(events, TagEnd::Strong)),
         Tag::Strikethrough => Inline::Strike(inlines(events, TagEnd::Strikethrough)),
-        Tag::Link { dest_url, .. } => Inline::Link {
-            url: dest_url.into_string(),
-            children: inlines(events, TagEnd::Link),
-        },
+        Tag::Link { dest_url, .. } => {
+            let children = inlines(events, TagEnd::Link);
+            match parse_address(&dest_url) {
+                Address::Link => Inline::Link {
+                    url: dest_url.into_string(),
+                    children,
+                },
+                Address::Malformed => Inline::ChapterRef {
+                    target: None,
+                    cached: plain_text(&children),
+                },
+                Address::Ref(target) => Inline::ChapterRef {
+                    target: Some(target),
+                    cached: plain_text(&children),
+                },
+            }
+        }
         Tag::Image { dest_url, .. } => Inline::Image {
             src: dest_url.into_string(),
             alt: plain_text(&inlines(events, TagEnd::Image)),
@@ -440,6 +461,7 @@ pub fn plain_text(inlines: &[Inline]) -> String {
             }
             Inline::Link { children, .. } => text.push_str(&plain_text(children)),
             Inline::Image { alt, .. } => text.push_str(alt),
+            Inline::ChapterRef { cached, .. } => text.push_str(cached),
             Inline::SoftBreak | Inline::HardBreak => text.push(' '),
         }
     }

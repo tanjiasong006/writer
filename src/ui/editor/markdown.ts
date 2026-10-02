@@ -7,6 +7,7 @@ import {
   type MarkdownSerializerState,
 } from 'prosemirror-markdown'
 import { marks, nodes, schema } from './schema.ts'
+import { parseChapterRefAddress } from '../../domain/chapter_reference/chapter_reference.ts'
 
 /**
  * 正文持久化格式（Markdown）与编辑器文档之间的转换。
@@ -103,6 +104,40 @@ function headingText(open: Token, content: string, lines: readonly string[]): st
 tokenizer.core.ruler.push('writer_soft_break', (state) => {
   for (const token of state.tokens) {
     if (token.type === 'inline' && token.children) joinSoftBreaks(token.children)
+  }
+})
+
+/**
+ * 章节引用（docs/decisions.md 第 9 节）：地址以 `writer:` 开头的链接合成一个 chapter_ref 记号，
+ * 链接文字（缓存）取其中的纯文字，与 Rust `render::markdown::plain_text` 相同。格式错误的地址同样是引用（失效）。
+ */
+tokenizer.core.ruler.push('writer_chapter_ref', (state) => {
+  for (const token of state.tokens) {
+    if (token.type !== 'inline' || !token.children) continue
+    const children: Token[] = []
+    for (let i = 0; i < token.children.length; i++) {
+      const open = token.children[i]
+      const href = open.type === 'link_open' ? (open.attrGet('href') ?? '') : ''
+      if (open.type !== 'link_open' || parseChapterRefAddress(href).kind === 'link') {
+        children.push(open)
+        continue
+      }
+      let text = ''
+      let depth = 1
+      for (i++; i < token.children.length; i++) {
+        const child = token.children[i]
+        if (child.type === 'link_open') depth++
+        else if (child.type === 'link_close' && --depth === 0) break
+        else if (child.type === 'image') text += imageAlt(child)
+        else if (child.type === 'hardbreak') text += ' '
+        else text += child.content
+      }
+      const ref = new state.Token('chapter_ref', '', 0)
+      ref.attrs = [['href', href]]
+      ref.content = text
+      children.push(ref)
+    }
+    token.children = children
   }
 })
 
@@ -246,6 +281,7 @@ const parser = new MarkdownParser(schema, tokenizer, {
   image: { node: 'image', getAttrs: imageAttrs },
   figure: { node: 'figure', getAttrs: imageAttrs },
   hardbreak: { node: 'hard_break' },
+  chapter_ref: { node: 'chapter_ref', getAttrs: (token) => ({ href: token.attrGet('href') ?? '', cached: token.content }) },
   em: { mark: 'em' },
   strong: { mark: 'strong' },
   s: { mark: 'strike' },
@@ -404,6 +440,9 @@ const serializer = new MarkdownSerializer(
     image(state, node) {
       state.write(imageMarkdown(state, node))
     },
+    chapter_ref(state, node) {
+      state.write(`[${state.esc(node.attrs.cached)}](${destination(node.attrs.href)})`)
+    },
     // 与只含这张图片的段落写法相同：Markdown 中没有新的语法。
     figure(state, node) {
       state.write(imageMarkdown(state, node))
@@ -479,6 +518,7 @@ function isList(node: Node): boolean {
 // 编辑器中可以做出一些 Markdown 无法原样表达的内容。写出前按渲染结果等价地调整，
 // 保证文字永远不会被破坏（不会多出字面的 * 或丢字），编辑器中的文档不受影响：
 // 1. 行首 / 行尾的空白、段首段尾的硬换行在 Markdown 中不显示（段首四个空格还会变成代码块）：去掉。
+//    章节引用上的链接与行内代码无法表达（链接不能嵌套，代码中没有链接）：去掉这两种格式，引用不变。
 // 2. CommonMark 的 * / ~~ 只有在两侧字符满足 flanking 规则时才生效：标记内侧紧挨空白，或内侧紧挨标点、
 //    外侧紧挨文字时（中文里很常见：是**“重要”**的）会变成字面的星号。
 //    把这类边界上的空白与标点移到标记之外（是“**重要**”的）。
@@ -486,6 +526,7 @@ function isList(node: Node): boolean {
 //    依次去掉强调、全部格式，直到文字能原样读回。
 
 const FLANKING_MARKS = [marks.strong, marks.em, marks.strike]
+const UNWRAPPED = [marks.link, marks.code]
 
 const isPunctuation = (char: string) => /[\p{P}\p{S}]/u.test(char)
 const isSpace = (char: string | null) => char !== null && /\s/u.test(char)
@@ -522,7 +563,7 @@ function representableBlock(block: Node): Node {
   if (block.type.spec.code) return block
   const cached = representableBlocks.get(block)
   if (cached) return cached
-  const adjusted = adjustEmphasis(trimLines(block))
+  const adjusted = adjustEmphasis(trimLines(unwrapChapterRefs(block)))
   let result = adjusted
   if (hasMarks(adjusted) && !roundTrips(adjusted)) {
     const fallbacks = [withoutMarks(adjusted, FLANKING_MARKS), withoutMarks(adjusted, null)]
@@ -557,6 +598,19 @@ function roundTrips(block: Node): boolean {
   return parsed.childCount === 1 && first!.type === nodes.paragraph && first!.content.eq(paragraph.content)
 }
 
+function unwrapChapterRefs(block: Node): Node {
+  let changed = false
+  const children: Node[] = []
+  block.forEach((child) => {
+    const kept = child.type === nodes.chapter_ref ? child.marks.filter((mark) => !UNWRAPPED.includes(mark.type)) : null
+    if (kept && kept.length !== child.marks.length) {
+      changed = true
+      children.push(child.mark(kept))
+    } else children.push(child)
+  })
+  return changed ? block.copy(Fragment.fromArray(children)) : block
+}
+
 /** 去掉每行（以硬换行分隔）首尾的空白（行内代码中的空白保留），以及段首、段尾的硬换行。 */
 function trimLines(block: Node): Node {
   const original: Node[] = []
@@ -587,8 +641,9 @@ function trimLines(block: Node): Node {
 }
 
 interface Unit {
-  /** 文字的一个字符；图片、硬换行等为 null。 */
-  readonly char: string | null
+  /** 写成 Markdown 后的首 / 尾字符：文字是它本身；章节引用是 [ 与 )；图片、硬换行等为 null。 */
+  readonly first: string | null
+  readonly last: string | null
   node: Node
 }
 
@@ -601,10 +656,12 @@ function adjustEmphasis(block: Node): Node {
 
   const units: Unit[] = []
   block.forEach((child) => {
-    if (!child.isText) units.push({ char: null, node: child })
-    else for (const char of child.text!) units.push({ char, node: schema.text(char, child.marks) })
+    if (child.type === nodes.chapter_ref) units.push({ first: '[', last: ')', node: child })
+    else if (!child.isText) units.push({ first: null, last: null, node: child })
+    else for (const char of child.text!) units.push({ first: char, last: char, node: schema.text(char, child.marks) })
   })
-  const charAt = (i: number) => (i < 0 || i >= units.length ? null : units[i].char ?? '\n')
+  const firstAt = (i: number) => (i < 0 || i >= units.length ? null : units[i].first ?? '\n')
+  const lastAt = (i: number) => (i < 0 || i >= units.length ? null : units[i].last ?? '\n')
 
   let changed = false
   for (const type of FLANKING_MARKS) {
@@ -624,8 +681,8 @@ function adjustEmphasis(block: Node): Node {
       // 标记内侧的空白移到外侧（Markdown 中 ** 内侧不能紧挨空白）；内侧是标点而外侧是文字时，标点移到外侧。
       const movable = (inner: string | null, outer: string | null) =>
         isSpace(inner) || (isPunctuation(inner ?? '') && isWord(outer))
-      while (start < end && movable(charAt(start), charAt(start - 1))) drop(start++)
-      while (end > start && movable(charAt(end - 1), charAt(end))) drop(--end)
+      while (start < end && movable(firstAt(start), lastAt(start - 1))) drop(start++)
+      while (end > start && movable(lastAt(end - 1), firstAt(end))) drop(--end)
       i = Math.max(end, i + 1)
       while (i < units.length && type.isInSet(units[i].node.marks)) i++
     }

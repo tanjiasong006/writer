@@ -568,6 +568,10 @@ impl Writer<'_> {
         for inline in inlines {
             p = match inline {
                 Inline::Text(text) => p.add_run(styled(Run::new().add_text(xml_safe(text)), style)),
+                // 章节引用暂按链接文字输出（生成文字与文档内跳转见实施计划“章节交叉引用”第 3 步）。
+                Inline::ChapterRef { cached, .. } => {
+                    p.add_run(styled(Run::new().add_text(xml_safe(cached)), style))
+                }
                 Inline::Strong(children) => self.inlines(
                     p,
                     children,

@@ -2,6 +2,7 @@
 //!
 //! 章节标题与编号只来自文档结构（前端传入），正文 Markdown 中不包含它们（docs/decisions.md 第 3 节）。
 
+pub mod chapter_reference;
 #[cfg(test)]
 mod contract_tests;
 pub mod markdown;

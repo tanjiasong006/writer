@@ -1,0 +1,95 @@
+{
+  "说明": "章节交叉引用（docs/decisions.md 第 9 节）：地址以 writer: 开头的链接。链接文字是缓存（cached），只保留纯文字。** 前是中文、后是 [ 时不能开始强调，第三段句中的星号保留为文字。",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "见" },
+        { "ref": { "id": "7a1e", "show": "number-title" }, "cached": "2.1 研究方法" },
+        { "text": "，另见" },
+        { "ref": { "id": "7a1e", "show": "number" }, "cached": "2.1" },
+        { "text": "与" },
+        { "ref": { "id": "7a1e", "show": "title" }, "cached": "研究方法" },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "未知格式" },
+        { "ref": { "id": "7a1e", "show": "number-title" }, "cached": "旧文字" },
+        { "text": "按默认格式；中文 id：" },
+        { "ref": { "id": "绪论", "show": "number-title" }, "cached": "绪论" },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "ref": { "id": "b2", "show": "number-title" }, "cached": "加粗的引用", "marks": ["strong"] },
+        { "text": " 在段首；见**" },
+        { "ref": { "id": "b2", "show": "number-title" }, "cached": "句中" },
+        { "text": "**的星号是文字。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "链接文字只保留纯文字：" },
+        { "ref": { "id": "c3", "show": "number-title" }, "cached": "2.2 数据 来源" },
+        { "text": "；空文字：" },
+        { "ref": { "id": "c3", "show": "number-title" }, "cached": "" },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "格式错误：" },
+        { "ref": null, "cached": "失效" },
+        { "text": "、" },
+        { "ref": null, "cached": "也失效" },
+        { "text": "、" },
+        { "ref": null, "cached": "编码错误" },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "普通链接不受影响：" },
+        { "text": "网站", "marks": ["link:https://example.com"] },
+        { "text": "、" },
+        { "text": "大写协议", "marks": ["link:WRITER:chapter/a"] },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "table",
+      "align": ["none", "none"],
+      "header": [[{ "text": "章节" }], [{ "text": "说明" }]],
+      "rows": [
+        [[{ "ref": { "id": "7a1e", "show": "number-title" }, "cached": "2.1 研究方法" }], [{ "text": "表格中的引用" }]]
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [
+        {
+          "task": false,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                { "text": "任务中的" },
+                { "ref": { "id": "7a1e", "show": "number-title" }, "cached": "引用" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
