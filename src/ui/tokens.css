@@ -73,6 +73,9 @@
   --color-doc-selection-inactive: #e3e3e6;
   /* 自绘选区底色盖在文字上方，靠混合模式透出文字：浅色背景用正片叠底，深色背景用滤色（叠底会把浅色文字压暗）。 */
   --color-doc-selection-blend: multiply;
+  /* 正文中的链接与章节引用：接近正文墨色的低饱和深蓝，下划线更淡，不比正文更抢眼。 */
+  --color-doc-link: #2f4b74;
+  --color-doc-link-rule: rgba(47, 75, 116, 0.32);
   /* 代码块语法高亮：低饱和，在代码底色上可读，不比正文更抢眼。 */
   --color-code-comment: #7c7c80;
   --color-code-keyword: #a23d6e;
@@ -180,6 +183,8 @@
     --color-doc-selection: #2d4a78;
     --color-doc-selection-inactive: #3a3a3e;
     --color-doc-selection-blend: screen;
+    --color-doc-link: #a8bcda;
+    --color-doc-link-rule: rgba(168, 188, 218, 0.36);
     --color-code-comment: #8a8a90;
     --color-code-keyword: #e07ba4;
     --color-code-string: #8fc58c;

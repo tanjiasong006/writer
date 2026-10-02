@@ -223,10 +223,11 @@
 
 .document-body a[data-href],
 .document-body .chapter-ref {
-  color: var(--color-accent-text);
+  color: var(--color-doc-link);
   text-decoration: underline;
-  text-decoration-color: var(--color-accent-fill-strong);
-  text-underline-offset: 0.18em;
+  text-decoration-color: var(--color-doc-link-rule);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
 }
 
 /* 失效的章节引用：显示原来的链接文字，以警示色与虚线下划线区分。 */
