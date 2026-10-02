@@ -20,6 +20,8 @@ export class MemoryDocumentOutput implements DocumentOutput {
   }> = []
   /** 下一次导出报告中缺失的图片。 */
   missingImages: string[] = []
+  /** 下一次导出报告中失效的章节引用。 */
+  brokenReferences: string[] = []
 
   async exportDocument(
     _projectPath: string,
@@ -31,7 +33,7 @@ export class MemoryDocumentOutput implements DocumentOutput {
     this.exports.push({ format, targetPath, request, pdfLayout })
     const failure = this.failures.shift()
     if (failure) return { ok: false, error: failure }
-    return { ok: true, value: { missingImages: this.missingImages } }
+    return { ok: true, value: { missingImages: this.missingImages, brokenReferences: this.brokenReferences } }
   }
 
   readonly previews: Array<{ request: RenderRequest; pdfLayout: PdfLayout }> = []

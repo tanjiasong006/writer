@@ -29,6 +29,7 @@ use super::fonts::{docx_fonts, FontFamily};
 use super::images::{display_size_pt, load_for_export, text_height_pt, Bounds};
 use super::theme::Theme;
 use super::{ExportError, ExportReport};
+use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::markdown::{Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
 
@@ -93,7 +94,11 @@ pub fn export(
     let mut writer = Writer {
         theme: Theme::default(),
         root: project_root,
-        report: ExportReport::default(),
+        report: ExportReport {
+            broken_references: broken_references(document),
+            ..ExportReport::default()
+        },
+        targets: ChapterTargets::new(document),
         next_numbering: FIRST_LIST_NUMBERING,
         numberings: Vec::new(),
         items: Vec::new(),
@@ -228,6 +233,8 @@ struct Writer<'a> {
     theme: Theme,
     root: &'a Path,
     report: ExportReport,
+    /// 章节引用的目标。
+    targets: ChapterTargets,
     next_numbering: usize,
     numberings: Vec<Numbering>,
     items: Vec<Item>,
@@ -258,9 +265,17 @@ impl Writer<'_> {
         } else {
             format!("{} {}", section.number, section.title)
         };
-        self.items.push(Item::Paragraph(
-            heading(level).add_run(Run::new().add_text(xml_safe(&text))),
-        ));
+        let mut paragraph = heading(level);
+        // 书签供章节引用跳转。
+        let bookmark = self.targets.by_id(&section.chapter_id).map(|t| t.index);
+        if let Some(index) = bookmark {
+            paragraph = paragraph.add_bookmark_start(index, chapter_bookmark(index));
+        }
+        paragraph = paragraph.add_run(Run::new().add_text(xml_safe(&text)));
+        if let Some(index) = bookmark {
+            paragraph = paragraph.add_bookmark_end(index);
+        }
+        self.items.push(Item::Paragraph(paragraph));
         for block in &section.blocks {
             self.block(block, section, BlockContext::default());
         }
@@ -568,10 +583,20 @@ impl Writer<'_> {
         for inline in inlines {
             p = match inline {
                 Inline::Text(text) => p.add_run(styled(Run::new().add_text(xml_safe(text)), style)),
-                // 章节引用暂按链接文字输出（生成文字与文档内跳转见实施计划“章节交叉引用”第 3 步）。
-                Inline::ChapterRef { cached, .. } => {
-                    p.add_run(styled(Run::new().add_text(xml_safe(cached)), style))
-                }
+                // 章节引用：按当前结构生成文字并链接到目标章节标题的书签；失效引用输出链接文字（列入导出报告）。
+                Inline::ChapterRef { target, cached } => match self.targets.get(target) {
+                    Some(chapter) => {
+                        let number = (!chapter.number.is_empty()).then_some(chapter.number.as_str());
+                        let show = target.as_ref().map_or(RefShow::NumberTitle, |t| t.show);
+                        let text = ref_text(number, &chapter.title, show);
+                        let run = styled(Run::new().add_text(xml_safe(&text)), style).color(LINK_COLOR);
+                        p.add_hyperlink(
+                            Hyperlink::new(chapter_bookmark(chapter.index), HyperlinkType::Anchor)
+                                .add_run(run),
+                        )
+                    }
+                    None => p.add_run(styled(Run::new().add_text(xml_safe(cached)), style)),
+                },
                 Inline::Strong(children) => self.inlines(
                     p,
                     children,
@@ -936,6 +961,11 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
         .add_numbering(Numbering::new(BULLET_NUMBERING, BULLET_ABSTRACT))
 }
 
+/// 章节标题的书签名（章节引用的跳转目标）。下划线开头是 Word 的隐藏书签，不出现在书签列表中。
+fn chapter_bookmark(index: usize) -> String {
+    format!("_WriterChapter{index}")
+}
+
 /// 标题段落：与下一段落留在同一页，标题本身不跨页拆开，避免标题孤零零地留在页面底部。
 fn heading(level: usize) -> Paragraph {
     Paragraph::new()
@@ -1127,6 +1157,27 @@ mod tests {
         assert!(!xml.contains(r#"<w:pStyle w:val="Subtitle" />"#));
         assert!(!xml.contains(r#"<w:pStyle w:val="Author" />"#));
         assert!(!part(&bytes, "docProps/core.xml").contains("dc:creator"));
+    }
+
+    #[test]
+    fn chapter_references_link_to_heading_bookmarks() {
+        let dir = project();
+        let markdown = "见[旧](writer:chapter/c)、[旧](writer:chapter/b?show=number)；失效：[原目标](writer:chapter/gone)。";
+        let (bytes, report) = export_ok(
+            &dir,
+            &[("a", vec![1], "绪论", markdown), ("b", vec![1, 1], "背景", ""), ("c", vec![2], "方法", "")],
+        );
+        let xml = part(&bytes, "word/document.xml");
+        for index in 0..3 {
+            assert!(xml.contains(&format!(r#"<w:bookmarkStart w:id="{index}" w:name="_WriterChapter{index}" />"#)), "{xml}");
+            assert!(xml.contains(&format!(r#"<w:bookmarkEnd w:id="{index}" />"#)));
+        }
+        assert!(xml.contains(r#"<w:hyperlink w:anchor="_WriterChapter2" "#), "{xml}");
+        assert!(xml.contains(r#"<w:hyperlink w:anchor="_WriterChapter1" "#));
+        assert!(xml.contains(">2 方法</w:t>") && xml.contains(">1.1</w:t>") && xml.contains(">原目标</w:t>"));
+        assert!(!xml.contains(">旧</w:t>"));
+        assert_eq!(xml.matches("<w:hyperlink").count(), 2);
+        assert_eq!(report.broken_references, vec!["原目标"]);
     }
 
     #[test]

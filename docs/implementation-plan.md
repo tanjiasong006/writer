@@ -754,6 +754,18 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   新增 Story（编辑器 ChapterReferences，可模拟章节树变化；阅读器 Default 的“结论”一章）。
   Storybook（Chrome）中目视检查了正常 / 失效引用、章节树变化后的更新、选中状态与全文阅读；深色外观与 Tauri（WebKit）未目视检查。
 
+### 第 3 步：导出（完成，2026-10-02）
+
+- Rust `render::chapter_reference`：`ref_text`（与 Domain `chapterRefText` 相同的规则）、`ChapterTargets`（按 id 查找文档中的章节）、
+  `broken_references`（遍历内容模型收集失效引用，不受渲染中重复测量的影响）。
+- PDF：章节标题带标签 `<writer-chapter-N>`（按章节序号命名，不受 id 字符限制），引用写成 `#link(<…>)[文字]`，
+  颜色与外部链接相同；编号写法与标题共用 `number_text`（跟随章节编号样式，不显示编号时只有标题）。
+- Word：章节标题加隐藏书签 `_WriterChapterN`，引用是指向书签的内部超链接（链接颜色），编号写成 `2.1`，不使用域。
+- 失效引用按链接文字输出；`ExportReport.brokenReferences` 传到前端，导出完成的提示中说明数量。
+  PDF 排版设置的样张只包含文档开头的章节，指向样张之外章节的引用在样张中按链接文字显示（不影响正式导出）。
+- 验证：Rust 文字规则与失效引用收集、PDF（三种编号样式的文字、文档内链接数量、报告）、Word（书签、内部超链接、报告）、
+  前端报告解析与导出提示测试。手动样例（`write_sample`）加入引用，PDF 中目视检查了文字、颜色与跳转页码；Word 未在 Word / WPS 中目视检查。
+
 ## 后续（MVP 之外，按价值排序）
 
 0. 富文本粘贴的后续能力（不是迁移回归）：识别 Word / WPS 的列表段落（目前是带 · 的普通段落）；

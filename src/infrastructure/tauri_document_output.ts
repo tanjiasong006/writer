@@ -16,11 +16,11 @@ export function createTauriDocumentOutput(): DocumentOutput {
           : invoke<unknown>('export_pdf', { ...args, layout: pdfLayout }),
       )
       if (!result.ok) return result
-      const raw = result.value as { missingImages?: unknown } | null
-      const missing = Array.isArray(raw?.missingImages)
-        ? raw.missingImages.filter((item): item is string => typeof item === 'string')
-        : []
-      return { ok: true, value: { missingImages: missing } }
+      const raw = result.value as { missingImages?: unknown; brokenReferences?: unknown } | null
+      return {
+        ok: true,
+        value: { missingImages: strings(raw?.missingImages), brokenReferences: strings(raw?.brokenReferences) },
+      }
     },
     async previewPdf(projectPath, request, pdfLayout) {
       const result = await call(() =>
@@ -33,6 +33,10 @@ export function createTauriDocumentOutput(): DocumentOutput {
       return { ok: true, value: pages }
     },
   }
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
 
 async function call<T>(run: () => Promise<T>): Promise<OutputResult<T>> {

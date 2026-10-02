@@ -29,6 +29,7 @@ use super::images::{display_size_pt, load_for_export, Bounds};
 use super::pdf_layout::{Binding, ChapterNumber, Header, PageNumber, PageSetup, ParagraphStyle, PdfLayout, TableStyle};
 use super::theme::{HeadingStyle, Theme};
 use super::{ExportError, ExportReport};
+use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::markdown::{plain_text, Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
 
@@ -82,6 +83,8 @@ fn layout(
     }
 
     let mut writer = Writer::new(project_root, pdf_layout);
+    writer.targets = ChapterTargets::new(document);
+    writer.report.broken_references = broken_references(document);
     writer.preamble(document, book);
     for section in &document.sections {
         writer.section(section);
@@ -231,6 +234,8 @@ struct Writer<'a> {
     quote_font: String,
     /// 封面关闭时文档信息放在正文首页顶部，第一章紧接其后，不另起一页。
     title_block_before_body: bool,
+    /// 章节引用的目标；默认不含任何章节。
+    targets: ChapterTargets,
 }
 
 impl<'a> Writer<'a> {
@@ -246,6 +251,7 @@ impl<'a> Writer<'a> {
             report: ExportReport::default(),
             quote_font: String::new(),
             title_block_before_body: false,
+            targets: ChapterTargets::default(),
         }
     }
 
@@ -434,14 +440,21 @@ impl<'a> Writer<'a> {
         self.quote_font = font_list(theme.blockquote.font.into());
     }
 
+    /// 章节编号在 PDF 中的写法（随排版配置）；不显示编号时为 None。标题与章节引用共用。
+    fn number_text(&self, number: &str, depth: usize) -> Option<String> {
+        match self.layout.chapter_number {
+            _ if number.is_empty() => None,
+            ChapterNumber::None => None,
+            ChapterNumber::Chapter if depth <= 1 => Some(format!("第 {number} 章")),
+            _ => Some(number.to_owned()),
+        }
+    }
+
     fn section(&mut self, section: &Section) {
         let depth = section.depth.max(1);
-        let text = match (self.layout.chapter_number, section.number.is_empty()) {
-            (ChapterNumber::None, _) | (_, true) => section.title.clone(),
-            (ChapterNumber::Chapter, false) if depth == 1 => {
-                format!("第 {} 章 {}", section.number, section.title)
-            }
-            _ => format!("{} {}", section.number, section.title),
+        let text = match self.number_text(&section.number, depth) {
+            None => section.title.clone(),
+            Some(number) => format!("{number} {}", section.title),
         };
         // 一级章节另起一页，上方留白；双面装订时从右页开始。页首的块间距会被丢弃，因此用固定留白。
         // 不用封面时，第一章紧接首页顶部的文档信息。
@@ -454,7 +467,13 @@ impl<'a> Writer<'a> {
             self.out.push_str(&format!("{page_break}#v({}pt)\n", num(CHAPTER_TOP_SPACE_PT)));
         }
         self.title_block_before_body = false;
-        self.out.push_str(&format!("#heading(level: {depth})[#{}]\n\n", string(&text)));
+        // 标签供章节引用跳转（按章节序号命名，不受 id 中字符的限制）。
+        let label = self
+            .targets
+            .by_id(&section.chapter_id)
+            .map(|target| format!(" {}", chapter_label(target.index)))
+            .unwrap_or_default();
+        self.out.push_str(&format!("#heading(level: {depth})[#{}]{label}\n\n", string(&text)));
         for block in &section.blocks {
             let rendered = self.block(block, section);
             self.out.push_str(&rendered);
@@ -577,11 +596,27 @@ impl<'a> Writer<'a> {
         let mut out = String::new();
         for inline in inlines {
             match inline {
-                // 章节引用暂按链接文字输出（生成文字与文档内跳转见实施计划“章节交叉引用”第 3 步）。
-                Inline::Text(text) | Inline::ChapterRef { cached: text, .. } => {
+                Inline::Text(text) => {
                     out.push('#');
                     out.push_str(&string(&breakable(text)));
                 }
+                // 章节引用：按当前结构生成文字并链接到目标章节标题；失效引用输出链接文字（列入导出报告）。
+                Inline::ChapterRef { target, cached } => match self.targets.get(target) {
+                    Some(chapter) => {
+                        let number = self.number_text(&chapter.number, chapter.depth);
+                        let show = target.as_ref().map_or(RefShow::NumberTitle, |t| t.show);
+                        let text = ref_text(number.as_deref(), &chapter.title, show);
+                        out.push_str(&format!(
+                            "#link({})[#{}]",
+                            chapter_label(chapter.index),
+                            string(&breakable(&text))
+                        ));
+                    }
+                    None => {
+                        out.push('#');
+                        out.push_str(&string(&breakable(cached)));
+                    }
+                },
                 Inline::Strong(children) => {
                     out.push_str(&format!("#strong[{}]", self.inlines(children, container)))
                 }
@@ -786,6 +821,11 @@ fn breakable(text: &str) -> String {
 }
 
 /// Typst 字符串字面量：转义反斜杠、引号与换行，去掉其余控制字符。
+/// 章节标题的标签（章节引用的跳转目标）。
+fn chapter_label(index: usize) -> String {
+    format!("<writer-chapter-{index}>")
+}
+
 fn string(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
     out.push('"');
@@ -1603,6 +1643,54 @@ mod tests {
         layout(document, dir.path(), system_fonts(), &pdf_layout).unwrap().0
     }
 
+    /// 页面中指向文档内部位置（而不是网址）的链接数量。
+    fn internal_links(paged: &PagedDocument) -> usize {
+        fn walk(frame: &typst::layout::Frame) -> usize {
+            use typst::layout::FrameItem;
+            frame
+                .items()
+                .map(|(_, item)| match item {
+                    FrameItem::Group(group) => walk(&group.frame),
+                    FrameItem::Link(destination, _) => {
+                        usize::from(!matches!(destination, typst::model::Destination::Url(_)))
+                    }
+                    _ => 0,
+                })
+                .sum()
+        }
+        paged.pages().iter().map(|page| walk(&page.frame)).sum()
+    }
+
+    #[test]
+    fn chapter_references_follow_the_chapter_number_style_and_link_to_headings() {
+        let markdown = "见[旧](writer:chapter/c)、[旧](writer:chapter/b?show=number)与[旧](writer:chapter/c?show=title)；\
+                        失效：[原目标](writer:chapter/gone)、[坏地址](writer:chapter/)。";
+        let document = build(&request(
+            "",
+            &[
+                ("a", vec![1], "绪论", markdown),
+                ("b", vec![1, 1], "背景", ""),
+                ("c", vec![2], "方法", ""),
+            ],
+        ));
+        let dir = project();
+        let (paged, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
+        let text = page_texts(&paged).concat();
+        assert!(text.contains("见2 方法、1.1与方法；失效：原目标、坏地址。"), "{text}");
+        // 目录条目也是文档内链接：关闭目录后只剩三个有效引用。
+        let no_toc = layout_with(&document, PdfLayout { toc: false, ..PdfLayout::default() });
+        assert_eq!(internal_links(&no_toc), 3);
+        assert_eq!(report.broken_references, vec!["原目标", "坏地址"]);
+
+        let chapter = layout_with(&document, PdfLayout { chapter_number: ChapterNumber::Chapter, ..PdfLayout::default() });
+        let text = page_texts(&chapter).concat();
+        assert!(text.contains("见第 2 章 方法、1.1与方法"), "{text}");
+
+        let hidden = layout_with(&document, PdfLayout { chapter_number: ChapterNumber::None, ..PdfLayout::default() });
+        let text = page_texts(&hidden).concat();
+        assert!(text.contains("见方法、背景与方法"), "{text}");
+    }
+
     fn three_chapters(title: &str) -> Document {
         build(&request(
             title,
@@ -2278,7 +2366,7 @@ fn write_sample_pdf() {
         subtitle: "长文档写作与输出示例".into(),
         author: "Writer 团队".into(),
         chapters: vec![
-            chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二\n\n注入测试：\"]#panic(\"x\")[ $ x $ #strong[不应加粗]"),
+            chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二\n\n注入测试：\"]#panic(\"x\")[ $ x $ #strong[不应加粗]\n\n章节引用：详见[旧](writer:chapter/c)与第[旧](writer:chapter/b?show=number)节。"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],

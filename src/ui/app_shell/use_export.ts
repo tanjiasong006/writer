@@ -65,11 +65,13 @@ export function useExport(options: {
       }
       const fileName = target.split(/[\\/]/).pop() ?? target
       const missing = result.value.missingImages.length
+      const broken = result.value.brokenReferences.length
+      const problems = [
+        missing > 0 ? `${missing} 张图片无法嵌入，已用文字占位` : null,
+        broken > 0 ? `${broken} 处章节引用已失效，已按原来的文字输出` : null,
+      ].filter((problem) => problem !== null)
       showNotice({
-        message:
-          missing > 0
-            ? `已导出 ${fileName}，其中 ${missing} 张图片无法嵌入，已用文字占位。`
-            : `已导出 ${fileName}`,
+        message: problems.length > 0 ? `已导出 ${fileName}，其中 ${problems.join('；')}。` : `已导出 ${fileName}`,
         path: target,
       })
     } finally {

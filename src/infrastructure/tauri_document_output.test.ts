@@ -20,11 +20,11 @@ beforeEach(() => {
 })
 
 test('按格式调用对应命令，并解析导出报告', async () => {
-  invokeMock.mockResolvedValue({ missingImages: ['../assets/a.png', 3] })
+  invokeMock.mockResolvedValue({ missingImages: ['../assets/a.png', 3], brokenReferences: ['原目标'] })
   const output = createTauriDocumentOutput()
   expect(await output.exportDocument('/p', request, 'docx', '/out/论文.docx', layout)).toEqual({
     ok: true,
-    value: { missingImages: ['../assets/a.png'] },
+    value: { missingImages: ['../assets/a.png'], brokenReferences: ['原目标'] },
   })
   expect(invokeMock).toHaveBeenCalledWith('export_docx', { path: '/p', document: request, target: '/out/论文.docx' })
 

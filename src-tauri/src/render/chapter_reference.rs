@@ -1,6 +1,11 @@
 //! 章节交叉引用的地址（docs/project-format.md 第 4.1 节）：`writer:chapter/<百分号编码的 id>[?show=number|title]`。
 //! 与前端 `domain/chapter_reference` 的规则相同，由共享 Markdown fixture 约束。
 
+use std::collections::HashMap;
+
+use super::markdown::{Block, Inline};
+use super::Document;
+
 /// 引用的显示格式。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefShow {
@@ -81,6 +86,109 @@ fn decode(encoded: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// 引用显示的文字（与前端 `chapterRefText` 相同）：number 是该输出中编号的写法，不显示编号时为 None。
+/// 不显示编号时只有标题；标题为空时只有编号。
+pub fn ref_text(number: Option<&str>, title: &str, show: RefShow) -> String {
+    match number {
+        None => title.to_owned(),
+        Some(number) if title.is_empty() || show == RefShow::Number => number.to_owned(),
+        Some(_) if show == RefShow::Title => title.to_owned(),
+        Some(number) => format!("{number} {title}"),
+    }
+}
+
+/// 可被引用的章节。
+#[derive(Debug, Clone)]
+pub struct ChapterTarget {
+    /// 在 `Document::sections` 中的序号。
+    pub index: usize,
+    /// 显示编号，如 "2.1"；空串表示没有编号。
+    pub number: String,
+    pub title: String,
+    /// 章节层级，根层级为 1。
+    pub depth: usize,
+}
+
+/// 文档中的章节，按 id 查找引用目标。默认值不含任何章节（所有引用都失效）。
+#[derive(Debug, Clone, Default)]
+pub struct ChapterTargets {
+    by_id: HashMap<String, ChapterTarget>,
+}
+
+impl ChapterTargets {
+    pub fn new(document: &Document) -> Self {
+        let by_id = document
+            .sections
+            .iter()
+            .enumerate()
+            .map(|(index, section)| {
+                let target = ChapterTarget {
+                    index,
+                    number: section.number.clone(),
+                    title: section.title.clone(),
+                    depth: section.depth,
+                };
+                (section.chapter_id.clone(), target)
+            })
+            .collect();
+        ChapterTargets { by_id }
+    }
+
+    /// 引用的目标章节；地址格式错误或章节不在文档中（失效引用）时为 None。
+    pub fn get(&self, target: &Option<RefTarget>) -> Option<&ChapterTarget> {
+        self.by_id(&target.as_ref()?.id)
+    }
+
+    pub fn by_id(&self, id: &str) -> Option<&ChapterTarget> {
+        self.by_id.get(id)
+    }
+}
+
+/// 文档中全部失效引用的链接文字，按阅读顺序（导出报告）。
+pub fn broken_references(document: &Document) -> Vec<String> {
+    let targets = ChapterTargets::new(document);
+    let mut out = Vec::new();
+    for section in &document.sections {
+        broken_in_blocks(&section.blocks, &targets, &mut out);
+    }
+    out
+}
+
+fn broken_in_blocks(blocks: &[Block], targets: &ChapterTargets, out: &mut Vec<String>) {
+    for block in blocks {
+        match block {
+            Block::Paragraph(inlines) => broken_in_inlines(inlines, targets, out),
+            Block::List { items, .. } => {
+                for item in items {
+                    broken_in_blocks(item, targets, out);
+                }
+            }
+            Block::Quote(children) => broken_in_blocks(children, targets, out),
+            Block::Table { header, rows, .. } => {
+                for cell in header.iter().chain(rows.iter().flatten()) {
+                    broken_in_inlines(cell, targets, out);
+                }
+            }
+            Block::Code { .. } | Block::Rule => {}
+        }
+    }
+}
+
+fn broken_in_inlines(inlines: &[Inline], targets: &ChapterTargets, out: &mut Vec<String>) {
+    for inline in inlines {
+        match inline {
+            Inline::ChapterRef { target, cached } if targets.get(target).is_none() => {
+                out.push(cached.clone())
+            }
+            Inline::Strong(children)
+            | Inline::Emphasis(children)
+            | Inline::Strike(children)
+            | Inline::Link { children, .. } => broken_in_inlines(children, targets, out),
+            _ => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +231,47 @@ mod tests {
         assert_eq!(
             parse_address("writer:chapter/章"),
             target("章", RefShow::NumberTitle)
+        );
+    }
+
+    #[test]
+    fn reference_text() {
+        assert_eq!(
+            ref_text(Some("2.1"), "方法", RefShow::NumberTitle),
+            "2.1 方法"
+        );
+        assert_eq!(ref_text(Some("2.1"), "方法", RefShow::Number), "2.1");
+        assert_eq!(ref_text(Some("2.1"), "方法", RefShow::Title), "方法");
+        assert_eq!(ref_text(None, "方法", RefShow::Number), "方法");
+        assert_eq!(ref_text(Some("2.1"), "", RefShow::Title), "2.1");
+        assert_eq!(
+            ref_text(Some("第 2 章"), "方法", RefShow::NumberTitle),
+            "第 2 章 方法"
+        );
+    }
+
+    #[test]
+    fn broken_references_in_reading_order() {
+        let request = crate::render::RenderRequest {
+            chapters: vec![
+                crate::render::RenderChapter {
+                    id: "a".into(),
+                    number: vec![1],
+                    title: "甲".into(),
+                    markdown: "[有效](writer:chapter/b)、**[已删](writer:chapter/x)**\n\n> - [坏](writer:chapter/)\n".into(),
+                },
+                crate::render::RenderChapter {
+                    id: "b".into(),
+                    number: vec![2],
+                    title: "乙".into(),
+                    markdown: "| [表中](writer:chapter/y) |\n| --- |\n".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            broken_references(&crate::render::build(&request)),
+            vec!["已删", "坏", "表中"]
         );
     }
 

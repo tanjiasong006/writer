@@ -582,6 +582,12 @@ test('导出：取消选择位置不导出；失败时显示原因；图片缺�
   services.output.missingImages = ['../assets/丢失.png']
   await exportPdf(wrapper)
   expect(wrapper.find('.workspace__notice').text()).toContain('1 张图片无法嵌入')
+
+  services.output.brokenReferences = ['原目标', '另一处']
+  await exportPdf(wrapper)
+  expect(wrapper.find('.workspace__notice').text()).toContain(
+    '其中 1 张图片无法嵌入，已用文字占位；2 处章节引用已失效，已按原来的文字输出。',
+  )
 })
 
 test('侧栏宽度：分隔线可用方向键调整，限制在 180–480px', async () => {

@@ -50,6 +50,8 @@ export type ExportFormat = 'docx' | 'pdf'
 export interface ExportReport {
   /** 无法嵌入的图片引用（缺失、越出项目、格式损坏）。 */
   readonly missingImages: readonly string[]
+  /** 失效的章节引用（目标章节不存在或地址格式错误）的链接文字，已按文字输出。 */
+  readonly brokenReferences: readonly string[]
 }
 
 export interface DocumentOutput {
