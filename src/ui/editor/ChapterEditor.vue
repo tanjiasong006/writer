@@ -396,6 +396,21 @@ function readingPosition(): BlockPosition {
  * 从全文阅读回来：把该位置滚到与阅读时相同的高度，光标放在视口中第一个完整显示的块的开头，
  * 接着输入时正文不会跳到别处。
  */
+/** 选中章节中第 index 个引用（从 0 开始）并滚动到可见，正文获得焦点（如从失效引用列表跳过来）。 */
+function selectChapterRef(chapterId: ChapterId, index: number): void {
+  if (!view || chapterId !== currentId) return
+  let found = -1
+  let count = 0
+  view.state.doc.descendants((node, pos) => {
+    if (found >= 0) return false
+    if (node.type === nodes.chapter_ref && count++ === index) found = pos
+    return true
+  })
+  if (found < 0) return
+  view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, found)).scrollIntoView())
+  focus()
+}
+
 /** 前往章节（如从引用跳转过来）：光标放在正文开头，滚动到顶部，正文获得焦点。 */
 function revealStart(chapterId: ChapterId): void {
   if (!view || !scroller.value || chapterId !== currentId) return
@@ -428,6 +443,9 @@ defineExpose({
   insertImage: insertImageAt,
   insertChapterRef: insertChapterRefAt,
   revealStart,
+  selectChapterRef,
+  /** 更新交叉引用后采用等价的新正文，不改变编辑器状态（见 ChapterDocuments.adopt）。 */
+  adoptContent: (chapterId: ChapterId, text: string) => documents.adopt(chapterId, text),
   runCommand,
   openMenuAtCaret,
   openListMenu,

@@ -17,6 +17,8 @@ import ChapterEditor, { type ChapterRefRequest } from '../editor/ChapterEditor.v
 import ChapterRefPicker from '../editor/ChapterRefPicker.vue'
 import { chapterRefAddress, type ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
 import { useChapterJumps } from './use_chapter_jumps.ts'
+import ChapterRefReportDialog from './ChapterRefReportDialog.vue'
+import { countRefsTo, updateChapterRefs, type BrokenChapterRef, type ChapterRefUpdate } from '../editor/chapter_ref_update.ts'
 import DocumentReader, { type ReadingPosition } from '../reader/DocumentReader.vue'
 import { useServices } from '../services.ts'
 import { useSession } from './use_session.ts'
@@ -267,13 +269,68 @@ function cancelChapterRef(): void {
   editor.value?.focus()
 }
 
+/** 章节完整的名称（编号 + 标题），用于提示。 */
+function chapterName(id: ChapterId): string {
+  const title = findChapter(tree.value, id)?.title || '未命名章节'
+  return `${(numbers.value.get(id) ?? []).join('.')} ${title}`
+}
+
+/** 更新交叉引用的结果（对话框）。 */
+const refReport = shallowRef<ChapterRefUpdate | null>(null)
+
+/** 章节 id，按阅读顺序（与导出相同）。 */
+function readingOrder(): ChapterId[] {
+  const ids: ChapterId[] = []
+  const visit = (nodes: typeof tree.value): void => {
+    for (const node of nodes) {
+      ids.push(node.id)
+      visit(node.children)
+    }
+  }
+  visit(tree.value)
+  return ids
+}
+
+/** 更新交叉引用：链接文字过期的章节写回（正常保存提交），编辑器状态不变；结果在对话框中说明。 */
+function updateAllChapterRefs(): void {
+  const result = updateChapterRefs(readingOrder(), document.value.contents, refLabel.value)
+  for (const [chapterId, text] of result.texts) {
+    editor.value?.adoptContent(chapterId, text)
+    props.session.setContent(chapterId, text)
+  }
+  refReport.value = result
+}
+
+/** 从失效引用列表跳到它所在的位置。 */
+async function showBrokenRef(item: BrokenChapterRef): Promise<void> {
+  refReport.value = null
+  selectedId.value = item.chapterId
+  await nextTick()
+  editor.value?.selectChapterRef(item.chapterId, item.index)
+}
+
+function closeRefReport(): void {
+  refReport.value = null
+  editor.value?.focus()
+}
+
+/** 删除章节时说明：其他章节中指向它（包括它的子章节）的引用数量。 */
+function chapterRefCount(chapterId: ChapterId): number {
+  const node = findChapter(tree.value, chapterId)
+  if (!node) return 0
+  const subtree = new Set<ChapterId>()
+  const visit = (current: typeof node): void => {
+    subtree.add(current.id)
+    current.children.forEach(visit)
+  }
+  visit(node)
+  return countRefsTo(document.value.contents, subtree, (id) => !subtree.has(id))
+}
+
 const jumps = useChapterJumps({
   selectedId,
   exists: (id) => findChapter(tree.value, id) !== null,
-  name: (id) => {
-    const title = findChapter(tree.value, id)?.title || '未命名章节'
-    return `${(numbers.value.get(id) ?? []).join('.')} ${title}`
-  },
+  name: chapterName,
   revealStart: (id) => editor.value?.revealStart(id),
   focus: () => editor.value?.focus(),
 })
@@ -433,6 +490,9 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       else if (command.action === 'back') void jumps.back()
       else switchFocus()
       return
+    case 'insert':
+      updateAllChapterRefs()
+      return
     case 'appearance':
       emit('set-appearance', command.appearance)
       return
@@ -528,6 +588,7 @@ async function createFirstChapter(): Promise<void> {
         class="workspace__chapters"
         :tree="document.tree"
         :has-content="chapterHasContent"
+        :reference-count="chapterRefCount"
         @update:tree="session.applyTree($event)"
         @open="openChapter"
       />
@@ -711,6 +772,16 @@ async function createFirstChapter(): Promise<void> {
         </Toast>
       </div>
     </main>
+
+    <ChapterRefReportDialog
+      v-if="refReport"
+      :chapters="refReport.texts.size"
+      :updated="refReport.updated"
+      :broken="refReport.broken"
+      :chapter-name="chapterName"
+      @select="showBrokenRef"
+      @close="closeRefReport"
+    />
 
     <ChapterRefPicker
       v-if="refPicker"

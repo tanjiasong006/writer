@@ -80,3 +80,17 @@ test('章节引用：写出时链接文字是当前生成的文字；只有编�
     '见[2.1 方法](writer:chapter/a)与[原目标](writer:chapter/gone)。',
   )
 })
+
+test('采用等价的新正文：状态与撤销历史不变，之后撤销回到它时给出它', () => {
+  const documents = new ChapterDocuments()
+  const original = '见[旧](writer:chapter/a)'
+  const state = documents.stateFor('c', original)
+  const label = () => ({ text: '2 方法', id: 'a', name: '2 方法' })
+  documents.refLabel = label
+  documents.adopt('c', '见[2 方法](writer:chapter/a)')
+  expect(documents.isCurrent('c', '见[2 方法](writer:chapter/a)')).toBe(true)
+  expect(documents.stateFor('c', '见[2 方法](writer:chapter/a)')).toBe(state)
+  const typed = typeAtEnd(state, '。')
+  expect(documents.update('c', typed)).toBe('见[2 方法](writer:chapter/a)。')
+  expect(documents.update('c', undone(typed))).toBe('见[2 方法](writer:chapter/a)')
+})

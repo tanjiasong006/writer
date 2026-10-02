@@ -430,3 +430,26 @@ test('折叠状态通过 update:collapsedIds 通知上层', async () => {
   expect(emitted).toHaveLength(1)
   expect([...(emitted![0][0] as Set<string>)]).toEqual(['a'])
 })
+
+test('被其他章节引用的章节：即使是空章节也先确认，并说明引用数量', async () => {
+  const wrapper = mountManager(nested, 'b', () => false)
+  await wrapper.setProps({ referenceCount: (id: string) => (id === 'b' ? 2 : 0) })
+  await openMenu(wrapper, 4) // b
+  await menuItem(wrapper, '删除')
+  await flushPromises()
+
+  const confirm = wrapper.find('.chapter-manager__confirm')
+  expect(confirm.exists()).toBe(true)
+  expect(confirm.text()).toContain('其他章节中有 2 处引用指向它，删除后这些引用将失效。')
+  expect(confirm.text()).not.toContain('包含正文')
+  await button(wrapper, '删除').trigger('click')
+  expect(rowTexts(wrapper)).toEqual(['1A', '1.1A1', '1.2A2', '1.2.1A2X'])
+})
+
+test('有子章节且被引用：说明指向它或它的子章节的引用', async () => {
+  const wrapper = mountManager(nested, 'a', () => true)
+  await wrapper.setProps({ referenceCount: () => 3 })
+  await openMenu(wrapper, 0) // a
+  await menuItem(wrapper, '删除')
+  expect(wrapper.find('.chapter-manager__confirm').text()).toContain('3 处引用指向它或它的子章节')
+})

@@ -37,6 +37,7 @@ export interface AppMenuContext {
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
+const INSERT_ACTIONS = ['update-chapter-refs'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
 const APPEARANCES = ['system', 'light', 'dark'] as const satisfies readonly Appearance[]
@@ -45,6 +46,7 @@ type FileAction = (typeof FILE_ACTIONS)[number]
 type EditAction = (typeof EDIT_ACTIONS)[number]
 type ChapterAction = (typeof CHAPTER_ACTIONS)[number]
 type ViewAction = (typeof VIEW_ACTIONS)[number]
+type InsertAction = (typeof INSERT_ACTIONS)[number]
 
 /**
  * 菜单项 id：`分组:名称`。系统菜单栏与快捷键只传回这个字符串，由 parseMenuItemId 还原成 MenuCommand。
@@ -57,6 +59,7 @@ export type MenuItemId =
   | `chapter:${ChapterAction}`
   | `chapter:move-${KeyboardMoveDirection}`
   | `view:${ViewAction}`
+  | `insert:${InsertAction}`
   | `appearance:${Appearance}`
   /** 子菜单本身（不对应命令）。 */
   | 'appearance'
@@ -71,6 +74,7 @@ export type MenuCommand =
   | { readonly group: 'chapter'; readonly action: ChapterAction }
   | { readonly group: 'move-chapter'; readonly direction: KeyboardMoveDirection }
   | { readonly group: 'view'; readonly action: ViewAction }
+  | { readonly group: 'insert'; readonly action: InsertAction }
   | { readonly group: 'appearance'; readonly appearance: Appearance }
 
 function oneOf<T extends string>(values: readonly T[], value: string): value is T {
@@ -101,6 +105,8 @@ export function parseMenuItemId(id: string): MenuCommand | null {
     }
     case 'view':
       return oneOf(VIEW_ACTIONS, name) ? { group: 'view', action: name } : null
+    case 'insert':
+      return oneOf(INSERT_ACTIONS, name) ? { group: 'insert', action: name } : null
     case 'appearance':
       return oneOf(APPEARANCES, name) ? { group: 'appearance', appearance: name } : null
     default:
@@ -250,7 +256,14 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
     },
     {
       label: '插入',
-      items: [editorItem('table'), editorItem('image'), editorItem('chapter-ref')],
+      items: [
+        editorItem('table'),
+        editorItem('image'),
+        editorItem('chapter-ref'),
+        { separator: true },
+        // 刷新全部章节引用的链接文字并列出失效引用（docs/decisions.md 第 9 节）。不设快捷键。
+        { id: 'insert:update-chapter-refs', label: '更新交叉引用', disabled: !context.hasChapters || context.reading },
+      ],
     },
     {
       // 与正文右键菜单中表格的操作相同，光标在表格中时可用。没有自然的"⌘ + 单键"，不设快捷键。

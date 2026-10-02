@@ -63,6 +63,16 @@ export class ChapterDocuments {
   }
 
   /**
+   * 更新交叉引用（docs/decisions.md 第 9 节）给出了与编辑器文档等价的新正文（只有链接文字不同）：
+   * 以它为该章节的正文与基准，编辑器状态与撤销历史不变。没有打开过的章节不需要处理。
+   */
+  adopt(chapterId: ChapterId, text: string): void {
+    const entry = this.entries.get(chapterId)
+    if (!entry) return
+    this.entries.set(chapterId, { ...entry, text, baseline: { ...entry.baseline, doc: entry.state.doc, text } })
+  }
+
+  /**
    * 当前章节的正文被外部修改：返回应替换成的文档，并以新正文为基准。
    * 之后由调用方用一个事务替换文档（保留在撤销历史中），再调用 update 记录。
    */

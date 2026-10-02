@@ -938,3 +938,60 @@ test('章节引用：取消选择不改变正文，焦点回到正文', async ()
   expect(saveState(wrapper)).toBe('saved')
   expect(document.activeElement).toBe(view.dom)
 })
+
+test('更新交叉引用：改名后写回链接文字过期的章节（编辑器撤销历史不变），列出失效引用并可跳过去', async () => {
+  const services = createMemoryServices()
+  services.shell.enableAppMenu()
+  const document = createDocument(
+    '论文',
+    tree,
+    new Map([
+      ['a', '见[2 方法](writer:chapter/b)\n'],
+      ['a1', '* 列表\n\n见[旧](writer:chapter/b?show=title)与[已删](writer:chapter/gone)\n'],
+      ['b', '方法正文\n'],
+    ]),
+  )
+  if (!document.ok) throw new Error('fixture')
+  services.storage.seed(PATH, document.document)
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  const view = editorView(wrapper)
+  typeAtEnd(view, '！')
+  await flushPromises()
+  const history = undoDepth(view.state)
+
+  // 改名：编辑器中立即更新，正文不变。
+  expect(editorView(wrapper).dom.querySelector('.chapter-ref')?.textContent).toBe('2 方法')
+  await wrapper.findAll('.chapter-tree__row')[2]!.trigger('click') // 方法
+  await flushPromises()
+  services.shell.chooseMenuItem('chapter:rename')
+  await flushPromises()
+  await wrapper.find('.chapter-tree__rename-input').setValue('研究方法')
+  await wrapper.find('.chapter-tree__rename-input').trigger('keydown', { key: 'Enter' })
+  await wrapper.findAll('.chapter-tree__row')[0]!.trigger('click') // 绪论
+  await flushPromises()
+  expect(editorView(wrapper).dom.querySelector('.chapter-ref')?.textContent).toBe('2 研究方法')
+
+  services.shell.chooseMenuItem('insert:update-chapter-refs')
+  await flushPromises()
+  const report = wrapper.find('.ref-report')
+  expect(report.text()).toContain('已更新 2 个章节中的 2 处引用文字。')
+  expect(report.text()).toContain('1 处引用已失效')
+  expect(report.text()).toContain('1.1 背景')
+  // 打开过的章节：编辑器状态与撤销历史不变。
+  expect(undoDepth(editorView(wrapper).state)).toBe(history)
+
+  await report.find('.ref-report__item').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.ref-report').exists()).toBe(false)
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1.1背景')
+  const selection = editorView(wrapper).state.selection as NodeSelection
+  expect(selection.node.attrs.cached).toBe('已删')
+
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ...MOD }))
+  await flushPromises()
+  const saved = services.storage.committed(PATH)!.contents
+  expect(saved.get('a')).toBe('见[2 研究方法](writer:chapter/b)！\n')
+  expect(saved.get('a1')).toBe('- 列表\n\n见[研究方法](writer:chapter/b?show=title)与[已删](writer:chapter/gone)\n')
+  expect(saved.get('b')).toBe('方法正文\n')
+})

@@ -166,8 +166,10 @@ describe('快捷键', () => {
     const entries = workspaceMenus(context())
       .filter((menu) => menu.label === '格式' || menu.label === '插入')
       .flatMap((menu) => menu.items)
-      .filter((entry) => 'id' in entry)
+      // “更新交叉引用”作用于整篇文档，不是插入命令，不设快捷键（docs/decisions.md 第 9 节）。
+      .filter((entry) => 'id' in entry && entry.id !== 'insert:update-chapter-refs')
     for (const entry of entries) {
+      if (!('id' in entry)) continue
       if (entry.submenu) expect(shortcuts([{ label: entry.label, items: entry.submenu }]).length).toBeGreaterThan(0)
       else expect(entry.shortcut, entry.id).toBeDefined()
     }
@@ -299,4 +301,15 @@ test('插入章节引用（⌘K）与返回上一位置', () => {
   expect(back({ canGoBack: true })).toMatchObject({ disabled: false })
   expect(back({ canGoBack: true, reading: true })).toMatchObject({ disabled: true })
   expect(parseMenuItemId('view:back')).toEqual({ group: 'view', action: 'back' })
+})
+
+test('更新交叉引用：有章节、不在全文阅读中时可用', () => {
+  const item = (patch: Partial<AppMenuContext>) =>
+    workspaceMenus(context(patch))
+      .find((menu) => menu.label === '插入')!
+      .items.find((entry) => 'id' in entry && entry.id === 'insert:update-chapter-refs')
+  expect(item({})).toMatchObject({ label: '更新交叉引用', disabled: false })
+  expect(item({ hasChapters: false })).toMatchObject({ disabled: true })
+  expect(item({ reading: true })).toMatchObject({ disabled: true })
+  expect(parseMenuItemId('insert:update-chapter-refs')).toEqual({ group: 'insert', action: 'update-chapter-refs' })
 })

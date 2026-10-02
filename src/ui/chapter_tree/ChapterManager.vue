@@ -56,6 +56,8 @@ const emit = defineEmits<{
 const props = defineProps<{
   /** 章节是否有正文：决定删除确认中的说明。不提供时保守地认为都有正文。 */
   hasContent?: (chapterId: ChapterId) => boolean
+  /** 其他章节中指向该章节（包括它的子章节）的章节引用数量：删除后它们会失效，需要先确认。 */
+  referenceCount?: (chapterId: ChapterId) => number
 }>()
 
 const editingId = ref<ChapterId | null>(null)
@@ -75,6 +77,9 @@ const deletingDescendantCount = computed(() =>
 )
 const deletingHasContent = computed(() =>
   deletingId.value === null ? false : chapterHasContent(deletingId.value),
+)
+const deletingReferences = computed(() =>
+  deletingId.value === null ? 0 : (props.referenceCount?.(deletingId.value) ?? 0),
 )
 
 function chapterHasContent(chapterId: ChapterId): boolean {
@@ -148,13 +153,14 @@ function cancelRename(): void {
 }
 
 /**
- * 删除章节（节点菜单、右键菜单、菜单栏、⌘⌫ 相同，ui-spec §23）：没有正文也没有子章节时直接删除，
- * 否则先确认，说明按章节内容给出。
+ * 删除章节（节点菜单、右键菜单、菜单栏、⌘⌫ 相同，ui-spec §23）：没有正文、没有子章节、也没有被引用时直接删除，
+ * 否则先确认，说明按章节内容给出；被引用时说明引用数量（删除后这些引用失效）。
  */
 function requestDelete(chapterId: ChapterId): void {
   clearError()
   editingId.value = null
-  if (countDescendants(tree.value, chapterId) === 0 && !chapterHasContent(chapterId)) {
+  const referenced = (props.referenceCount?.(chapterId) ?? 0) > 0
+  if (countDescendants(tree.value, chapterId) === 0 && !chapterHasContent(chapterId) && !referenced) {
     deletingId.value = null
     applyDelete(chapterId)
     return
@@ -369,7 +375,10 @@ function messageForMove(reason: MoveReason): string {
           <template v-else-if="deletingDescendantCount > 0">
             该章节包含 {{ deletingDescendantCount }} 个子章节，删除后会一并移除。
           </template>
-          <template v-else>该章节包含正文，删除后无法恢复。</template>
+          <template v-else-if="deletingHasContent">该章节包含正文，删除后无法恢复。</template>
+          <template v-if="deletingReferences > 0">
+            其他章节中有 {{ deletingReferences }} 处引用指向{{ deletingDescendantCount > 0 ? '它或它的子章节' : '它' }}，删除后这些引用将失效。
+          </template>
         </p>
         <div class="chapter-manager__confirm-actions">
           <button type="button" ref="confirmCancelButton" class="chapter-manager__button" tabindex="0" @click="cancelDelete">
