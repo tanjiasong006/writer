@@ -423,6 +423,7 @@ const menus = computed(() =>
     hasChapters: tree.value.length > 0,
     reading: reading.value,
     canGoBack: jumps.canGoBack.value,
+    canGoForward: jumps.canGoForward.value,
     appearance: props.appearance,
   }),
 )
@@ -488,6 +489,7 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       if (command.action === 'sidebar') void setSidebarVisible(!sidebarVisible.value)
       else if (command.action === 'reader') toggleReading()
       else if (command.action === 'back') void jumps.back()
+      else if (command.action === 'forward') void jumps.forward()
       else switchFocus()
       return
     case 'insert':

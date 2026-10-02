@@ -236,8 +236,6 @@ const editingKeymap = keymap({
   [proseMirrorKey(SHORTCUTS.bold)]: toggleBold,
   [proseMirrorKey(SHORTCUTS.italic)]: toggleItalic,
   [proseMirrorKey(SHORTCUTS.inlineCode)]: toggleCode,
-  [proseMirrorKey(SHORTCUTS.outdent)]: liftListItem(nodes.list_item),
-  [proseMirrorKey(SHORTCUTS.indent)]: sinkListItem(nodes.list_item),
   Backspace: chainCommands(undoInputRule, selectFigureBackward, deleteEmptyFirstBlock),
   Delete: selectFigureForward,
   Escape: selectParentNode,

@@ -32,8 +32,9 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   'task-list': { label: '任务列表' },
   quote: { label: '引用', shortcut: SHORTCUTS.quote },
   'code-block': { label: '代码块', shortcut: SHORTCUTS.codeBlock },
-  indent: { label: '增加缩进', shortcut: SHORTCUTS.indent },
-  outdent: { label: '减少缩进', shortcut: SHORTCUTS.outdent },
+  // 缩进用 Tab / Shift+Tab；⌘[ / ⌘] 是返回 / 前进。
+  indent: { label: '增加缩进' },
+  outdent: { label: '减少缩进' },
   table: { label: '表格', shortcut: SHORTCUTS.insertTable },
   image: { label: '图片…', shortcut: SHORTCUTS.insertImage },
   'chapter-ref': { label: '章节引用…', shortcut: SHORTCUTS.chapterRef },

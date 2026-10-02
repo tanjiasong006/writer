@@ -25,6 +25,7 @@ function context(patch: Partial<AppMenuContext> = {}): AppMenuContext {
     hasChapters: true,
     reading: false,
     canGoBack: false,
+    canGoForward: false,
     appearance: 'system',
     ...patch,
   }
@@ -167,7 +168,8 @@ describe('快捷键', () => {
       .filter((menu) => menu.label === '格式' || menu.label === '插入')
       .flatMap((menu) => menu.items)
       // “更新交叉引用”作用于整篇文档，不是插入命令，不设快捷键（docs/decisions.md 第 9 节）。
-      .filter((entry) => 'id' in entry && entry.id !== 'insert:update-chapter-refs')
+      // 列表缩进用正文中的 Tab / Shift+Tab（不能作菜单快捷键），⌘[ / ⌘] 留给返回 / 前进。
+      .filter((entry) => 'id' in entry && !['insert:update-chapter-refs', 'editor:indent', 'editor:outdent'].includes(entry.id))
     for (const entry of entries) {
       if (!('id' in entry)) continue
       if (entry.submenu) expect(shortcuts([{ label: entry.label, items: entry.submenu }]).length).toBeGreaterThan(0)
@@ -288,19 +290,30 @@ describe('菜单项 id', () => {
   })
 })
 
-test('插入章节引用（⌘K）与返回上一位置', () => {
+test('插入章节引用（⌘K）、返回上一位置（⌘[）与前进到下一位置（⌘]）', () => {
   const insert = workspaceMenus(context()).find((menu) => menu.label === '插入')!
   expect(insert.items).toContainEqual(
     expect.objectContaining({ id: 'editor:chapter-ref', label: '章节引用…', shortcut: SHORTCUTS.chapterRef, disabled: false }),
   )
-  const back = (patch: Partial<AppMenuContext>) =>
+  const view = (patch: Partial<AppMenuContext>, id: string) =>
     workspaceMenus(context(patch))
       .find((menu) => menu.label === '显示')!
-      .items.find((item) => 'id' in item && item.id === 'view:back')
-  expect(back({})).toMatchObject({ label: '返回上一位置', disabled: true })
-  expect(back({ canGoBack: true })).toMatchObject({ disabled: false })
-  expect(back({ canGoBack: true, reading: true })).toMatchObject({ disabled: true })
+      .items.find((item) => 'id' in item && item.id === id)
+  expect(view({}, 'view:back')).toMatchObject({ label: '返回上一位置', shortcut: 'CmdOrCtrl+[', disabled: true })
+  expect(view({ canGoBack: true }, 'view:back')).toMatchObject({ disabled: false })
+  expect(view({ canGoBack: true, reading: true }, 'view:back')).toMatchObject({ disabled: true })
+  expect(view({}, 'view:forward')).toMatchObject({ label: '前进到下一位置', shortcut: 'CmdOrCtrl+]', disabled: true })
+  expect(view({ canGoForward: true }, 'view:forward')).toMatchObject({ disabled: false })
+  expect(view({ canGoForward: true, reading: true }, 'view:forward')).toMatchObject({ disabled: true })
   expect(parseMenuItemId('view:back')).toEqual({ group: 'view', action: 'back' })
+  expect(parseMenuItemId('view:forward')).toEqual({ group: 'view', action: 'forward' })
+
+  // 正文中也响应：列表缩进不再占用 ⌘[ / ⌘]。
+  const mod = IS_MAC ? { metaKey: true } : { ctrlKey: true }
+  const key = (code: string) => new KeyboardEvent('keydown', { key: code === 'BracketLeft' ? '[' : ']', code, ...mod })
+  const menus = workspaceMenus(context({ canGoBack: true, canGoForward: true }))
+  expect(menuItemForKey(menus, key('BracketLeft'))).toBe('view:back')
+  expect(menuItemForKey(menus, key('BracketRight'))).toBe('view:forward')
 })
 
 test('更新交叉引用：有章节、不在全文阅读中时可用', () => {

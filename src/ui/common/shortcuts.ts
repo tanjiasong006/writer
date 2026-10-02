@@ -33,9 +33,6 @@ export const SHORTCUTS = {
   list: 'CmdOrCtrl+8',
   quote: 'CmdOrCtrl+9',
   codeBlock: 'CmdOrCtrl+0',
-  /** 列表项增加 / 减少缩进（与 Pages、Word 的 ⌘] / ⌘[ 一致）。 */
-  indent: 'CmdOrCtrl+]',
-  outdent: 'CmdOrCtrl+[',
   insertTable: 'CmdOrCtrl+T',
   /** 插入图片（graphic）。 */
   insertImage: 'CmdOrCtrl+G',
@@ -48,6 +45,12 @@ export const SHORTCUTS = {
   contextMenu: 'CmdOrCtrl+/',
   /** 显示 / 隐藏侧栏（章节树）。注意 Windows / Linux 上 Ctrl+Y 常作重做，Writer 不用它重做。 */
   toggleSidebar: 'CmdOrCtrl+Y',
+  /**
+   * 从章节引用前往别处之后返回 / 再前进（与 Safari、Xcode 的 ⌘[ / ⌘] 一致）。
+   * 列表项的缩进因此不设快捷键，用 Tab / Shift+Tab。
+   */
+  back: 'CmdOrCtrl+[',
+  forward: 'CmdOrCtrl+]',
   /** 在章节树与正文之间切换焦点（jump）。侧栏隐藏时先显示。 */
   switchFocus: 'CmdOrCtrl+J',
   /** 全文阅读（reader）：连续浏览整篇文档，再按一次回到编辑。与 Safari 的“阅读器”相同。 */

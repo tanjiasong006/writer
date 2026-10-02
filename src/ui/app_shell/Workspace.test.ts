@@ -916,6 +916,24 @@ test('章节引用：⌘K 选择目标并插入；⌘ + 单击前往，提示中
   await flushPromises()
   expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1绪论')
 
+  // 返回后可以再前进。
+  expect(appMenuItem(services, 'view:forward').disabled).toBe(false)
+  services.shell.chooseMenuItem('view:forward')
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('2方法')
+  expect(appMenuItem(services, 'view:forward').disabled).toBe(true)
+  expect(appMenuItem(services, 'view:back').disabled).toBe(false)
+
+  // 正文中按 ⌘[ / ⌘]：编辑器不再把它们当作列表缩进，由工作区返回 / 前进。
+  const press = (key: string, code: string) =>
+    editorView(wrapper).dom.dispatchEvent(new KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true, ...MOD }))
+  press('[', 'BracketLeft')
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('1绪论')
+  press(']', 'BracketRight')
+  await flushPromises()
+  expect(wrapper.find('.chapter-tree__row--selected').text()).toBe('2方法')
+
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ...MOD }))
   await flushPromises()
   expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言[2 方法](writer:chapter/b)')
