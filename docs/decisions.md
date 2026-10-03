@@ -81,6 +81,10 @@
   编辑字体不进入项目或输出请求，不因此承诺跨机器一致。
 - 打包字体：把 .ttf / .otf / .ttc 放入应用资源目录下的 `fonts/`（Tauri `bundle.resources`）即参与 PDF 排版的字体查找；
   要让它成为首选，把它的字体族名加到 `export::fonts::families` 对应字体族列表的前面。
+  已打包（2026-10-03 实施，待产品负责人确认）：Noto Serif CJK SC 与 Noto Sans CJK SC 的常规与粗体（SIL OFL 1.1），
+  排在衬线 / 无衬线中文候选的最前面，各平台 PDF 的中文字形与折行一致（拉丁字体仍按原候选）。
+  字体约 80 MB，不提交到仓库：构建正式包前 `scripts/fetch-fonts.mjs` 下载并校验（beforeBuildCommand），
+  开发环境没有下载时按本机字体回退。楷体与等宽不打包。
   Word 只写字体名，由用户机器上的 Word 负责替换。
 
 ## 7. 稳定性
