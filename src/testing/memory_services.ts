@@ -119,6 +119,12 @@ export class MemoryShell implements DesktopShell {
     return this.startupProject
   }
 
+  fullscreen = false
+
+  setFullscreen(fullscreen: boolean) {
+    this.fullscreen = fullscreen
+  }
+
   /** 检查更新的结果；默认与开发版相同（未配置），不打扰其他测试。 */
   updateResult: UpdateCheckResult = { kind: 'not-configured' }
   updateChecks = 0

@@ -30,6 +30,8 @@ export interface AppMenuContext {
   readonly hasChapters: boolean
   /** 是否在全文阅读中。 */
   readonly reading: boolean
+  /** 是否在专注模式中。 */
+  readonly focusMode?: boolean
   /** 是否有可以返回 / 再前进的位置（从章节引用前往别处之后）。 */
   readonly canGoBack: boolean
   readonly canGoForward: boolean
@@ -44,7 +46,7 @@ const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find-replace'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete'] as const
 const INSERT_ACTIONS = ['update-chapter-refs', 'references'] as const
-const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back', 'forward'] as const
+const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back', 'forward', 'focus-mode'] as const
 const APP_ACTIONS = ['check-update'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
 const APPEARANCES = ['system', 'light', 'dark'] as const satisfies readonly Appearance[]
@@ -383,6 +385,13 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
           shortcut: SHORTCUTS.reader,
           checked: context.reading,
           disabled: !context.hasChapters,
+        },
+        // 全屏、隐藏侧栏与工具栏、淡化当前段落以外的正文。没有自然的单键，不设快捷键。
+        {
+          id: 'view:focus-mode',
+          label: '专注模式',
+          checked: context.focusMode ?? false,
+          disabled: !context.hasChapters || context.reading,
         },
         // 从章节引用前往别处之后回到出发的位置，返回后可以再前进（docs/decisions.md 第 9 节）。
         {

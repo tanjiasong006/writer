@@ -235,6 +235,23 @@ function resolveImage(reference: string): string | null {
   return path === null ? null : shell.toDisplayUrl(path)
 }
 
+/**
+ * 专注模式（docs/decisions.md 第 15 节）：窗口全屏，侧栏与工具栏隐去（鼠标移到窗口顶部时工具栏出现），
+ * 正文中当前段落以外的内容淡化。不改变侧栏的偏好，退出后恢复原样；不持久化。
+ */
+const focusMode = ref(false)
+
+function setFocusMode(on: boolean): void {
+  if (focusMode.value === on) return
+  focusMode.value = on
+  shell.setFullscreen?.(on)
+  void nextTick(() => editor.value?.focus())
+}
+
+onBeforeUnmount(() => {
+  if (focusMode.value) shell.setFullscreen?.(false)
+})
+
 /** 全文阅读（docs/decisions.md 第 8 节）：编辑环境中的连续只读展示，不是导出效果预览。 */
 const reading = ref(false)
 /** 进入阅读时的位置：编辑器中正在看的地方。 */
@@ -242,6 +259,7 @@ const readingStart = shallowRef<ReadingPosition | null>(null)
 
 function openReading(): void {
   if (reading.value || tree.value.length === 0) return
+  setFocusMode(false)
   const id = selectedId.value
   readingStart.value = id !== null && editor.value ? { chapterId: id, ...editor.value.readingPosition() } : null
   reading.value = true
@@ -660,6 +678,7 @@ const menus = computed(() =>
     exporting: exporting.value !== null,
     hasChapters: tree.value.length > 0,
     reading: reading.value,
+    focusMode: focusMode.value,
     canGoBack: jumps.canGoBack.value,
     canGoForward: jumps.canGoForward.value,
     canUndoDelete: removedChapters.canUndo.value,
@@ -733,6 +752,7 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
     case 'view':
       if (command.action === 'sidebar') void setSidebarVisible(!sidebarVisible.value)
       else if (command.action === 'reader') toggleReading()
+      else if (command.action === 'focus-mode') setFocusMode(!focusMode.value)
       else if (command.action === 'back') void jumps.back()
       else if (command.action === 'forward') void jumps.forward()
       else switchFocus()
@@ -819,12 +839,13 @@ async function createFirstChapter(): Promise<void> {
     :class="{
       'workspace--unified': unified,
       'workspace--resizing': resizing,
-      'workspace--sidebar-hidden': !sidebarVisible,
+      'workspace--sidebar-hidden': !sidebarVisible || focusMode,
+      'workspace--focus': focusMode,
     }"
     :style="{ '--sidebar-w': `${sidebarWidth}px` }"
     :data-save-status="status"
   >
-    <aside v-show="sidebarVisible" ref="sidebarElement" class="workspace__sidebar" aria-label="文档结构">
+    <aside v-show="sidebarVisible && !focusMode" ref="sidebarElement" class="workspace__sidebar" aria-label="文档结构">
       <!-- unified 窗口：侧栏顶部是标题栏的一部分，左边是窗口按钮，右边是侧栏开关。 -->
       <div v-if="unified" class="workspace__sidebar-bar" data-tauri-drag-region>
         <button
@@ -941,6 +962,16 @@ async function createFirstChapter(): Promise<void> {
           </button>
         </div>
 
+        <button
+          v-if="focusMode"
+          type="button"
+          class="workspace__exit-focus"
+          tabindex="0"
+          @click="setFocusMode(false)"
+        >
+          退出专注模式
+        </button>
+
         <div class="workspace__group" role="toolbar" aria-label="文档">
           <button
             type="button"
@@ -1002,6 +1033,7 @@ async function createFirstChapter(): Promise<void> {
           :ref-label="refLabel"
           :find-query="find.open.value && !reading ? find.query.value : ''"
           :element-start="elementStart"
+          :focus-mode="focusMode"
           @find-status="find.setSelected"
           @stats="stats = $event"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
@@ -1352,6 +1384,41 @@ async function createFirstChapter(): Promise<void> {
 .workspace__count:focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 1px;
+}
+
+/* 专注模式：工具栏隐去，鼠标移到窗口顶部（或焦点进入工具栏）时出现；正文从窗口顶部开始。 */
+.workspace--focus .workspace__bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 10;
+  background: var(--color-bg);
+  opacity: 0;
+  transition: opacity var(--duration-slow) var(--ease-out);
+}
+
+.workspace--focus .workspace__bar:hover,
+.workspace--focus .workspace__bar:focus-within {
+  opacity: 1;
+}
+
+.workspace__exit-focus {
+  flex: none;
+  height: var(--control-h-s);
+  margin-right: var(--space-5);
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-m);
+  background: var(--color-fill-hover);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-s);
+}
+
+.workspace__exit-focus:hover {
+  background: var(--color-fill-pressed);
+  color: var(--color-text);
 }
 
 .workspace__group {

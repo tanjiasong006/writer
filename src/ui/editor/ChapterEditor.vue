@@ -83,6 +83,8 @@ const props = defineProps<{
   refLabel?: ChapterRefLabel
   /** 查找中的文字：正文中高亮全部匹配（不进入文档）；空串表示没有在查找。 */
   findQuery?: string
+  /** 专注模式：淡化当前段落（光标所在的顶层块）以外的正文。只是显示。 */
+  focusMode?: boolean
   /** 本章图表编号的起点（所在一级章节与之前的图、表数量，element_numbering.ts）；只影响显示。 */
   elementStart?: ElementStart
 }>()
@@ -244,6 +246,24 @@ function elementDecorations(doc: EditorState['doc']): DecorationSet {
   return set
 }
 
+/** 专注模式中光标所在的顶层块加上 is-focus-block。 */
+function withFocusBlock(state: EditorState, set: DecorationSet): DecorationSet {
+  if (!props.focusMode || state.doc.childCount === 0) return set
+  const { $from } = state.selection
+  const index = $from.depth === 0 ? Math.min($from.index(0), state.doc.childCount - 1) : $from.index(0)
+  let pos = 0
+  for (let i = 0; i < index; i++) pos += state.doc.child(i).nodeSize
+  const block = state.doc.child(index)
+  return set.add(state.doc, [Decoration.node(pos, pos + block.nodeSize, { class: 'is-focus-block' })])
+}
+
+watch(
+  () => props.focusMode,
+  () => {
+    if (view) view.updateState(view.state)
+  },
+)
+
 function sameStart(a: ElementStart, b: ElementStart): boolean {
   return a.chapter === b.chapter && a.figures === b.figures && a.tables === b.tables
 }
@@ -345,7 +365,7 @@ onMounted(() => {
       return true
     },
     decorations: (state) => {
-      const elements = elementDecorations(state.doc)
+      const elements = withFocusBlock(state, elementDecorations(state.doc))
       if (!props.findQuery) return elements
       const find = findDecorations(state.doc, currentMatches(state), state.selection)
       return elements === DecorationSet.empty ? find : elements.add(state.doc, find.find())
@@ -1022,7 +1042,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="chapter-editor" :style="themeStyle">
+  <div class="chapter-editor" :class="{ 'chapter-editor--focus': focusMode }" :style="themeStyle">
     <div ref="scroller" class="chapter-editor__scroller">
       <h1 ref="heading" class="chapter-editor__heading document-heading">
         <span class="document-heading__number">{{ number }}</span>
@@ -1321,6 +1341,17 @@ defineExpose({
   outline: none;
   border-radius: 2px;
   background: var(--color-doc-selection);
+}
+
+/* 专注模式：当前段落以外的正文淡化；章节标题也淡化。 */
+.chapter-editor--focus .chapter-editor__heading,
+.chapter-editor--focus .chapter-editor__body :deep(.chapter-editor__content > *:not(.is-focus-block)) {
+  opacity: 0.32;
+  transition: opacity var(--duration-slow) var(--ease-out);
+}
+
+.chapter-editor--focus .chapter-editor__body :deep(.chapter-editor__content > .is-focus-block) {
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
 /* 查找的匹配（find.ts）：全部匹配淡黄底色，当前匹配更深。 */

@@ -12,6 +12,7 @@
     "core:app:allow-set-app-theme",
     "dialog:default",
     "core:window:allow-start-dragging",
-    "core:menu:default"
+    "core:menu:default",
+    "core:window:allow-set-fullscreen"
   ]
 }

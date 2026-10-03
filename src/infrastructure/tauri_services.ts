@@ -120,6 +120,14 @@ function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): D
       })
     },
 
+    setFullscreen(fullscreen) {
+      void getCurrentWindow()
+        .setFullscreen(fullscreen)
+        .catch(() => {
+          // 全屏只是专注模式的一部分，失败时仍可在窗口中专注写作。
+        })
+    },
+
     setWindowTitle(title) {
       void getCurrentWindow()
         .setTitle(title)

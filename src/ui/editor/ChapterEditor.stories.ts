@@ -308,3 +308,17 @@ export const Formulas: Story = {
       '写错的公式：$\\notacommand{x}$。\n',
   },
 }
+
+/** 专注模式：光标所在段落以外的正文与章节标题淡化。 */
+export const FocusMode: Story = {
+  args: {
+    chapterId: 'focus',
+    number: '1',
+    title: '绪论',
+    focusMode: true,
+    content:
+      '长文档写作需要清晰的结构。章节树让作者随时看到整体，编辑器只显示当前章节。\n\n' +
+      '专注模式下，窗口全屏，侧栏与工具栏隐去，只有正在写的这一段保持清晰。\n\n' +
+      '移动光标时，清晰的段落随之改变，其余段落淡化，但仍可阅读。\n',
+  },
+}

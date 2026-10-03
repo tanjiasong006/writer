@@ -101,6 +101,8 @@ export interface DesktopShell {
    * 提供时优先于上次打开的项目。
    */
   startupProjectPath(): string | null
+  /** 窗口进入 / 离开全屏（专注模式）。失败静默忽略；不提供时专注模式不改变窗口。 */
+  setFullscreen?(fullscreen: boolean): void
   /** 检查是否有新版本。不提供时（如 Storybook）界面不显示检查更新。 */
   checkForUpdate?(): Promise<UpdateCheckResult>
   /** 下载并安装最近一次检查到的新版本；失败时抛出（原因作为补充说明）。 */

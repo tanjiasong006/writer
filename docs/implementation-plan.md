@@ -960,13 +960,20 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 
 ### P2：体验提升
 
-1. 专注模式 / 全屏写作。
+1. ~~专注模式 / 全屏写作。~~（完成，见下方“P2-1 专注模式”）
 2. 章节状态或标签（草稿 / 待修改 / 完成）与章节备注。
 3. 写作目标（字数目标、进度）。
 4. 更多导出格式：合并的 Markdown、HTML、EPUB。
 5. 文档模板（论文、报告、书稿）。
 6. 富文本粘贴识别 Word / WPS 的列表段落（目前是带 · 的普通段落）。
 7. 大量章节虚拟滚动（ui-spec P1；1050 章节实测暂不需要；拖入折叠节点自动展开、拖拽自动滚动已完成）。
+
+#### P2-1 专注模式（完成，2026-10-03）
+
+- 规则见 decisions 第 15 节。`DesktopShell.setFullscreen`（Tauri `setFullscreen`，权限 `core:window:allow-set-fullscreen`）；
+  工作区 `focusMode`（`workspace--focus`：侧栏隐藏、工具栏悬浮显现），编辑器 `focusMode`（`is-focus-block` decoration 与淡化样式）。
+- 验证：菜单进入、全屏、侧栏、淡化随光标、退出按钮、全文阅读时退出测试；Story `ChapterEditor/FocusMode`（Storybook 中目视检查了淡化）。
+  Tauri 中的全屏与工具栏悬浮显现未目视检查。
 
 ### 发布准备（非功能）
 
