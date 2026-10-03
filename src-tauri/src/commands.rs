@@ -182,6 +182,34 @@ fn percent_decode(value: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// 把磁盘上已提交的项目保存为一个版本（docs/project-format.md 第 7.1 节）。
+#[tauri::command]
+pub async fn snapshot_create(
+    path: PathBuf,
+    label: String,
+    kind: storage::snapshots::SnapshotKind,
+) -> Result<storage::snapshots::SnapshotInfo, StorageError> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis() as u64);
+    run_storage(move || storage::snapshots::create_snapshot(&RealFs, &path, &label, kind, now)).await
+}
+
+#[tauri::command]
+pub async fn snapshot_list(path: PathBuf) -> Result<Vec<storage::snapshots::SnapshotInfo>, StorageError> {
+    run_storage(move || storage::snapshots::list_snapshots(&RealFs, &path)).await
+}
+
+#[tauri::command]
+pub async fn snapshot_read(path: PathBuf, id: String) -> Result<storage::OpenedProject, StorageError> {
+    run_storage(move || storage::snapshots::read_snapshot(&RealFs, &path, &id)).await
+}
+
+#[tauri::command]
+pub async fn snapshot_delete(path: PathBuf, id: String) -> Result<(), StorageError> {
+    run_storage(move || storage::snapshots::delete_snapshot(&RealFs, &path, &id)).await
+}
+
 /// 导出 Word：在后台线程生成，原子写入目标文件。
 #[tauri::command]
 pub async fn export_docx(

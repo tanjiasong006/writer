@@ -4,6 +4,7 @@ import { createDocument, setDocumentInfo, setReferences } from '../domain/docume
 import type {
   OpenedProject,
   ProjectStorage,
+  SnapshotInfo,
   StorageFailure,
   StorageResult,
 } from '../application/project_storage.ts'
@@ -72,6 +73,26 @@ export function createTauriProjectStorage(): ProjectStorage {
       return { ok: true, value: { fileName: result.value, reference: assetReference(result.value) } }
     },
 
+    createSnapshot(path, label, kind) {
+      return call(() => invoke<SnapshotInfo>('snapshot_create', { path, label, kind }))
+    },
+
+    listSnapshots(path) {
+      return call(() => invoke<SnapshotInfo[]>('snapshot_list', { path }))
+    },
+
+    async readSnapshot(path, id) {
+      const result = await call(() => invoke<unknown>('snapshot_read', { path, id }))
+      if (!result.ok) return result
+      const opened = decodeOpened(result.value)
+      if (!opened.ok) return opened
+      return { ok: true, value: { document: opened.value.document, pdfLayout: opened.value.pdfLayout } }
+    },
+
+    async deleteSnapshot(path, id) {
+      return toVoid(await call(() => invoke('snapshot_delete', { path, id })))
+    },
+
     assetPath(path, reference) {
       return resolveAssetReference(path, reference)
     },
@@ -104,6 +125,7 @@ const KNOWN_CODES = new Set<StorageFailure['code']>([
   'asset-unsupported',
   'asset-too-large',
   'asset-not-found',
+  'snapshot-not-found',
   'io',
 ])
 

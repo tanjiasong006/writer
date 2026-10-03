@@ -31,6 +31,8 @@ import { useFocusRegion } from './use_focus_region.ts'
 import { useFind } from './use_find.ts'
 import { useRemovedChapters } from './use_removed_chapters.ts'
 import FindBar from './FindBar.vue'
+import HistoryDialog from './HistoryDialog.vue'
+import { useHistory } from './use_history.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
 import { embeddableImage } from './embeddable_image.ts'
@@ -527,6 +529,18 @@ function closeCountPopover(): void {
   countPopover.value = null
 }
 
+/** 版本历史（docs/project-format.md 第 7.1 节）；打开文档后每天自动留下一个版本。 */
+const history = useHistory({
+  session: props.session,
+  confirm: (message) => shell.confirm(message, { ok: '恢复', cancel: '取消' }),
+  onError: (failure) => (actionError.value = messageForStorageFailure(failure)),
+})
+onMounted(() => void history.autoSnapshot())
+
+function snapshotName(snapshot: { readonly label: string; readonly createdAt: number }): string {
+  return snapshot.label || new Date(snapshot.createdAt).toLocaleString('zh-CN')
+}
+
 /** 撤销删除章节（ui-spec §23）。 */
 const removedChapters = useRemovedChapters({
   tree: () => tree.value,
@@ -690,6 +704,9 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
           return
         case 'pdf-layout':
           layoutDialog.value = 'save'
+          return
+        case 'history':
+          void history.show()
           return
       }
       return
@@ -1060,6 +1077,16 @@ async function createFirstChapter(): Promise<void> {
         </Toast>
       </div>
     </main>
+
+    <HistoryDialog
+      v-if="history.open.value"
+      :snapshots="history.snapshots.value"
+      :busy="history.busy.value"
+      @create="history.create"
+      @restore="(snapshot) => history.restore(snapshot, snapshotName(snapshot))"
+      @delete="history.remove"
+      @close="history.close"
+    />
 
     <WordCountPopover
       v-if="countPopover && stats"

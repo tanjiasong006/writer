@@ -6,6 +6,8 @@ import type {
   OpenedProject,
   ProjectState,
   ProjectStorage,
+  SnapshotInfo,
+  SnapshotKind,
   StorageFailure,
   StorageResult,
 } from '../application/project_storage.ts'
@@ -99,6 +101,47 @@ export class MemoryProjectStorage implements ProjectStorage {
     this.importedData.push({ path, fileName, data })
     const name = fileName || 'image.png'
     return { ok: true, value: { fileName: name, reference: `../assets/${name}` } }
+  }
+
+  /** 版本快照（按项目路径），最新的在后。 */
+  readonly snapshots = new Map<string, Array<{ info: SnapshotInfo; state: ProjectState }>>()
+  /** 下一个快照的时间（测试中可以设定）。 */
+  now = 1_700_000_000_000
+
+  async createSnapshot(path: string, label: string, kind: SnapshotKind): Promise<StorageResult<SnapshotInfo>> {
+    const failure = this.failures.shift()
+    if (failure) return { ok: false, error: failure }
+    const state = this.projects.get(path)
+    if (!state) return { ok: false, error: { code: 'not-a-project' } }
+    const list = this.snapshots.get(path) ?? []
+    const characters = [...state.document.contents.values()].join('').replace(/\s/g, '').length
+    const info: SnapshotInfo = {
+      id: String(this.now),
+      createdAt: this.now++,
+      label: label.trim(),
+      kind,
+      title: state.document.title,
+      chapters: state.document.contents.size,
+      characters,
+    }
+    list.push({ info, state })
+    this.snapshots.set(path, list)
+    return { ok: true, value: info }
+  }
+
+  async listSnapshots(path: string): Promise<StorageResult<readonly SnapshotInfo[]>> {
+    return { ok: true, value: [...(this.snapshots.get(path) ?? [])].reverse().map((entry) => entry.info) }
+  }
+
+  async readSnapshot(path: string, id: string): Promise<StorageResult<ProjectState>> {
+    const entry = this.snapshots.get(path)?.find((candidate) => candidate.info.id === id)
+    return entry ? { ok: true, value: entry.state } : { ok: false, error: { code: 'snapshot-not-found' } }
+  }
+
+  async deleteSnapshot(path: string, id: string): Promise<StorageResult<void>> {
+    const list = this.snapshots.get(path) ?? []
+    this.snapshots.set(path, list.filter((entry) => entry.info.id !== id))
+    return { ok: true, value: undefined }
   }
 
   assetPath(path: string, reference: string): string | null {

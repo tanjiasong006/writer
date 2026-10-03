@@ -40,7 +40,7 @@ export interface AppMenuContext {
   readonly appearance: Appearance
 }
 
-const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout'] as const
+const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout', 'history'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find-replace'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete'] as const
 const INSERT_ACTIONS = ['update-chapter-refs', 'references'] as const
@@ -249,6 +249,8 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         { separator: true },
         { role: 'close-window' },
         { id: 'file:save', label: '保存', shortcut: SHORTCUTS.save },
+        // 项目在某一时刻的完整内容：保存、浏览与恢复（docs/project-format.md 第 7.1 节）。
+        { id: 'file:history', label: '版本历史…' },
         { separator: true },
         { id: 'file:rename', label: '重命名文档' },
         { id: 'file:info', label: '文档信息…' },

@@ -13,6 +13,8 @@ import type { ReferenceEntry } from '../domain/bibliography/bibliography.ts'
 import type {
   ImportedAsset,
   ProjectState,
+  SnapshotInfo,
+  SnapshotKind,
   ProjectStorage,
   StorageFailure,
   StorageResult,
@@ -144,6 +146,39 @@ export class ProjectSession {
   setPdfLayout(settings: PdfLayoutSettings): void {
     if (settings === this.layout) return
     this.layout = settings
+    this.changed()
+  }
+
+  /**
+   * 把当前内容保存为一个版本（docs/project-format.md 第 7.1 节）：先保存未保存的修改，再由存储层从磁盘留下快照。
+   * 保存失败时不创建。
+   */
+  async createSnapshot(label: string, kind: SnapshotKind): Promise<StorageResult<SnapshotInfo>> {
+    if (!(await this.save()) || this.isDirty) {
+      return { ok: false, error: this.error ?? { code: 'unknown', message: 'save not completed' } }
+    }
+    return this.storage.createSnapshot(this.path, label, kind)
+  }
+
+  listSnapshots(): Promise<StorageResult<readonly SnapshotInfo[]>> {
+    return this.storage.listSnapshots(this.path)
+  }
+
+  readSnapshot(id: string): Promise<StorageResult<ProjectState>> {
+    return this.storage.readSnapshot(this.path, id)
+  }
+
+  deleteSnapshot(id: string): Promise<StorageResult<void>> {
+    return this.storage.deleteSnapshot(this.path, id)
+  }
+
+  /**
+   * 恢复一个版本：用它的文档与排版配置替换当前状态，是一次普通的项目修改（产生 dirty，由正常保存提交）。
+   * 调用方先为当前状态留下“恢复前”的版本。
+   */
+  restore(project: ProjectState): void {
+    this.current = project.document
+    this.layout = project.pdfLayout
     this.changed()
   }
 

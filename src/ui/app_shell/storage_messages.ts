@@ -61,6 +61,8 @@ export function messageForStorageFailure(failure: StorageFailure): string {
       return '图片超过 50 MB，无法插入。'
     case 'asset-not-found':
       return '找不到所选图片文件。'
+    case 'snapshot-not-found':
+      return '找不到这个版本，可能已被删除。'
     case 'io':
       return messageForIo(failure.kind, fileName(failure.path), failure.message)
     case 'unknown':

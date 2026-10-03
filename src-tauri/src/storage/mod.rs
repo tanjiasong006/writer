@@ -7,6 +7,7 @@
 pub mod assets;
 pub mod fs;
 pub mod lock;
+pub mod snapshots;
 mod names;
 #[cfg(test)]
 mod tests;
@@ -72,6 +73,8 @@ pub enum StorageError {
     AssetTooLarge,
     /// 要导入的资源文件不存在。
     AssetNotFound,
+    /// 版本快照不存在或无法读取。
+    SnapshotNotFound,
     /// 文件系统操作失败。
     Io {
         operation: String,

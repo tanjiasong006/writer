@@ -25,6 +25,7 @@ export type StorageFailure =
   | { readonly code: 'asset-unsupported' }
   | { readonly code: 'asset-too-large' }
   | { readonly code: 'asset-not-found' }
+  | { readonly code: 'snapshot-not-found' }
   | {
       readonly code: 'io'
       readonly operation: string
@@ -80,8 +81,31 @@ export interface ProjectStorage {
   importAssetData(path: string, fileName: string, data: Uint8Array): Promise<StorageResult<ImportedAsset>>
   /** 正文中的资源引用（如 ../assets/图.png）对应的项目内文件路径；项目外或无法解析时返回 null。 */
   assetPath(path: string, reference: string): string | null
+  /** 把磁盘上已提交的项目保存为一个版本（调用方先保存）。 */
+  createSnapshot(path: string, label: string, kind: SnapshotKind): Promise<StorageResult<SnapshotInfo>>
+  /** 全部版本，最新的在前。 */
+  listSnapshots(path: string): Promise<StorageResult<readonly SnapshotInfo[]>>
+  /** 读出一个版本的项目状态（已校验）。 */
+  readSnapshot(path: string, id: string): Promise<StorageResult<ProjectState>>
+  deleteSnapshot(path: string, id: string): Promise<StorageResult<void>>
   /** 关闭项目，释放打开时取得的独占锁（同一项目同一时间只能被一个 Writer 打开）。尽力而为。 */
   close(path: string): Promise<void>
+}
+
+/** 版本快照的来源：手动保存、每天自动、恢复其他版本前自动留下（docs/project-format.md 第 7.1 节）。 */
+export type SnapshotKind = 'manual' | 'auto' | 'before-restore'
+
+/** 版本列表中的一项。 */
+export interface SnapshotInfo {
+  readonly id: string
+  /** 创建时间（Unix 毫秒）。 */
+  readonly createdAt: number
+  readonly label: string
+  readonly kind: SnapshotKind
+  readonly title: string
+  readonly chapters: number
+  /** 正文的字符数（不含空白）。 */
+  readonly characters: number
 }
 
 export interface ImportedAsset {
