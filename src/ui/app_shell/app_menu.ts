@@ -32,12 +32,14 @@ export interface AppMenuContext {
   /** 是否有可以返回 / 再前进的位置（从章节引用前往别处之后）。 */
   readonly canGoBack: boolean
   readonly canGoForward: boolean
+  /** 是否有可以撤销的章节删除（章节树获得焦点时 ⌘Z 撤销删除）。 */
+  readonly canUndoDelete?: boolean
   readonly appearance: Appearance
 }
 
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find-replace'] as const
-const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
+const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete'] as const
 const INSERT_ACTIONS = ['update-chapter-refs'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back', 'forward'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
@@ -192,6 +194,12 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
   })
   const inTree = focus === 'tree'
 
+  // 章节树获得焦点时，撤销的是最近一次章节删除（ui-spec §23）；正文与输入框各自撤销自己的修改。
+  const undoItem: WorkspaceMenuEntry =
+    inTree && context.canUndoDelete
+      ? { id: 'chapter:undo-delete', label: '撤销删除章节', shortcut: SHORTCUTS.undo }
+      : history('undo')
+
   return [
     {
       label: '文件',
@@ -214,7 +222,7 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
     {
       label: '编辑',
       items: [
-        history('undo'),
+        undoItem,
         history('redo'),
         { separator: true },
         { role: 'cut' },

@@ -1,6 +1,6 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { removeChapter, selectionAfterRemove } from './remove_chapter.ts'
+import { describeRemoval, removeChapter, restoreRemovedChapter, selectionAfterRemove } from './remove_chapter.ts'
 import { validateTree } from '../domain/chapter_tree/chapter_tree.ts'
 import type { ChapterTree } from '../domain/chapter_tree/chapter_tree.ts'
 
@@ -55,4 +55,43 @@ test('selectionAfterRemove：下一个兄弟，否则上一个兄弟，否则父
   assert.equal(selectionAfterRemove(outline, 'b'), 'a')
   assert.equal(selectionAfterRemove([{ id: 'x', title: 'X', children: [] }], 'x'), null)
   assert.equal(selectionAfterRemove(outline, 'missing'), null)
+})
+
+test('撤销删除：章节连同子树回到原来的父章节与位置', () => {
+  const removed = describeRemoval(outline, 'a2')
+  assert.deepEqual(removed && { parentId: removed.parentId, index: removed.index }, { parentId: 'a', index: 1 })
+  const after = removeChapter(outline, 'a2')
+  assert.equal(after.ok, true)
+  if (!after.ok || !removed) return
+  const restored = restoreRemovedChapter(after.tree, removed)
+  assert.equal(restored.ok, true)
+  if (!restored.ok) return
+  assert.deepEqual(restored.tree, outline)
+})
+
+test('撤销删除：之后的结构修改保留；原父章节不在时放到根层级末尾，原位置超出时放到末尾', () => {
+  const first = describeRemoval(outline, 'a1')!
+  const withoutA1 = removeChapter(outline, 'a1')
+  assert.equal(withoutA1.ok, true)
+  if (!withoutA1.ok) return
+  const withoutA = removeChapter(withoutA1.tree, 'a')
+  assert.equal(withoutA.ok, true)
+  if (!withoutA.ok) return
+  const restored = restoreRemovedChapter(withoutA.tree, first)
+  assert.equal(restored.ok, true)
+  if (!restored.ok) return
+  assert.deepEqual(restored.tree.map((node) => node.id), ['b', 'a1'])
+
+  const last = describeRemoval(outline, 'b')!
+  const shorter = removeChapter(outline, 'a')
+  if (!shorter.ok) return
+  const withoutB = removeChapter(shorter.tree, 'b')
+  if (!withoutB.ok) return
+  const back = restoreRemovedChapter(withoutB.tree, last)
+  assert.equal(back.ok, true)
+  if (back.ok) assert.deepEqual(back.tree.map((node) => node.id), ['b'])
+})
+
+test('describeRemoval：章节不存在时为 null', () => {
+  assert.equal(describeRemoval(outline, 'zzz'), null)
 })

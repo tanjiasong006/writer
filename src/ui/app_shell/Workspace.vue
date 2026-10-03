@@ -27,6 +27,7 @@ import { useSidebar, SIDEBAR_DEFAULT, SIDEBAR_MIN } from './use_sidebar.ts'
 import { useExport } from './use_export.ts'
 import { useFocusRegion } from './use_focus_region.ts'
 import { useFind } from './use_find.ts'
+import { useRemovedChapters } from './use_removed_chapters.ts'
 import FindBar from './FindBar.vue'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
@@ -357,6 +358,25 @@ function closeFind(): void {
   editor.value?.focus()
 }
 
+/** 撤销删除章节（ui-spec §23）。 */
+const removedChapters = useRemovedChapters({
+  tree: () => tree.value,
+  contents: () => document.value.contents,
+  apply: (next, restored) => props.session.applyTree(next, restored),
+  select: (id) => (selectedId.value = id),
+})
+
+/** 撤销删除：恢复的章节被选中；从章节树中撤销时焦点落在它上面。 */
+async function undoDelete(): Promise<void> {
+  const fromTree = focusRegion.value === 'tree'
+  if (!removedChapters.undo()) return
+  if (!sidebarVisible.value) await setSidebarVisible(true)
+  if (fromTree) {
+    await nextTick()
+    chapters.value?.focusCurrent()
+  }
+}
+
 const jumps = useChapterJumps({
   selectedId,
   exists: (id) => findChapter(tree.value, id) !== null,
@@ -454,6 +474,7 @@ const menus = computed(() =>
     reading: reading.value,
     canGoBack: jumps.canGoBack.value,
     canGoForward: jumps.canGoForward.value,
+    canUndoDelete: removedChapters.canUndo.value,
     appearance: props.appearance,
   }),
 )
@@ -533,12 +554,16 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
     case 'chapter':
     case 'move-chapter': {
       // 章节命令作用于侧栏中的章节：侧栏隐藏时先显示出来，新建与重命名才看得见。
-      const isDelete = command.group === 'chapter' && command.action === 'delete'
+      const isDelete = command.group === 'chapter' && (command.action === 'delete' || command.action === 'undo-delete')
       if (!sidebarVisible.value && !isDelete) await setSidebarVisible(true)
       const manager = chapters.value
       if (!manager) return
       if (command.group === 'move-chapter') {
         manager.moveChapter(command.direction)
+        return
+      }
+      if (command.action === 'undo-delete') {
+        void undoDelete()
         return
       }
       switch (command.action) {
@@ -624,6 +649,7 @@ async function createFirstChapter(): Promise<void> {
         :has-content="chapterHasContent"
         :reference-count="chapterRefCount"
         @update:tree="session.applyTree($event)"
+        @removed="removedChapters.record"
         @open="openChapter"
       />
 
@@ -813,6 +839,12 @@ async function createFirstChapter(): Promise<void> {
           {{ jumps.notice.value }}
           <template #actions>
             <button type="button" @click="jumps.back">返回</button>
+          </template>
+        </Toast>
+        <Toast v-if="removedChapters.notice.value" class="workspace__removed" @dismiss="removedChapters.dismiss">
+          {{ removedChapters.notice.value }}
+          <template #actions>
+            <button type="button" @click="undoDelete">撤销</button>
           </template>
         </Toast>
         <Toast v-if="exportNotice" class="workspace__notice" @dismiss="exportNotice = null">

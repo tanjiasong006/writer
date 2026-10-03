@@ -14,7 +14,7 @@ import {
   type MoveIntent,
 } from '../../application/move_chapter.ts'
 import { renameChapter } from '../../application/rename_chapter.ts'
-import { removeChapter, selectionAfterRemove } from '../../application/remove_chapter.ts'
+import { describeRemoval, removeChapter, selectionAfterRemove, type RemovedChapter } from '../../application/remove_chapter.ts'
 import {
   countDescendants,
   findChapter,
@@ -51,6 +51,8 @@ const collapsedIds = defineModel<ReadonlySet<ChapterId>>('collapsedIds', {
 const emit = defineEmits<{
   /** 用户在章节树中按 Enter，要求进入该章节的正文。 */
   open: [chapterId: ChapterId]
+  /** 即将删除章节（在发出新树之前）：上层据此记下章节与正文，以便撤销删除。 */
+  removed: [removed: RemovedChapter]
 }>()
 
 const props = defineProps<{
@@ -183,11 +185,13 @@ function confirmDelete(): void {
 
 function applyDelete(id: ChapterId): void {
   const next = selectionAfterRemove(tree.value, id)
+  const removed = describeRemoval(tree.value, id)
   const result = removeChapter(tree.value, id)
-  if (!result.ok) {
-    errorMessage.value = messageForRemove(result.reason)
+  if (!result.ok || !removed) {
+    errorMessage.value = messageForRemove(result.ok ? 'chapter-not-found' : result.reason)
     return
   }
+  emit('removed', removed)
   tree.value = result.tree
   // 选中章节被删除（或在被删章节的子树中）时，改为选中相邻章节，可以直接继续写作。
   // 必须对照 result.tree：受控模式下 tree.value 要等上层更新 props 后才是新树。

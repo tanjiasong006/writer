@@ -107,10 +107,13 @@ export class ProjectSession {
     return () => this.listeners.delete(listener)
   }
 
-  /** 章节结构操作（chapter_tree 用例）之后，用新树更新文档，正文随之同步。 */
-  applyTree(tree: ChapterTree): void {
+  /**
+   * 章节结构操作（chapter_tree 用例）之后，用新树更新文档，正文随之同步。
+   * restored 是重新出现的章节的正文（撤销删除时），其余新章节的正文为空。
+   */
+  applyTree(tree: ChapterTree, restored?: ReadonlyMap<ChapterId, string>): void {
     if (tree === this.current.tree) return
-    this.commit(replaceTree(this.current, tree))
+    this.commit(replaceTree(this.current, tree, restored))
   }
 
   /** 修改章节正文；章节不存在时返回 false。 */

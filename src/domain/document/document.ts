@@ -51,16 +51,21 @@ export function emptyDocument(title: string): WriterDocument {
 
 /**
  * 用一棵新树替换文档结构，同步维护正文不变量：
- * 已不在树中的章节（被删除的整棵子树）去掉正文，新出现的章节补空正文，其余正文原样保留。
+ * 已不在树中的章节（被删除的整棵子树）去掉正文，新出现的章节使用 restored 中的正文（撤销删除时），
+ * 没有时补空正文，其余正文原样保留。
  *
  * 章节结构操作（新建、移动、删除、重命名）都在 chapter_tree 中完成，这里只负责让正文跟上。
  *
  * 前置条件：tree 是一棵已通过 validateTree 的可信树。
  */
-export function replaceTree(document: WriterDocument, tree: ChapterTree): WriterDocument {
+export function replaceTree(
+  document: WriterDocument,
+  tree: ChapterTree,
+  restored: ReadonlyMap<ChapterId, string> = new Map(),
+): WriterDocument {
   const ids = collectIds(tree)
   const contents = new Map<ChapterId, string>()
-  for (const id of ids) contents.set(id, document.contents.get(id) ?? '')
+  for (const id of ids) contents.set(id, document.contents.get(id) ?? restored.get(id) ?? '')
   return { ...document, tree, contents }
 }
 

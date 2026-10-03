@@ -70,6 +70,16 @@ test('replaceTree：删除子树时一并去掉子孙正文', () => {
   assert.equal(next.contents.get('b'), '正文\n')
 })
 
+test('replaceTree：重新出现的章节（撤销删除）使用给出的正文，已有章节的正文不被覆盖', () => {
+  const restored = new Map([
+    ['new', '恢复的正文'],
+    ['b', '不使用'],
+  ])
+  const next = replaceTree(doc(), [...doc().tree, { id: 'new', title: '恢复', children: [] }], restored)
+  assert.equal(next.contents.get('new'), '恢复的正文')
+  assert.equal(next.contents.get('b'), '正文\n')
+})
+
 test('replaceTree：新章节补空正文，移动不影响正文', () => {
   const moved: ChapterTree = [
     { id: 'b', title: '第二章', children: [{ id: 'a1', title: '背景', children: [] }] },
