@@ -16,7 +16,7 @@
 - 后续正文编辑能力优先基于 ProseMirror schema / command / plugin 扩展，而不是通过 Markdown 文本操作实现。
 - Markdown 继续作为正文的持久化格式；领域模型（正文是 Markdown 字符串）、正文磁盘格式及 Rust 导出内容解析保持不变。
   Markdown ⇄ ProseMirror 文档的转换只发生在编辑器层（`ui/editor/markdown.ts`）。
-- Markdown 方言与导出的 pulldown-cmark 一致：CommonMark + GFM 表格、删除线、任务列表；原始 HTML 与 Markdown 标题视为文字
+- Markdown 方言与导出的 pulldown-cmark 一致：CommonMark + GFM 表格、删除线、任务列表、脚注（第 11 节）；原始 HTML 与 Markdown 标题视为文字
   （见第 8 节“正文不支持标题与 HTML”）。
 - schema 只包含 Markdown 能保存、且 Rust 渲染器能渲染的结构；不能用 Markdown 保存的能力（合并单元格、
   单元格内多段落、列宽等）不进入编辑器。需要新增此类能力时，先与产品负责人确认是否调整持久化格式。
@@ -322,3 +322,17 @@
      TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/writer-updater.key)" npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":true}}'`。
   3. 上传安装包、`.sig` 与 Tauri 格式的 `latest.json`（`version`、`notes`、`pub_date`、各平台的 `url` 与 `signature`）。
 - Mac App Store 版本不得包含自更新（构建时不提供上述环境变量即可，入口显示“此版本不检查更新”；上架前再决定是否隐藏入口）。
+
+## 11. 脚注（2026-10-03 实施，待产品负责人确认）
+
+- 持久化使用 GFM 脚注语法：正文中 `[^1]`，章节末尾 `[^1]: 内容`。不扩展 Markdown，`version` 不变；
+  其他 Markdown 工具（GitHub、Typora 等）能直接显示。行内写法 `^[…]` 与没有定义的 `[^x]` 是文字（pulldown-cmark 不支持前者）。
+- 编辑器中脚注是行内的原子节点，显示为上标编号（按章节中的顺序），章节末尾在短线下列出全部脚注；全文阅读相同。
+  脚注内容只有一段文字（不带格式）：载入时带格式或多行的定义原样保留，内容没有修改就原样写回，修改后按文字写出。
+- 插入：“插入 → 脚注…”与正文右键菜单（无快捷键，与 Pages 相同）；先在光标下方的浮层中填写内容，Enter 完成后才插入，
+  Esc 取消不留下空脚注。编辑：双击编号、单击章末列表中的一条、选中后按 Enter 或右键“编辑脚注…”；清空内容即删除。
+- 写出时引用按章节中的顺序重新编号为 `[^1]`、`[^2]`……，定义写在章节末尾（每条之间空一行）；同一定义被引用多次时，
+  每处各是一条脚注（编辑与输出一致）。只有被编辑的章节会这样写出。
+- 输出：Word 使用真正的脚注（页底、自动编号，FootnoteText / FootnoteReference 样式）；PDF 使用 Typst 的 footnote。
+  两者都在全文中连续编号，编辑展示中的编号只在章节内，这是已接受的差异。
+- 契约：共享 fixture `footnotes`，语义投影为 `{footnote: 内容的纯文字}`。

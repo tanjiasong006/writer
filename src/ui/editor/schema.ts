@@ -29,7 +29,7 @@ function parseAlign(value: string | null | undefined): Align | null {
 const table = tableNodes({
   tableGroup: 'block',
   // GFM 表格的单元格只能是一行行内内容：不允许硬换行与块级内容。
-  cellContent: '(text | image | chapter_ref)*',
+  cellContent: '(text | image | chapter_ref | footnote)*',
   cellAttributes: {
     align: {
       default: null,
@@ -262,6 +262,32 @@ export const schema = new Schema({
         'span',
         { class: 'chapter-ref', 'data-chapter-ref': node.attrs.href },
         node.attrs.cached,
+      ],
+    },
+
+    /**
+     * 脚注（Markdown 中的 `[^1]` 与章节末尾的 `[^1]: 内容`）：行内的原子节点，显示为上标的编号（按章节中的顺序，
+     * 由 decoration 给出，不存进文档）。text 是脚注内容的文字；source 是载入时定义的 Markdown 原文
+     * （可能带格式或多行），内容没有修改时原样写回，修改后按 text 写出。
+     */
+    footnote: {
+      inline: true,
+      group: 'inline',
+      atom: true,
+      attrs: {
+        text: { default: '', validate: 'string' },
+        source: { default: null, validate: 'string|null' },
+      },
+      leafText: () => '',
+      parseDOM: [
+        {
+          tag: 'sup[data-footnote]',
+          getAttrs: (dom) => ({ text: dom.getAttribute('data-footnote') ?? '' }),
+        },
+      ],
+      toDOM: (node): DOMOutputSpec => [
+        'sup',
+        { class: 'footnote-ref', 'data-footnote': node.attrs.text, title: node.attrs.text },
       ],
     },
 

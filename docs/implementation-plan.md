@@ -867,7 +867,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 
 ### P1：长文档写作核心能力
 
-1. 脚注：Markdown 解析未开启脚注，导出为字面 `[^1]`（`render/markdown.rs`）。
+1. ~~脚注：Markdown 解析未开启脚注，导出为字面 `[^1]`（`render/markdown.rs`）。~~（完成，见下方“P1-1 脚注”）
 2. 图表自动编号与引用（"见图 3""见表 2"）：已有图注，未发现自动编号，也不能像章节一样被交叉引用。
 3. 参考文献 / 文献引用（未发现）。
 4. 数学公式（未发现）：Typst 原生支持，PDF 成本低；Word 需要转换为 OMML。
@@ -876,6 +876,17 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 7. 外部修改检测（文件监听 + 冲突提示，known-risks #4）。
 8. 打包开源中文字体，保证不同机器上 PDF 排版一致。
 9. 最近项目列表（目前只记住上次打开的项目）。
+
+#### P1-1 脚注（完成，2026-10-03）
+
+- 规则见 decisions 第 11 节。编辑器：`markdown-it-footnote`（关闭行内脚注）→ `writer_footnote` 规则合成 `footnote` 记号，
+  定义从记号流中去掉；写出时先写占位，整章写出后编号并追加定义（`withFootnotes`）；往返检查与定界调整把脚注当作以 [ 开头的原子。
+- `footnote_view.ts`（编号 decoration、章末列表）、`FootnotePopover.vue`、命令 `insertFootnote` / `setFootnoteText`，
+  “插入 → 脚注…”与右键菜单；全文阅读同样编号并列出。
+- Rust：`ENABLE_FOOTNOTES`，`Inline::Footnote(内容)`（定义收集后替换引用占位，没有定义时是文字）；
+  Word 脚注（`footnoteRef` 由占位替换、FootnoteText / FootnoteReference 样式），PDF `#footnote[…]`。
+- 验证：编辑器解析 / 写出、编辑交互、全文阅读测试；共享 fixture `footnotes`（两侧契约）；Word（脚注部件、编号标记、样式）
+  与 PDF（页底、全文连续编号）测试；Story `ChapterEditor/Footnotes`、`FootnotePopover`（Storybook 中目视检查了编号、章末列表与编辑浮层）。
 
 ### P2：体验提升
 

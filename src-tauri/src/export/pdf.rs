@@ -640,6 +640,10 @@ impl<'a> Writer<'a> {
                     let image = self.image(src, alt, container.width, &container.max_height);
                     out.push_str(&format!("#box({image})"));
                 }
+                // 脚注：Typst 的 footnote 在页底按全文连续编号。
+                Inline::Footnote(content) => {
+                    out.push_str(&format!("#footnote[{}]", self.inlines(content, container)))
+                }
                 Inline::SoftBreak => out.push_str("#\" \""),
                 Inline::HardBreak => out.push_str("#linebreak()"),
             }
@@ -1689,6 +1693,24 @@ mod tests {
         let hidden = layout_with(&document, PdfLayout { chapter_number: ChapterNumber::None, ..PdfLayout::default() });
         let text = page_texts(&hidden).concat();
         assert!(text.contains("见方法、背景与方法"), "{text}");
+    }
+
+    #[test]
+    fn footnotes_are_placed_at_the_page_bottom_with_continuous_numbers() {
+        let document = build(&request(
+            "",
+            &[
+                ("a", vec![1], "绪论", "第一处[^a]正文。\n\n[^a]: 脚注甲"),
+                ("b", vec![2], "方法", "第二处[^b]。\n\n[^b]: 脚注**乙**"),
+            ],
+        ));
+        let paged = layout_with(&document, PdfLayout { toc: false, ..PdfLayout::default() });
+        let texts = page_texts(&paged);
+        // 正文中是上标编号，内容在同一页的底部；编号在全文中连续。
+        let first = texts.iter().find(|t| t.contains("第一处")).unwrap();
+        assert!(first.contains("第一处1正文") && first.contains("1脚注甲"), "{first}");
+        let second = texts.iter().find(|t| t.contains("第二处")).unwrap();
+        assert!(second.contains("第二处2") && second.contains("2脚注乙"), "{second}");
     }
 
     fn three_chapters(title: &str) -> Document {

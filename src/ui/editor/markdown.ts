@@ -1,4 +1,5 @@
 import MarkdownIt from 'markdown-it'
+import footnotePlugin from 'markdown-it-footnote'
 import { Fragment, type MarkType, type Node } from 'prosemirror-model'
 import {
   MarkdownParser,
@@ -52,7 +53,7 @@ export function serializeChapter(
   format: TextFormat = DEFAULT_FORMAT,
   refLabel: ChapterRefLabel | null = null,
 ): string {
-  const markdown = serializeMarkdown(doc, refLabel)
+  const markdown = withFootnotes(doc, serializeMarkdown(doc, refLabel))
   const body = markdown.length > 0 && format.finalNewline ? `${markdown}\n` : markdown
   return (format.bom ? '\uFEFF' : '') + (format.crlf ? body.replaceAll('\n', '\r\n') : body)
 }
@@ -68,7 +69,9 @@ function usesOnlyCrlf(text: string): boolean {
 /** 与 Rust 渲染器相同：块级嵌套超过此深度的内容无法表示（pulldown-cmark 一侧在 32 层压平）。 */
 const MAX_NESTING = 100
 
-const tokenizer = MarkdownIt('commonmark', { html: false }).enable(['table', 'strikethrough'])
+const tokenizer = MarkdownIt('commonmark', { html: false }).enable(['table', 'strikethrough']).use(footnotePlugin)
+// pulldown-cmark 不支持行内脚注 ^[…]：按文字处理。
+tokenizer.inline.ruler.disable(['footnote_inline'])
 // commonmark 预设只允许 20 层；maxNesting 是 markdown-it 的运行时选项，类型定义中没有列出。
 Object.assign(tokenizer.options, { maxNesting: MAX_NESTING })
 // 保留链接与图片地址的原文：不做百分号编码，也不因协议拒绝（导出时由 Rust 决定是否可用）。
@@ -107,6 +110,79 @@ function headingText(open: Token, content: string, lines: readonly string[]): st
   if (open.markup.startsWith('#')) return [content === '' ? open.markup : `${open.markup} ${content}`]
   const underline = lines[open.map![1] - 1].replace(/^[\s>]*/, '').trimEnd()
   return [...content.split('\n').map((line) => line.trim()), underline]
+}
+
+/**
+ * 脚注（GFM）：引用 `[^label]` 合成 footnote 记号，带定义的文字与 Markdown 原文；定义本身不是正文中的块，
+ * 从记号流中去掉（与 Rust 渲染器相同：定义只出现在引用它的地方）。没有定义的 `[^label]` 是文字；
+ * 同一个定义被引用多次时，每个引用都是一条脚注。
+ */
+tokenizer.core.ruler.after('footnote_tail', 'writer_footnote', (state) => {
+  const tokens = state.tokens
+  const start = tokens.findIndex((token) => token.type === 'footnote_block_open')
+  const definitions = new Map<number, { text: string; source: string | null }>()
+  if (start >= 0) {
+    const lines = state.src.split('\n')
+    let id = -1
+    let label: string | undefined
+    let parts: string[] = []
+    let range: [number, number] | null = null
+    for (const token of tokens.slice(start)) {
+      if (token.type === 'footnote_open') {
+        ;({ id, label } = token.meta as { id: number; label?: string })
+        parts = []
+        range = null
+      } else if (token.type === 'inline') {
+        parts.push(inlinePlainText(token.children ?? []))
+        if (token.map) range = [range?.[0] ?? token.map[0], token.map[1]]
+      } else if (token.type === 'fence' || token.type === 'code_block') {
+        parts.push(token.content.trim())
+      } else if (token.type === 'footnote_close') {
+        definitions.set(id, { text: parts.join(' ').replace(/\s+/g, ' ').trim(), source: definitionSource(lines, range, label) })
+      }
+    }
+    tokens.splice(start)
+  }
+  for (const token of tokens) {
+    if (token.type !== 'inline' || !token.children) continue
+    for (const child of token.children) {
+      if (child.type !== 'footnote_ref') continue
+      const definition = definitions.get((child.meta as { id: number }).id)
+      child.type = 'footnote'
+      child.attrs = [
+        ['text', definition?.text ?? ''],
+        ['source', definition?.source ?? ''],
+      ]
+    }
+  }
+})
+
+/** 行内记号的纯文字（脚注内容）：软换行按渲染结果处理，图片取替代文字。 */
+function inlinePlainText(children: readonly Token[]): string {
+  const copy = children.map((child) => {
+    const token = Object.assign(Object.create(Object.getPrototypeOf(child) as object), child) as Token
+    return token
+  })
+  joinSoftBreaks(copy)
+  return copy
+    .map((child) => (child.type === 'image' ? imageAlt(child) : child.type === 'hardbreak' ? ' ' : child.content))
+    .join('')
+}
+
+/**
+ * 定义的 Markdown 原文（去掉 `[^label]:` 之后的部分，续行保留缩进）。只认顶层、首行以 `[^label]:` 开头的定义；
+ * 其他情况（在引用或列表中定义等）没有原文，写回时按文字写出。
+ */
+function definitionSource(lines: readonly string[], range: [number, number] | null, label: string | undefined): string | null {
+  if (!range || label === undefined) return null
+  // 定义的段落从 `[^label]:` 所在行开始；之前的行可能是空行（标记与内容分行时）。
+  let first = range[0]
+  const marker = /^ {0,3}\[\^([^\]]+)\]:[ \t]?/
+  while (first >= 0 && !marker.test(lines[first] ?? '')) first--
+  if (first < 0 || marker.exec(lines[first])![1] !== label) return null
+  const body = [lines[first].replace(marker, ''), ...lines.slice(first + 1, range[1])]
+  while (body.length > 0 && body.at(-1)!.trim() === '') body.pop()
+  return body.join('\n')
 }
 
 tokenizer.core.ruler.push('writer_soft_break', (state) => {
@@ -290,6 +366,10 @@ const parser = new MarkdownParser(schema, tokenizer, {
   figure: { node: 'figure', getAttrs: imageAttrs },
   hardbreak: { node: 'hard_break' },
   chapter_ref: { node: 'chapter_ref', getAttrs: (token) => ({ href: token.attrGet('href') ?? '', cached: token.content }) },
+  footnote: {
+    node: 'footnote',
+    getAttrs: (token) => ({ text: token.attrGet('text') ?? '', source: token.attrGet('source') || null }),
+  },
   em: { mark: 'em' },
   strong: { mark: 'strong' },
   s: { mark: 'strike' },
@@ -452,6 +532,10 @@ const serializer = new MarkdownSerializer(
       const text = writingRefLabel?.(node.attrs.href)?.text ?? node.attrs.cached
       state.write(`[${state.esc(text)}](${destination(node.attrs.href)})`)
     },
+    // 先写占位，整章写出后按顺序编号并在末尾写出定义（withFootnotes）。
+    footnote(state) {
+      state.write(FOOTNOTE_PLACEHOLDER)
+    },
     // 与只含这张图片的段落写法相同：Markdown 中没有新的语法。
     figure(state, node) {
       state.write(imageMarkdown(state, node))
@@ -539,6 +623,51 @@ function isList(node: Node): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// 脚注：引用按在章节中的顺序编号为 [^1]、[^2]……，定义写在章节末尾，每条之间空一行。
+// 内容没有修改（与载入时的原文对应）时写回原文，否则按文字转义写出；没有内容的脚注不写出。
+
+/** 写出各块时脚注引用的占位（不会出现在正文文字中：私用区字符）。 */
+const FOOTNOTE_PLACEHOLDER = '[^\uE000]'
+
+function withFootnotes(doc: Node, markdown: string): string {
+  if (!markdown.includes(FOOTNOTE_PLACEHOLDER)) return markdown
+  const notes: Node[] = []
+  doc.descendants((node) => {
+    if (node.type === nodes.footnote) notes.push(node)
+    return true
+  })
+  const definitions: string[] = []
+  let index = 0
+  const body = markdown.replaceAll(FOOTNOTE_PLACEHOLDER, () => {
+    const note = notes[index++]
+    const content = note ? footnoteContent(note) : ''
+    if (content === '') return ''
+    definitions.push(`[^${definitions.length + 1}]: ${content}`)
+    return `[^${definitions.length}]`
+  })
+  return definitions.length === 0 ? body : `${body}\n\n${definitions.join('\n\n')}`
+}
+
+function footnoteContent(note: Node): string {
+  const source = note.attrs.source as string | null
+  const text = note.attrs.text as string
+  if (source !== null && sourceText(source) === text) return source
+  if (text.trim() === '') return ''
+  return serializeMarkdown(nodes.doc.create(null, nodes.paragraph.create(null, schema.text(text.trim()))), null)
+}
+
+/** 原文定义解析后的文字：与载入时得到的 text 相同说明内容没有修改。 */
+function sourceText(source: string): string {
+  const parsed = parser.parse(`x[^1]\n\n[^1]: ${source}`)
+  let text: string | null = null
+  parsed.descendants((node) => {
+    if (node.type === nodes.footnote && text === null) text = node.attrs.text as string
+    return text === null
+  })
+  return text ?? ''
+}
+
+// ---------------------------------------------------------------------------
 // 写出前的调整：让每个文本块都能被 Markdown 准确表达
 //
 // 编辑器中可以做出一些 Markdown 无法原样表达的内容。写出前按渲染结果等价地调整，
@@ -618,17 +747,34 @@ function withoutMarks(block: Node, types: readonly MarkType[] | null): Node {
 
 /** 文本块的内容写成 Markdown 后再次解析，是否得到完全相同的内容。 */
 function roundTrips(block: Node): boolean {
-  const paragraph = nodes.paragraph.create(null, block.content)
+  const paragraph = nodes.paragraph.create(null, withoutFootnotes(block.content))
   const parsed = parser.parse(serializer.serialize(nodes.doc.create(null, paragraph)))
   const first = parsed.firstChild
   return parsed.childCount === 1 && first!.type === nodes.paragraph && first!.content.eq(paragraph.content)
+}
+
+/**
+ * 往返检查中的脚注：单独一段写不出定义，换成写法同样以 [ 开头、不含文字的章节引用（定界规则中两者相同：
+ * 前后都是标点），格式不受影响。
+ */
+function withoutFootnotes(content: Fragment): Fragment {
+  let changed = false
+  const children: Node[] = []
+  content.forEach((child) => {
+    if (child.type !== nodes.footnote) children.push(child)
+    else {
+      changed = true
+      children.push(nodes.chapter_ref.create({ href: 'writer:chapter/_', cached: '' }, null, child.marks))
+    }
+  })
+  return changed ? Fragment.fromArray(children) : content
 }
 
 function unwrapChapterRefs(block: Node): Node {
   let changed = false
   const children: Node[] = []
   block.forEach((child) => {
-    const kept = child.type === nodes.chapter_ref ? child.marks.filter((mark) => !UNWRAPPED.includes(mark.type)) : null
+    const kept = child.type === nodes.chapter_ref || child.type === nodes.footnote ? child.marks.filter((mark) => !UNWRAPPED.includes(mark.type)) : null
     if (kept && kept.length !== child.marks.length) {
       changed = true
       children.push(child.mark(kept))
@@ -683,6 +829,7 @@ function adjustEmphasis(block: Node): Node {
   const units: Unit[] = []
   block.forEach((child) => {
     if (child.type === nodes.chapter_ref) units.push({ first: '[', last: ')', node: child })
+    else if (child.type === nodes.footnote) units.push({ first: '[', last: ']', node: child })
     else if (!child.isText) units.push({ first: null, last: null, node: child })
     else for (const char of child.text!) units.push({ first: char, last: char, node: schema.text(char, child.marks) })
   })

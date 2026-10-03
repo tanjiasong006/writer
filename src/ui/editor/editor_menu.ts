@@ -9,6 +9,7 @@ import type { ChapterRefShow } from '../../domain/chapter_reference/chapter_refe
  *
  * - 选中的图片：添加 / 编辑图注、剪切 / 拷贝（图片没有单独的尺寸或对齐设置）。
  * - 选中的章节引用：前往目标章节、显示格式（当前格式打勾）、更改目标、剪切 / 拷贝。
+ * - 选中的脚注：编辑脚注（`footnote:edit`）、剪切 / 拷贝。
  * - 表格中：插入 / 删除行与列、删除表格，放在最前面。
  * - 代码块中：“代码语言”子菜单放在最前面（当前语言打勾）。
  * - 其余：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当前所在结构打勾）、插入表格与图片。
@@ -38,6 +39,8 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   table: { label: '表格', shortcut: SHORTCUTS.insertTable },
   image: { label: '图片…', shortcut: SHORTCUTS.insertImage },
   'chapter-ref': { label: '章节引用…', shortcut: SHORTCUTS.chapterRef },
+  // 脚注没有自然的“⌘ + 单键”（Word 的 ⌥⌘F 是两个修饰键），只在插入菜单与右键菜单中。
+  footnote: { label: '脚注…' },
   'row-before': { label: '在上方插入行' },
   'row-after': { label: '在下方插入行' },
   'column-before': { label: '在左侧插入列' },
@@ -133,8 +136,12 @@ export function editorContextMenu(
   figureCaption: string | null,
   codeLanguage: string | null = null,
   chapterRef: ChapterRefMenu | null = null,
+  footnote = false,
 ): MenuEntry[] {
   if (chapterRef !== null) return chapterRefMenu(state, chapterRef)
+  if (footnote) {
+    return [{ id: 'footnote:edit', label: '编辑脚注…' }, { separator: true }, { role: 'cut' }, { role: 'copy' }]
+  }
   if (figureCaption !== null) {
     return [
       { id: 'figure:caption', label: figureCaption === '' ? '添加图注' : '编辑图注' },
@@ -179,6 +186,7 @@ export function editorContextMenu(
       commandEntry('table', state, { label: '插入表格' }),
       commandEntry('image', state, { label: '插入图片…' }),
       commandEntry('chapter-ref', state, { label: '插入章节引用…' }),
+      commandEntry('footnote', state, { label: '插入脚注…' }),
     )
   }
   return entries

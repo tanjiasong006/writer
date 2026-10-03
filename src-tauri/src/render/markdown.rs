@@ -4,7 +4,8 @@
 //! 正文不支持标题与 HTML（docs/decisions.md 第 8 节），与编辑器的方言一致：
 //! 原始 HTML 一律作为普通文本；Markdown 标题作为普通段落，文字是标题的原文（见 HeadingsAsText）。
 
-use std::collections::VecDeque;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd};
@@ -62,6 +63,9 @@ pub enum Inline {
         src: String,
         alt: String,
     },
+    /// 脚注（GFM `[^label]`）：内容是定义的行内文字（多段以空格连接），出现在引用处。
+    /// 同一定义被引用多次时每个引用各是一条脚注（与编辑器相同）。
+    Footnote(Vec<Inline>),
     SoftBreak,
     HardBreak,
 }
@@ -82,16 +86,106 @@ impl Block {
 /// 引用 / 列表的最大嵌套层数。更深的内容压平为文本，保证解析与各渲染器的递归深度有上界。
 const MAX_NESTING: usize = 32;
 
+thread_local! {
+    /// 解析一章时收集的脚注定义（标签小写 → 内容）。定义可能出现在引用之后，解析完再把引用换成内容。
+    static FOOTNOTES: RefCell<HashMap<String, Vec<Inline>>> = RefCell::new(HashMap::new());
+}
+
+/// 引用处的占位：解析完成后由 resolve_footnotes 换成 Footnote（有定义）或文字（没有定义）。
+const FOOTNOTE_MARK: char = '\u{0}';
+
 pub fn parse(markdown: &str) -> Vec<Block> {
-    let options =
-        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES;
     let mut events = HeadingsAsText {
         source: markdown,
         inner: Parser::new_ext(markdown, options).into_offset_iter(),
         queued: VecDeque::new(),
     }
     .peekable();
-    blocks(&mut events, &|_| false, 0)
+    FOOTNOTES.with(|footnotes| footnotes.borrow_mut().clear());
+    let mut parsed = blocks(&mut events, &|_| false, 0);
+    let definitions = FOOTNOTES.with(|footnotes| std::mem::take(&mut *footnotes.borrow_mut()));
+    for block in &mut parsed {
+        resolve_block(block, &definitions);
+    }
+    parsed
+}
+
+fn resolve_block(block: &mut Block, definitions: &HashMap<String, Vec<Inline>>) {
+    match block {
+        Block::Paragraph(inlines) => resolve_inlines(inlines, definitions),
+        Block::List { items, .. } => items
+            .iter_mut()
+            .flatten()
+            .for_each(|block| resolve_block(block, definitions)),
+        Block::Quote(blocks) => blocks
+            .iter_mut()
+            .for_each(|block| resolve_block(block, definitions)),
+        Block::Table { header, rows, .. } => header
+            .iter_mut()
+            .chain(rows.iter_mut().flatten())
+            .for_each(|cell| resolve_inlines(cell, definitions)),
+        Block::Code { .. } | Block::Rule => {}
+    }
+}
+
+fn resolve_inlines(inlines: &mut Vec<Inline>, definitions: &HashMap<String, Vec<Inline>>) {
+    for inline in inlines.iter_mut() {
+        match inline {
+            Inline::Footnote(marker) => {
+                let label = match marker.as_slice() {
+                    [Inline::Text(text)] => text.trim_start_matches(FOOTNOTE_MARK).to_owned(),
+                    _ => continue,
+                };
+                *inline = match definitions.get(&label.to_lowercase()) {
+                    Some(content) => Inline::Footnote(content.clone()),
+                    None => Inline::Text(format!("[^{label}]")),
+                };
+            }
+            Inline::Strong(children)
+            | Inline::Emphasis(children)
+            | Inline::Strike(children)
+            | Inline::Link { children, .. } => resolve_inlines(children, definitions),
+            _ => {}
+        }
+    }
+    *inlines = normalize(std::mem::take(inlines));
+}
+
+/// 脚注定义的块 → 行内内容：各块的内容以空格连接；定义中再引用的脚注不保留（与编辑器相同）。
+fn footnote_content(blocks: Vec<Block>) -> Vec<Inline> {
+    let mut out: Vec<Inline> = Vec::new();
+    for block in blocks {
+        let inlines = match block {
+            Block::Paragraph(inlines) => inlines,
+            Block::Code { text, .. } => vec![Inline::Text(text)],
+            other => vec![Inline::Text(block_text(&other))],
+        };
+        if !out.is_empty() {
+            out.push(Inline::Text(" ".to_owned()));
+        }
+        out.extend(inlines.into_iter().filter(|inline| !matches!(inline, Inline::Footnote(_))));
+    }
+    normalize(out)
+}
+
+fn block_text(block: &Block) -> String {
+    match block {
+        Block::Paragraph(inlines) => plain_text(inlines),
+        Block::List { items, .. } => items.iter().flatten().map(block_text).collect::<Vec<_>>().join(" "),
+        Block::Quote(blocks) => blocks.iter().map(block_text).collect::<Vec<_>>().join(" "),
+        Block::Code { text, .. } => text.clone(),
+        Block::Table { header, rows, .. } => header
+            .iter()
+            .chain(rows.iter().flatten())
+            .map(|cell| plain_text(cell))
+            .collect::<Vec<_>>()
+            .join(" "),
+        Block::Rule => String::new(),
+    }
 }
 
 type Events<'a> = Peekable<HeadingsAsText<'a>>;
@@ -233,6 +327,21 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
                 flush(&mut pending, &mut out);
                 out.push(Block::Rule);
             }
+            Event::Start(Tag::FootnoteDefinition(label)) => {
+                // 定义不是正文中的块：内容记下来，出现在引用它的地方。重复定义以第一个为准。
+                flush(&mut pending, &mut out);
+                let content = footnote_content(blocks(
+                    events,
+                    &|e| matches!(e, TagEnd::FootnoteDefinition),
+                    depth + 1,
+                ));
+                FOOTNOTES.with(|footnotes| {
+                    footnotes
+                        .borrow_mut()
+                        .entry(label.to_lowercase())
+                        .or_insert(content);
+                });
+            }
             Event::Start(tag) => {
                 if let Some(inline) = inline_from_start(tag, events) {
                     pending.push(inline);
@@ -367,7 +476,9 @@ fn inline_from_leaf(event: Event) -> Option<Inline> {
         Event::SoftBreak => Inline::SoftBreak,
         Event::HardBreak => Inline::HardBreak,
         Event::TaskListMarker(done) => Inline::Text(if done { "☑ " } else { "☐ " }.to_owned()),
-        Event::FootnoteReference(name) => Inline::Text(format!("[^{name}]")),
+        Event::FootnoteReference(name) => {
+            Inline::Footnote(vec![Inline::Text(format!("{FOOTNOTE_MARK}{name}"))])
+        }
         _ => return None,
     })
 }
@@ -462,6 +573,7 @@ pub fn plain_text(inlines: &[Inline]) -> String {
             Inline::Link { children, .. } => text.push_str(&plain_text(children)),
             Inline::Image { alt, .. } => text.push_str(alt),
             Inline::ChapterRef { cached, .. } => text.push_str(cached),
+            Inline::Footnote(_) => {}
             Inline::SoftBreak | Inline::HardBreak => text.push(' '),
         }
     }

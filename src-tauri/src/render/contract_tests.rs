@@ -49,6 +49,14 @@ fn runs(inlines: &[Inline], marks: &[String], out: &mut Vec<Value>) {
             Inline::Emphasis(children) => nested("emphasis".into(), children, out),
             Inline::Strike(children) => nested("strike".into(), children, out),
             Inline::Link { url, children } => nested(format!("link:{url}"), children, out),
+            // 脚注投影为内容的纯文字（空白合并）：编辑器中脚注内容只有文字。
+            Inline::Footnote(content) => {
+                let text = crate::render::markdown::plain_text(content)
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                out.push(with_marks(object(json!({ "footnote": text }))))
+            }
             Inline::ChapterRef { target, cached } => {
                 let target = target.as_ref().map(|target| {
                     let show = match target.show {

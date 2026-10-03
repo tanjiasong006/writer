@@ -1,0 +1,36 @@
+{
+  "说明": "GFM 脚注：引用处是脚注（内容为定义的纯文字），定义本身不是正文中的块。同一定义被引用多次时每处各是一条。没有定义的 [^x] 与行内写法 ^[…] 是文字。编辑器写出时按顺序重新编号（[^1]…），定义写在章节末尾。",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "正文中的脚注" },
+        { "footnote": "第一条脚注，带 格式 与续行。" },
+        { "text": "，" },
+        { "text": "强调后", "marks": ["strong"] },
+        { "footnote": "第二条" },
+        { "text": "，再次引用同一条" },
+        { "footnote": "第一条脚注，带 格式 与续行。" },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [{ "text": "没有定义的[^missing]是文字，行内写法^[也是文字]。" }]
+    },
+    {
+      "type": "table",
+      "align": ["none"],
+      "header": [[{ "text": "列" }]],
+      "rows": [[[{ "text": "表格中" }, { "footnote": "表注" }]]]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [
+        { "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "列表中的脚注" }, { "footnote": "第二条" }] }] }
+      ]
+    }
+  ]
+}

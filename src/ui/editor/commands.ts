@@ -47,6 +47,7 @@ export type EditorCommand =
   | 'table'
   | 'image'
   | 'chapter-ref'
+  | 'footnote'
   | 'row-before'
   | 'row-after'
   | 'column-before'
@@ -295,6 +296,44 @@ export function insertChapterRef(href: string, cached: string): Command {
   }
 }
 
+/**
+ * 在选区末尾插入一条内容为 text 的脚注（选中的文字保留，脚注在它之后），之后光标在脚注之后。
+ * 代码块中与不能放行内内容的位置不能插入。
+ */
+export function insertFootnote(text: string): Command {
+  return (state, dispatch) => {
+    const { $to } = state.selection
+    const parent = $to.parent
+    if (!parent.inlineContent || parent.type.spec.code || !parent.canReplaceWith($to.index(), $to.index(), nodes.footnote)) {
+      return false
+    }
+    if (dispatch) {
+      const tr = state.tr.insert($to.pos, nodes.footnote.create({ text }))
+      dispatch(tr.setSelection(TextSelection.create(tr.doc, $to.pos + 1)).scrollIntoView())
+    }
+    return true
+  }
+}
+
+/** 修改 pos 处脚注的内容（载入时的原文保留，内容与原文不再对应时按文字写出）。 */
+export function setFootnoteText(pos: number, text: string): Command {
+  return (state, dispatch) => {
+    const node = state.doc.nodeAt(pos)
+    if (node?.type !== nodes.footnote) return false
+    if (node.attrs.text === text) return true
+    if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, text }))
+    return true
+  }
+}
+
+/** 选中的脚注；没有选中脚注时为 null。 */
+export function selectedFootnote(state: EditorState): { readonly pos: number; readonly node: Node } | null {
+  const { selection } = state
+  return selection instanceof NodeSelection && selection.node.type === nodes.footnote
+    ? { pos: selection.from, node: selection.node }
+    : null
+}
+
 /** 更改选中引用的显示格式；地址格式错误的引用不能更改。 */
 export function setChapterRefShow(show: ChapterRefShow): Command {
   return (state, dispatch) => {
@@ -368,7 +407,7 @@ const removeColumn = thenSelectCell(
   (before, after) => ({ row: before.top, col: Math.min(before.left, after.width - 1) }),
 )
 
-export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image' | 'chapter-ref'>, Command>> = {
+export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote'>, Command>> = {
   undo,
   redo,
   bold: toggleBold,
@@ -416,6 +455,7 @@ export function commandState(state: EditorState): CommandState {
     table: plain(insertTable),
     image: plain(insertImage('', '')),
     'chapter-ref': plain(insertChapterRef('writer:chapter/_', '')),
+    footnote: plain(insertFootnote('')),
     'row-before': plain(rowBefore),
     'row-after': plain(rowAfter),
     'column-before': plain(columnBefore),

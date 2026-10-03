@@ -4,6 +4,7 @@ import { schema } from '../editor/schema.ts'
 import { highlightedCodeDOM } from '../editor/code_highlight.ts'
 import { staticImageDOM, type ImageResolver } from '../editor/image_view.ts'
 import { staticChapterRefDOM, type ChapterRefLabel } from '../editor/chapter_ref_view.ts'
+import { footnoteListDOM, footnotesOf } from '../editor/footnote_view.ts'
 
 /**
  * 章节正文 → 只读展示的 DOM：与编辑器使用同一个 Markdown 解析与 schema，
@@ -27,5 +28,14 @@ export function renderChapterBody(
     },
     base.marks,
   )
-  return serializer.serializeFragment(parseChapter(text).doc.content) as DocumentFragment
+  const { doc } = parseChapter(text)
+  const fragment = serializer.serializeFragment(doc.content) as DocumentFragment
+  // 脚注：正文中按顺序编号，章节末尾列出内容（与编辑器相同）。列表不是正文的块，不参与按块对齐的阅读位置。
+  const notes = footnotesOf(doc)
+  if (notes.length > 0) {
+    fragment.querySelectorAll('.footnote-ref').forEach((ref, index) => ref.setAttribute('data-number', String(index + 1)))
+    const list = footnoteListDOM(notes.map(({ node }) => ({ pos: null, text: node.attrs.text as string })))
+    fragment.append(list)
+  }
+  return fragment
 }

@@ -16,13 +16,13 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 
 use docx_rs::{
-    AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, Footer, Header, Hyperlink,
+    AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, Footer, Footnote, Header, Hyperlink,
     HyperlinkType, IndentLevel, Level, LevelJc, LevelOverride, LevelText, LineSpacing,
     LineSpacingType, NumberFormat, Numbering, NumberingId, PageMargin, PageNum, PageNumType,
     Paragraph, ParagraphBorder, ParagraphBorderPosition, ParagraphBorders, Pic, Run, RunFonts,
     Shading, ShdType, SpecialIndentType, Start, Style, StyleType, Table, TableBorder,
     TableBorderPosition, TableBorders, TableCell, TableCellBorder, TableCellBorderPosition,
-    TableCellBorders, TableRow, WidthType,
+    TableCellBorders, TableRow, VertAlignType, WidthType,
 };
 
 use super::fonts::{docx_fonts, FontFamily};
@@ -144,11 +144,32 @@ pub fn export(
 
     let mut xml = docx.build();
     xml.document = mark_header_rows(&xml.document);
+    xml.footnotes = footnote_marks(&xml.footnotes);
     xml.doc_props.core = core_properties(&document.title, &document.author);
     let bytes = pack_with_jpeg(xml).map_err(|error| ExportError::RenderFailed {
         message: error.to_string(),
     })?;
     Ok((bytes, writer.report))
+}
+
+/// 脚注内容开头的编号标记在生成时先写成这个占位文字（docx-rs 没有 footnoteRef 元素）。
+const FOOTNOTE_MARK_TEXT: &str = "\u{E000}";
+
+/// 把脚注内容中的占位文字换成 Word 的脚注编号标记 `<w:footnoteRef/>`（显示为该脚注的编号）。
+fn footnote_marks(xml: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(xml);
+    let mut out = String::with_capacity(text.len());
+    let mut rest: &str = &text;
+    while let Some(end) = rest.find(&format!("{FOOTNOTE_MARK_TEXT}</w:t>")) {
+        let Some(start) = rest[..end].rfind("<w:t") else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        out.push_str("<w:footnoteRef />");
+        rest = &rest[end + FOOTNOTE_MARK_TEXT.len() + "</w:t>".len()..];
+    }
+    out.push_str(rest);
+    out.into_bytes()
 }
 
 /// 文档属性（docProps/core.xml）：标题与作者。docx-rs 没有设置它们的接口，默认写出的
@@ -647,6 +668,17 @@ impl Writer<'_> {
                     let run = self.image_run(src, alt, bounds);
                     p.add_run(run)
                 }
+                // 脚注：Word 的脚注（页底，自动编号）。内容段落以编号标记开头（见 footnote_marks）。
+                Inline::Footnote(content) => {
+                    let mut text = Paragraph::new()
+                        .style("FootnoteText")
+                        .add_run(Run::new().style("FootnoteReference").add_text(FOOTNOTE_MARK_TEXT))
+                        .add_run(Run::new().add_text(" "));
+                    text = self.inlines(text, content, RunStyle::default(), bounds);
+                    let mut footnote = Footnote::new();
+                    footnote.add_content(text);
+                    p.add_run(Run::new().add_footnote_reference(footnote))
+                }
                 Inline::SoftBreak => p.add_run(styled(Run::new().add_text(" "), style)),
                 Inline::HardBreak => p.add_run(Run::new().add_break(BreakType::TextWrapping)),
             };
@@ -880,6 +912,18 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
                         .after(40),
                 ),
         )
+        .add_style(
+            Style::new("FootnoteText", StyleType::Paragraph)
+                .name("footnote text")
+                .based_on("Normal")
+                .size(half_points(META_PT))
+                .align(AlignmentType::Both),
+        )
+        .add_style({
+            let mut style = Style::new("FootnoteReference", StyleType::Character).name("footnote reference");
+            style.run_property = style.run_property.vert_align(VertAlignType::SuperScript);
+            style
+        })
         .add_style(
             Style::new("Caption", StyleType::Paragraph)
                 .name("caption")
@@ -1157,6 +1201,23 @@ mod tests {
         assert!(!xml.contains(r#"<w:pStyle w:val="Subtitle" />"#));
         assert!(!xml.contains(r#"<w:pStyle w:val="Author" />"#));
         assert!(!part(&bytes, "docProps/core.xml").contains("dc:creator"));
+    }
+
+    #[test]
+    fn footnotes_become_word_footnotes_with_number_marks() {
+        let dir = project();
+        let (bytes, _) = export_ok(&dir, &[("a", vec![1], "绪论", "正文[^a]与[^b]。\n\n[^a]: 脚注**甲**\n\n[^b]: 脚注乙")]);
+        docx_rs::read_docx(&bytes).expect("generated docx must be readable");
+        let document = part(&bytes, "word/document.xml");
+        assert_eq!(document.matches("<w:footnoteReference").count(), 2, "{document}");
+        assert!(!document.contains("脚注甲"));
+        let footnotes = part(&bytes, "word/footnotes.xml");
+        assert_eq!(footnotes.matches("<w:footnoteRef />").count(), 2, "{footnotes}");
+        assert!(!footnotes.contains('\u{E000}'));
+        assert!(footnotes.contains(r#"<w:pStyle w:val="FootnoteText" />"#));
+        assert!(footnotes.contains("甲") && footnotes.contains("<w:b />") && footnotes.contains("脚注乙"));
+        let styles = part(&bytes, "word/styles.xml");
+        assert!(styles.contains(r#"w:styleId="FootnoteReference""#) && styles.contains(r#"<w:vertAlign w:val="superscript" />"#));
     }
 
     #[test]

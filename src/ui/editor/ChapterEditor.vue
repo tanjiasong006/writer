@@ -10,7 +10,10 @@ import {
   commandState,
   editorCommands,
   insertChapterRef,
+  insertFootnote,
   insertImage,
+  selectedFootnote,
+  setFootnoteText,
   selectedChapterRef,
   setChapterRefShow,
   setCodeLanguage,
@@ -22,6 +25,8 @@ import { editorContextMenu, listEntries } from './editor_menu.ts'
 import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
+import FootnotePopover from './FootnotePopover.vue'
+import { footnoteNumber, footnotesOf } from './footnote_view.ts'
 import { useMenu } from '../common/use_menu.ts'
 import { editSelectedCaption, figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
 import { NO_CHAPTER_REFS, chapterRefNodeViews, chapterRefPos, type ChapterRefLabel } from './chapter_ref_view.ts'
@@ -309,6 +314,10 @@ function runCommand(command: EditorCommand): void {
     requestChapterRef()
     return
   }
+  if (command === 'footnote') {
+    startNewFootnote()
+    return
+  }
   editorCommands[command](view.state, view.dispatch)
   focus()
 }
@@ -336,7 +345,7 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
     const { doc, selection } = view.state
     const inside = hit.inside >= 0 ? doc.nodeAt(hit.inside) : null
     const onFigure = (event.target as Element).closest?.('.editor-figure') && inside?.type === nodes.figure
-    const ref = chapterRefPos(view, event.target)
+    const ref = chapterRefPos(view, event.target) ?? footnotePos(event.target)
     if (ref !== null) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, ref)))
     else if (onFigure) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, hit.inside)))
     else if (!inSelection(selection, hit.pos) || selection instanceof NodeSelection) {
@@ -347,6 +356,16 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
 }
 
 /** Shift+F10 / 菜单键：在光标处打开右键菜单（与章节树相同）。⌘/ 经菜单栏调用 openMenuAtCaret。 */
+/** 选中脚注时按 Enter 编辑它（在 ProseMirror 处理 Enter 之前）。 */
+function onFootnoteKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.isComposing || event.metaKey || event.ctrlKey || !view) return
+  const note = selectedFootnote(view.state)
+  if (!note) return
+  event.preventDefault()
+  event.stopPropagation()
+  editFootnote(note.pos)
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if (isCaption(event.target)) return
   if (matchesShortcut(event, SHORTCUTS.list)) {
@@ -388,6 +407,7 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
     onFigure ? (selection.node.attrs.alt as string) : null,
     inCode ? fenceLanguage(selection.$from.parent.attrs.params as string) : null,
     ref ? chapterRefMenu(ref.attrs.href as string) : null,
+    selectedFootnote(view.state) !== null,
   )
   const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
@@ -401,6 +421,10 @@ function runMenuItem(id: string): void {
     focus()
   }
   else if (id === 'figure:caption' && view) editSelectedCaption(view)
+  else if (id === 'footnote:edit' && view) {
+    const note = selectedFootnote(view.state)
+    if (note) editFootnote(note.pos)
+  }
   else if (kind === 'chapter-ref' && view) {
     const ref = selectedChapterRef(view.state)
     if (value === 'open' && ref) openChapterRef(ref.attrs.href as string)
@@ -467,6 +491,88 @@ function onMousedownCapture(event: MouseEvent): void {
 /** 剪贴板或拖入内容中的图片文件。 */
 function imageFiles(data: DataTransfer | null): File[] {
   return [...(data?.files ?? [])].filter((file) => file.type.startsWith('image/'))
+}
+
+/**
+ * 脚注的编辑（docs/decisions.md 第 11 节）：插入时先在光标处弹出浮层，完成后才插入（取消不留下空脚注）；
+ * 已有脚注双击、单击章末列表中的一条、选中后按 Enter 或右键“编辑脚注…”时编辑。修改是一个可撤销的事务。
+ */
+const footnoteEditor = shallowRef<{
+  readonly chapterId: ChapterId
+  /** 已有脚注的位置；新脚注为 null。 */
+  readonly pos: number | null
+  readonly number: number
+  readonly text: string
+  readonly anchor: { readonly x: number; readonly y: number }
+} | null>(null)
+
+function startNewFootnote(): void {
+  if (!view || !insertFootnote('')(view.state)) return
+  const { to } = view.state.selection
+  const caret = view.coordsAtPos(to)
+  const before = footnotesOf(view.state.doc).filter((note) => note.pos < to).length
+  footnoteEditor.value = { chapterId: currentId, pos: null, number: before + 1, text: '', anchor: { x: caret.left, y: caret.bottom } }
+}
+
+function editFootnote(pos: number): void {
+  if (!view) return
+  const node = view.state.doc.nodeAt(pos)
+  if (node?.type !== nodes.footnote) return
+  const dom = view.nodeDOM(pos)
+  const rect = dom instanceof Element ? dom.getBoundingClientRect() : null
+  const caret = rect ?? view.coordsAtPos(pos)
+  footnoteEditor.value = {
+    chapterId: currentId,
+    pos,
+    number: footnoteNumber(view.state.doc, pos),
+    text: node.attrs.text as string,
+    anchor: { x: caret.left, y: caret.bottom },
+  }
+}
+
+function commitFootnote(text: string): void {
+  const editing = footnoteEditor.value
+  footnoteEditor.value = null
+  if (!view || !editing || editing.chapterId !== currentId) return
+  if (editing.pos === null) {
+    if (text !== '') insertFootnote(text)(view.state, view.dispatch)
+  } else if (text === '') {
+    // 清空内容即删除这条脚注。
+    view.dispatch(view.state.tr.delete(editing.pos, editing.pos + 1))
+  } else {
+    setFootnoteText(editing.pos, text)(view.state, view.dispatch)
+  }
+  focus()
+}
+
+function cancelFootnote(): void {
+  footnoteEditor.value = null
+  focus()
+}
+
+/** 点在脚注上时它在文档中的位置。 */
+function footnotePos(target: EventTarget | null): number | null {
+  if (!view || !(target instanceof Element)) return null
+  const dom = target.closest('.footnote-ref')
+  if (!dom || !view.dom.contains(dom)) return null
+  const pos = view.posAtDOM(dom, 0)
+  return view.state.doc.nodeAt(pos)?.type === nodes.footnote ? pos : null
+}
+
+/** 双击脚注编辑；单击章末脚注列表中的一条编辑它。 */
+function onFootnoteClick(event: MouseEvent): void {
+  if (!view || !(event.target instanceof Element)) return
+  const item = event.target.closest<HTMLElement>('[data-footnote-pos]')
+  if (item && event.detail === 1) {
+    event.preventDefault()
+    editFootnote(Number(item.dataset.footnotePos))
+    return
+  }
+  if (event.detail !== 2) return
+  const pos = footnotePos(event.target)
+  if (pos === null) return
+  event.preventDefault()
+  editFootnote(pos)
 }
 
 function isCaption(target: EventTarget | null): boolean {
@@ -647,9 +753,24 @@ defineExpose({
         </span>
       </h1>
       <div class="chapter-editor__body" @mousedown.capture="onMousedownCapture">
-        <div ref="mountPoint" class="chapter-editor__mount" @contextmenu="openContextMenu" @keydown="onKeydown"></div>
+        <div
+          ref="mountPoint"
+          class="chapter-editor__mount"
+          @contextmenu="openContextMenu"
+          @keydown="onKeydown"
+          @keydown.capture="onFootnoteKeydown"
+          @click="onFootnoteClick"
+        ></div>
       </div>
     </div>
+    <FootnotePopover
+      v-if="footnoteEditor"
+      :anchor="footnoteEditor.anchor"
+      :number="footnoteEditor.number"
+      :text="footnoteEditor.text"
+      @commit="commitFootnote"
+      @cancel="cancelFootnote"
+    />
     <PopupMenu
       v-if="menu.current.value"
       label="正文操作"

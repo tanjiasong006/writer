@@ -31,6 +31,7 @@ import { codeHighlight } from './code_highlight.ts'
 import { taskList } from './task_list.ts'
 import { figureEditing, newParagraphAtBlock, selectFigureBackward, selectFigureForward } from './figure_editing.ts'
 import { chapterRefSelection } from './chapter_ref_view.ts'
+import { footnoteDisplay } from './footnote_view.ts'
 
 /**
  * 编辑器插件：快捷键、Markdown 输入规则、撤销历史、表格编辑、占位提示与剪贴板的 Markdown 文本。
@@ -441,6 +442,7 @@ export const editorPlugins: readonly Plugin[] = [
   activeTable(),
   taskList(),
   codeHighlight(),
+  footnoteDisplay(),
   placeholder('开始写作…'),
   continueBelow(),
   markdownClipboard(),

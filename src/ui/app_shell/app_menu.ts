@@ -284,6 +284,7 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         editorItem('table'),
         editorItem('image'),
         editorItem('chapter-ref'),
+        editorItem('footnote'),
         { separator: true },
         // 刷新全部章节引用的链接文字并列出失效引用（docs/decisions.md 第 9 节）。不设快捷键。
         { id: 'insert:update-chapter-refs', label: '更新交叉引用', disabled: !context.hasChapters || context.reading },

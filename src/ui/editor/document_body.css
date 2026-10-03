@@ -230,6 +230,57 @@
   text-underline-offset: 0.2em;
 }
 
+/*
+ * 脚注：正文中是链接色的上标编号（编号由 decoration / 全文阅读给出 data-number）；
+ * 章节末尾在一条短线下列出全部脚注，字号小一号、次级颜色，与页底脚注的阅读习惯相同。
+ */
+.document-body .footnote-ref {
+  margin: 0 0.1em;
+  color: var(--color-doc-link);
+  font-size: 0.72em;
+  font-variant-numeric: tabular-nums;
+  line-height: 0;
+  vertical-align: super;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.document-body .footnote-ref::after {
+  content: attr(data-number);
+}
+
+.document-body .document-footnotes {
+  margin: 2.4em 0 0;
+  padding: 0.8em 0 0 1.6em;
+  border-top: none;
+  background: linear-gradient(var(--color-doc-rule), var(--color-doc-rule)) 0 0 / 30% 1px no-repeat;
+  color: var(--color-doc-muted);
+  font-size: 0.86em;
+  line-height: 1.6;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.document-body .document-footnotes li {
+  margin: 0.2em 0;
+  padding-left: 0.2em;
+}
+
+.document-body .document-footnotes li.is-empty {
+  color: var(--color-text-tertiary);
+}
+
+/* 编辑器中单击一条脚注编辑它。 */
+.document-body .document-footnotes li[data-footnote-pos] {
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+
+.document-body .document-footnotes li[data-footnote-pos]:hover {
+  color: var(--color-doc-text);
+}
+
 /* 失效的章节引用：显示原来的链接文字，以警示色与虚线下划线区分。 */
 .document-body .chapter-ref.is-broken {
   color: var(--color-danger-text);
