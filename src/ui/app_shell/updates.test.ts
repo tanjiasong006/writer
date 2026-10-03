@@ -1,0 +1,106 @@
+import { afterEach, expect, test, vi } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
+import { createMemoryServices } from '../../testing/memory_services.ts'
+import { PATH, seededServices, mountApp, unmountAll, button, typeAtEnd, editorView, appMenuItem } from '../../testing/app_harness.ts'
+
+/** 检查更新（App 与菜单）。 */
+
+afterEach(unmountAll)
+
+function dialogTitle(): string | null {
+  return document.querySelector('.update-dialog__title')?.textContent ?? null
+}
+
+test('帮助 → 检查更新…：已是最新、未配置、失败时说明，“好”关闭', async () => {
+  const services = createMemoryServices()
+  services.shell.enableAppMenu()
+  services.shell.updateResult = { kind: 'up-to-date', current: '0.1.0' }
+  const wrapper = await mountApp(services)
+  expect(appMenuItem(services, 'app:check-update').label).toBe('检查更新…')
+
+  services.shell.chooseMenuItem('app:check-update')
+  await flushPromises()
+  expect(dialogTitle()).toBe('Writer 已是最新版本')
+  await button(wrapper, '好').trigger('click')
+  expect(dialogTitle()).toBeNull()
+
+  services.shell.updateResult = { kind: 'not-configured' }
+  services.shell.chooseMenuItem('app:check-update')
+  await flushPromises()
+  expect(dialogTitle()).toBe('此版本不检查更新')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  await flushPromises()
+
+  services.shell.updateResult = { kind: 'failed', message: 'network down' }
+  services.shell.chooseMenuItem('app:check-update')
+  await flushPromises()
+  expect(dialogTitle()).toBe('无法检查更新')
+  expect(document.querySelector('.update-dialog__detail')?.textContent).toBe('network down')
+})
+
+test('发现新版本：显示说明，下载并安装后重新启动；重新启动前先保存打开的文档', async () => {
+  const services = seededServices()
+  services.shell.enableAppMenu()
+  services.shell.lastProjectPath = PATH
+  services.shell.updateResult = { kind: 'available', current: '0.1.0', version: '0.2.0', notes: '- 查找与替换' }
+  const wrapper = await mountApp(services)
+  typeAtEnd(editorView(wrapper), '未保存')
+
+  services.shell.chooseMenuItem('app:check-update')
+  await flushPromises()
+  expect(dialogTitle()).toBe('Writer 0.2.0 可以更新')
+  expect(document.querySelector('.update-dialog__notes')?.textContent?.trim()).toBe('- 查找与替换')
+
+  await button(wrapper, '下载并安装').trigger('click')
+  await flushPromises()
+  expect(services.shell.installs).toBe(1)
+  expect(dialogTitle()).toBe('更新已安装')
+
+  await button(wrapper, '重新启动').trigger('click')
+  await flushPromises()
+  expect(services.storage.committed(PATH)!.contents.get('a')).toBe('引言未保存')
+  expect(services.shell.restarts).toBe(1)
+})
+
+test('安装失败时说明原因，版本不变', async () => {
+  const services = createMemoryServices()
+  services.shell.enableAppMenu()
+  services.shell.updateResult = { kind: 'available', current: '0.1.0', version: '0.2.0', notes: null }
+  services.shell.installFailure = 'signature mismatch'
+  const wrapper = await mountApp(services)
+  services.shell.chooseMenuItem('app:check-update')
+  await flushPromises()
+  expect(document.querySelector('.update-dialog__notes')).toBeNull()
+  await button(wrapper, '下载并安装').trigger('click')
+  await flushPromises()
+  expect(dialogTitle()).toBe('更新没有安装成功')
+  expect(services.shell.restarts).toBe(0)
+})
+
+test('启动后在后台检查一次：只有新版本才提示，“查看”打开说明', async () => {
+  vi.useFakeTimers()
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.updateResult = { kind: 'available', current: '0.1.0', version: '0.2.0', notes: null }
+  const wrapper = await mountApp(services)
+  expect(services.shell.updateChecks).toBe(0)
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(services.shell.updateChecks).toBe(1)
+  expect(wrapper.find('.workspace__update').text()).toContain('Writer 0.2.0 可以更新')
+
+  await button(wrapper, '查看').trigger('click')
+  await flushPromises()
+  expect(dialogTitle()).toBe('Writer 0.2.0 可以更新')
+  expect(wrapper.find('.workspace__update').exists()).toBe(false)
+})
+
+test('后台检查失败或已是最新时不打扰', async () => {
+  vi.useFakeTimers()
+  const services = createMemoryServices()
+  services.shell.updateResult = { kind: 'failed', message: 'offline' }
+  const wrapper = await mountApp(services)
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(services.shell.updateChecks).toBe(1)
+  expect(wrapper.find('.app__update').exists()).toBe(false)
+  expect(dialogTitle()).toBeNull()
+})

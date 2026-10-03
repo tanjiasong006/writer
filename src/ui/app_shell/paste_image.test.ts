@@ -68,7 +68,7 @@ test('拖入图片：插入到放下的位置；导入失败显示原因', async
   await flushPromises()
   expect(await save(services)).toBe('引言\n\n![](../assets/截屏.png)')
 
-  services.storage.failures.push({ code: 'asset-too-large' })
+  services.storage.failNext({ code: 'asset-too-large' })
   view.someProp('handleDrop', (handle) => handle(view, drop, Slice.empty, false))
   await flushPromises()
   expect(wrapper.find('.workspace__error').exists()).toBe(true)

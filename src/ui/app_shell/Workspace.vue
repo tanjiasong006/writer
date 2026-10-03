@@ -62,6 +62,8 @@ const props = defineProps<{
   session: ProjectSession
   /** 应用层的提示（如打开项目时的说明），与工作区自己的提示显示在同一处。 */
   notice?: string | null
+  /** 后台检查发现的新版本（提示中带“查看”）。 */
+  updateNotice?: string | null
   appearance: Appearance
 }>()
 
@@ -70,6 +72,10 @@ const emit = defineEmits<{
   'open-project': []
   'dismiss-notice': []
   'set-appearance': [appearance: Appearance]
+  /** 帮助 → 检查更新…（应用级，由 App 处理）。 */
+  'check-update': []
+  'show-update': []
+  'dismiss-update': []
 }>()
 
 const { shell, output } = useServices()
@@ -603,6 +609,9 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
     case 'appearance':
       emit('set-appearance', command.appearance)
       return
+    case 'app':
+      emit('check-update')
+      return
     case 'chapter':
     case 'move-chapter': {
       // 章节命令作用于侧栏中的章节：侧栏隐藏时先显示出来，新建与重命名才看得见。
@@ -889,6 +898,12 @@ async function createFirstChapter(): Promise<void> {
 
       <div class="workspace__toasts">
         <Toast v-if="notice" class="app__notice" @dismiss="emit('dismiss-notice')">{{ notice }}</Toast>
+        <Toast v-if="updateNotice" class="workspace__update" @dismiss="emit('dismiss-update')">
+          {{ updateNotice }}
+          <template #actions>
+            <button type="button" @click="emit('show-update')">查看</button>
+          </template>
+        </Toast>
         <Toast
           v-if="status === 'failed' && lastError && !saveErrorDismissed"
           class="workspace__save-error"

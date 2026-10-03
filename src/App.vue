@@ -15,6 +15,8 @@ import { useServices } from './ui/services.ts'
 import Toast from './ui/common/Toast.vue'
 import { menuItemForKey, parseMenuItemId, welcomeMenus } from './ui/app_shell/app_menu.ts'
 import { useAppearance } from './ui/app_shell/use_appearance.ts'
+import { useUpdates } from './ui/app_shell/use_updates.ts'
+import UpdateDialog from './ui/app_shell/UpdateDialog.vue'
 import { blockReload, isHandled } from './ui/common/shortcuts.ts'
 import './ui/base.css'
 
@@ -79,6 +81,7 @@ function runWelcomeMenuItem(id: string): void {
   if (view.value.kind === 'open') return
   const command = parseMenuItemId(id)
   if (command?.group === 'appearance') appearance.set(command.appearance)
+  if (command?.group === 'app') void updates.check()
   if (busy.value) return
   if (id === 'file:new') void newProject()
   else if (id === 'file:open') void openExisting()
@@ -131,6 +134,10 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => stopCloseGuard?.())
+
+/** 检查更新：重新启动前与关闭窗口相同，先保存并释放当前项目。 */
+const updates = useUpdates(shell, () => leaveCurrent())
+onMounted(() => updates.scheduleBackgroundCheck())
 
 function confirmDiscard(failure: StorageFailure | null): Promise<boolean> {
   const reason = failure ? messageForStorageFailure(failure) : '保存没有完成。'
@@ -223,15 +230,33 @@ function titleFromPath(path: string): string {
       :appearance="appearance.current.value"
       @dismiss-notice="notice = null"
       @set-appearance="appearance.set"
+      :update-notice="updates.notice.value"
       @new-project="newProject"
       @open-project="openExisting"
+      @check-update="updates.check"
+      @show-update="updates.showAvailable"
+      @dismiss-update="updates.dismissNotice"
     />
     <template v-else-if="view.kind === 'welcome'">
       <WelcomeView :error="error" :busy="busy" @new-project="newProject" @open-project="openExisting" />
-      <div v-if="notice" class="app__toasts">
-        <Toast class="app__notice" @dismiss="notice = null">{{ notice }}</Toast>
+      <div v-if="notice || updates.notice.value" class="app__toasts">
+        <Toast v-if="notice" class="app__notice" @dismiss="notice = null">{{ notice }}</Toast>
+        <Toast v-if="updates.notice.value" class="app__update" @dismiss="updates.dismissNotice">
+          {{ updates.notice.value }}
+          <template #actions>
+            <button type="button" @click="updates.showAvailable">查看</button>
+          </template>
+        </Toast>
       </div>
     </template>
+    <UpdateDialog
+      v-if="updates.dialog.value"
+      :state="updates.dialog.value"
+      :app-name="shell.appName"
+      @install="updates.install"
+      @restart="updates.restart"
+      @close="updates.close"
+    />
   </div>
 </template>
 
@@ -243,7 +268,9 @@ function titleFromPath(path: string): string {
   left: 0;
   z-index: var(--z-toast);
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
   pointer-events: none;
 }
 </style>

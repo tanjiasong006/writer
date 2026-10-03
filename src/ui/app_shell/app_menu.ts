@@ -42,6 +42,7 @@ const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete'] as const
 const INSERT_ACTIONS = ['update-chapter-refs'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back', 'forward'] as const
+const APP_ACTIONS = ['check-update'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
 const APPEARANCES = ['system', 'light', 'dark'] as const satisfies readonly Appearance[]
 
@@ -50,6 +51,7 @@ type EditAction = (typeof EDIT_ACTIONS)[number]
 type ChapterAction = (typeof CHAPTER_ACTIONS)[number]
 type ViewAction = (typeof VIEW_ACTIONS)[number]
 type InsertAction = (typeof INSERT_ACTIONS)[number]
+type AppAction = (typeof APP_ACTIONS)[number]
 
 /**
  * 菜单项 id：`分组:名称`。系统菜单栏与快捷键只传回这个字符串，由 parseMenuItemId 还原成 MenuCommand。
@@ -64,6 +66,7 @@ export type MenuItemId =
   | `view:${ViewAction}`
   | `insert:${InsertAction}`
   | `appearance:${Appearance}`
+  | `app:${AppAction}`
   /** 子菜单本身（不对应命令）。 */
   | 'appearance'
   | 'list'
@@ -79,6 +82,8 @@ export type MenuCommand =
   | { readonly group: 'view'; readonly action: ViewAction }
   | { readonly group: 'insert'; readonly action: InsertAction }
   | { readonly group: 'appearance'; readonly appearance: Appearance }
+  /** 应用级命令（检查更新），与打开的文档无关。 */
+  | { readonly group: 'app'; readonly action: AppAction }
 
 function oneOf<T extends string>(values: readonly T[], value: string): value is T {
   return (values as readonly string[]).includes(value)
@@ -112,6 +117,8 @@ export function parseMenuItemId(id: string): MenuCommand | null {
       return oneOf(INSERT_ACTIONS, name) ? { group: 'insert', action: name } : null
     case 'appearance':
       return oneOf(APPEARANCES, name) ? { group: 'appearance', appearance: name } : null
+    case 'app':
+      return oneOf(APP_ACTIONS, name) ? { group: 'app', action: name } : null
     default:
       return null
   }
@@ -157,6 +164,9 @@ function appearanceMenu(current: Appearance): WorkspaceMenuEntry {
   }
 }
 
+/** 帮助：检查更新（macOS 上系统把“帮助”菜单放在最后）。欢迎页与工作区相同。 */
+const HELP_MENU: WorkspaceMenu = { label: '帮助', items: [{ id: 'app:check-update', label: '检查更新…' }] }
+
 /** 欢迎页（没有打开文档）时的菜单栏。 */
 export function welcomeMenus(appearance: Appearance): WorkspaceMenu[] {
   return [
@@ -171,6 +181,7 @@ export function welcomeMenus(appearance: Appearance): WorkspaceMenu[] {
     },
     { label: '编辑', items: [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'select-all' }] },
     { label: '显示', items: [appearanceMenu(appearance)] },
+    HELP_MENU,
   ]
 }
 
@@ -361,6 +372,7 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         appearanceMenu(context.appearance),
       ],
     },
+    HELP_MENU,
   ]
 }
 

@@ -19,6 +19,15 @@ export type MenuEntry =
   | { readonly separator: true }
   | { readonly role: 'cut' | 'copy' | 'paste' | 'select-all' | 'close-window' }
 
+/** 检查更新的结果（直接分发的安装包）。 */
+export type UpdateCheckResult =
+  /** 此版本没有配置更新地址（开发版、自行编译的版本）。 */
+  | { readonly kind: 'not-configured' }
+  | { readonly kind: 'up-to-date'; readonly current: string }
+  | { readonly kind: 'available'; readonly current: string; readonly version: string; readonly notes: string | null }
+  /** 网络或服务器问题；message 是原始错误，只在界面上作为补充说明。 */
+  | { readonly kind: 'failed'; readonly message: string }
+
 /** 应用外观：跟随系统，或固定为浅色 / 深色。 */
 export type Appearance = 'system' | 'light' | 'dark'
 
@@ -92,6 +101,12 @@ export interface DesktopShell {
    * 提供时优先于上次打开的项目。
    */
   startupProjectPath(): string | null
+  /** 检查是否有新版本。不提供时（如 Storybook）界面不显示检查更新。 */
+  checkForUpdate?(): Promise<UpdateCheckResult>
+  /** 下载并安装最近一次检查到的新版本；失败时抛出（原因作为补充说明）。 */
+  installUpdate?(): Promise<void>
+  /** 重新启动应用（安装更新后）。调用前必须已保存并释放当前项目。 */
+  restartApp?(): Promise<void>
 }
 
 export interface AppServices {

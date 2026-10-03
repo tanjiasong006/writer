@@ -120,8 +120,12 @@ export function createTauriMenus(appName: string) {
       ],
     })
     const submenus: Submenu[] = []
+    let help: Submenu | null = null
     for (const menu of menus) {
-      submenus.push(await Submenu.new({ text: menu.label, items: await createEntries(menu.items, select, next) }))
+      const submenu = await Submenu.new({ text: menu.label, items: await createEntries(menu.items, select, next) })
+      // “帮助”按 macOS 惯例排在“窗口”之后，并作为系统的帮助菜单（带菜单搜索）。
+      if (menu.label === '帮助') help = submenu
+      else submenus.push(submenu)
     }
     const windowMenu = await Submenu.new({
       text: '窗口',
@@ -132,9 +136,10 @@ export function createTauriMenus(appName: string) {
         await PredefinedMenuItem.new({ item: 'Fullscreen', text: '进入全屏幕' }),
       ],
     })
-    const bar = await Menu.new({ items: [app, ...submenus, windowMenu] })
+    const bar = await Menu.new({ items: [app, ...submenus, windowMenu, ...(help ? [help] : [])] })
     await bar.setAsAppMenu()
     await windowMenu.setAsWindowsMenuForNSApp()
+    if (help) await help.setAsHelpMenuForNSApp()
     registry = next
   }
 

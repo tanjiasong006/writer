@@ -6,6 +6,7 @@ mod export;
 mod io_kind;
 mod render;
 mod storage;
+mod updater;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -14,6 +15,8 @@ pub fn run() {
     app_env::apply(&mut context);
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::PendingUpdate::default())
         .setup(|app| {
             // 扫描系统字体需要数秒：启动后在后台预热，首次导出 PDF 不必等待。
             let resource_dir = app.path().resource_dir().ok();
@@ -37,6 +40,9 @@ pub fn run() {
             commands::export_pdf,
             commands::preview_pdf,
             commands::reveal_in_file_manager,
+            updater::update_check,
+            updater::update_install,
+            updater::app_restart,
         ])
         .build(context)
         .expect("error while building tauri application")
@@ -44,7 +50,11 @@ pub fn run() {
             // Cmd+Q / 菜单"退出"会直接请求退出应用，绕过窗口的关闭流程。
             // 主窗口还在时先阻止退出，改走窗口关闭：前端保存未保存的修改、失败时询问用户，
             // 由它决定是否真正关闭窗口；窗口销毁后再次到来的退出请求正常放行。
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+            // 安装更新后的重新启动由前端在保存并释放项目之后请求，直接放行。
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code == Some(tauri::RESTART_EXIT_CODE) {
+                    return;
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     api.prevent_exit();
                     let _ = window.close();

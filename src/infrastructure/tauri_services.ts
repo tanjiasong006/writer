@@ -2,7 +2,7 @@ import { setTheme } from '@tauri-apps/api/app'
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ask, open, save } from '@tauri-apps/plugin-dialog'
-import type { AppServices, DesktopShell } from '../application/desktop_shell.ts'
+import type { AppServices, DesktopShell, UpdateCheckResult } from '../application/desktop_shell.ts'
 import { createTauriProjectStorage } from './tauri_project_storage.ts'
 import { createTauriDocumentOutput } from './tauri_document_output.ts'
 import { createTauriMenus } from './tauri_menu.ts'
@@ -133,5 +133,31 @@ function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): D
     getPreference: appState.getPreference,
     setPreference: appState.setPreference,
     startupProjectPath: () => appState.snapshot.openProject,
+
+    async checkForUpdate() {
+      try {
+        return await invoke<UpdateCheckResult>('update_check')
+      } catch (error) {
+        return { kind: 'failed', message: errorMessage(error) }
+      }
+    },
+
+    async installUpdate() {
+      try {
+        await invoke('update_install')
+      } catch (error) {
+        throw new Error(errorMessage(error))
+      }
+    },
+
+    async restartApp() {
+      await invoke('app_restart')
+    },
   }
+}
+
+/** Rust 返回的错误（{ message }）或其他异常的说明文字。 */
+function errorMessage(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'message' in error) return String(error.message)
+  return String(error)
 }

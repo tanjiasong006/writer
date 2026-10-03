@@ -1,4 +1,4 @@
-import type { AppMenu, AppServices, Appearance, DesktopShell } from '../application/desktop_shell.ts'
+import type { AppMenu, AppServices, Appearance, DesktopShell, UpdateCheckResult } from '../application/desktop_shell.ts'
 import { MemoryProjectStorage } from './memory_project_storage.ts'
 import { MemoryDocumentOutput } from './memory_document_output.ts'
 
@@ -117,6 +117,28 @@ export class MemoryShell implements DesktopShell {
 
   startupProjectPath() {
     return this.startupProject
+  }
+
+  /** 检查更新的结果；默认与开发版相同（未配置），不打扰其他测试。 */
+  updateResult: UpdateCheckResult = { kind: 'not-configured' }
+  updateChecks = 0
+  /** 安装失败时的原因；null 表示安装成功。 */
+  installFailure: string | null = null
+  installs = 0
+  restarts = 0
+
+  async checkForUpdate() {
+    this.updateChecks += 1
+    return this.updateResult
+  }
+
+  async installUpdate() {
+    this.installs += 1
+    if (this.installFailure !== null) throw new Error(this.installFailure)
+  }
+
+  async restartApp() {
+    this.restarts += 1
   }
 }
 

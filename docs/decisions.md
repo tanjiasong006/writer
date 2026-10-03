@@ -308,3 +308,17 @@
 第二期：从章节树拖入正文插入引用（需与章节树拖动排序共存）。
 
 待定：反向引用列表、复制到其他项目时的处理。
+
+## 10. 检查更新（直接分发，2026-10-03 实施，待产品负责人确认）
+
+- 直接分发的安装包使用 Tauri updater：更新包带签名，应用用内置的公钥校验后才安装。
+  入口是“帮助 → 检查更新…”；启动约 5 秒后在后台静默检查一次，只有发现新版本时才提示（带“查看”），
+  失败与已是最新都不打扰。安装后需要重新启动，重新启动前与关闭窗口相同，先保存并释放打开的项目。
+- 更新地址与公钥在**构建正式包时**由环境变量提供（`WRITER_UPDATE_ENDPOINT`、`WRITER_UPDATE_PUBKEY`，见 `src-tauri/src/updater.rs`），
+  不写入仓库；没有提供的构建（开发版、自行编译）不检查更新，对话框说明“此版本不检查更新”。
+- 发布流程：
+  1. 只需一次：`npx tauri signer generate -w ~/.tauri/writer-updater.key` 生成密钥（私钥妥善保管，丢失后已安装的版本无法再更新）。
+  2. 构建：`WRITER_UPDATE_ENDPOINT=<latest.json 的地址> WRITER_UPDATE_PUBKEY="$(cat ~/.tauri/writer-updater.key.pub)"
+     TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/writer-updater.key)" npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":true}}'`。
+  3. 上传安装包、`.sig` 与 Tauri 格式的 `latest.json`（`version`、`notes`、`pub_date`、各平台的 `url` 与 `signature`）。
+- Mac App Store 版本不得包含自更新（构建时不提供上述环境变量即可，入口显示“此版本不检查更新”；上架前再决定是否隐藏入口）。
