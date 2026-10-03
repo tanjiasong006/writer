@@ -16,7 +16,7 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 
 use docx_rs::{
-    AbstractNumbering, AlignmentType, BorderType, BreakType, Docx, Footer, Footnote, Header, Hyperlink,
+    AbstractNumbering, AlignmentType, TableOfContents, BorderType, BreakType, Docx, Footer, Footnote, Header, Hyperlink,
     HyperlinkType, IndentLevel, Level, LevelJc, LevelOverride, LevelText, LineSpacing,
     LineSpacingType, NumberFormat, Numbering, NumberingId, PageMargin, PageNum, PageNumType,
     Paragraph, ParagraphBorder, ParagraphBorderPosition, ParagraphBorders, Pic, Run, RunFonts,
@@ -131,6 +131,22 @@ pub fn export(
                 .push(Item::Paragraph(short_rule(0.4, 5, COVER_LINE_COLOR)));
         }
     }
+    // 目录（docs/decisions.md 第 5 节）：封面之后单独一页，由标题样式生成的 Word 目录域。
+    // 生成时预先填入各级标题的文字，打开时 Word 询问是否更新域（标记为 dirty），更新后得到页码。
+    if !document.sections.is_empty() {
+        let title = Paragraph::new()
+            .style("TOCHeading")
+            .page_break_before(cover)
+            .add_run(Run::new().add_text(TOC_TITLE));
+        let toc = TableOfContents::new()
+            .heading_styles_range(1, TOC_DEPTH)
+            .alias(TOC_TITLE)
+            .hyperlink()
+            .auto()
+            .dirty()
+            .add_before_paragraph(title);
+        writer.items.push(Item::Toc(toc));
+    }
     for section in &document.sections {
         writer.section(section);
     }
@@ -144,6 +160,7 @@ pub fn export(
         docx = match item {
             Item::Paragraph(p) => docx.add_paragraph(p),
             Item::Table(t) => docx.add_table(t),
+            Item::Toc(t) => docx.add_table_of_contents(t),
         };
     }
 
@@ -253,6 +270,7 @@ fn pack_with_jpeg(mut xml: docx_rs::XMLDocx) -> zip::result::ZipResult<Vec<u8>> 
 enum Item {
     Paragraph(Paragraph),
     Table(Table),
+    Toc(TableOfContents),
 }
 
 struct Writer<'a> {
@@ -319,11 +337,11 @@ impl Writer<'_> {
         // 书签供章节引用跳转。
         let bookmark = self.targets.by_id(&section.chapter_id).map(|t| t.index);
         if let Some(index) = bookmark {
-            paragraph = paragraph.add_bookmark_start(index, chapter_bookmark(index));
+            paragraph = paragraph.add_bookmark_start(CHAPTER_BOOKMARK_BASE + index, chapter_bookmark(index));
         }
         paragraph = paragraph.add_run(Run::new().add_text(xml_safe(&text)));
         if let Some(index) = bookmark {
-            paragraph = paragraph.add_bookmark_end(index);
+            paragraph = paragraph.add_bookmark_end(CHAPTER_BOOKMARK_BASE + index);
         }
         self.items.push(Item::Paragraph(paragraph));
         for block in &section.blocks {
@@ -1018,6 +1036,18 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
                 ),
         )
         .add_style(
+            // 目录标题：与一级标题相同的字体与字号，居中，不进入大纲（不出现在目录与导航窗格中）。
+            Style::new("TOCHeading", StyleType::Paragraph)
+                .name("TOC Heading")
+                .based_on("Normal")
+                .next("Normal")
+                .fonts(fonts(theme.heading(1).font))
+                .size(half_points(theme.heading(1).size))
+                .bold()
+                .align(AlignmentType::Center)
+                .line_spacing(LineSpacing::new().before(twips(CHAPTER_TOP_PT)).after(twips(theme.heading(1).size))),
+        )
+        .add_style(
             // 参考文献条目：编号与著录文字之间是制表位，换行后与著录文字对齐（悬挂缩进）。
             Style::new("Bibliography", StyleType::Paragraph)
                 .name("Bibliography")
@@ -1121,6 +1151,10 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
 /// 章节标题的书签名（章节引用的跳转目标）。下划线开头是 Word 的隐藏书签，不出现在书签列表中。
 /// 图表编号与图注 / 标题之间的分隔（全角空格，与 PDF 相同）。
 const ELEMENT_SEPARATOR: &str = "\u{3000}";
+/// 目录的标题与包含的标题层级（与 PDF 默认的目录层级相同）。
+const TOC_TITLE: &str = "目录";
+const TOC_DEPTH: usize = 2;
+
 /// 参考文献条目的悬挂缩进（twip，约 2.5 字）。
 const BIBLIOGRAPHY_INDENT: i32 = 600;
 
@@ -1132,6 +1166,9 @@ const CITATION_BOOKMARK_BASE: usize = 2_000_000;
 fn citation_bookmark(number: usize) -> String {
     format!("_WriterCite{number}")
 }
+
+/// 章节书签的 id 从这里开始：小的 id 留给 Word 目录生成的书签。
+const CHAPTER_BOOKMARK_BASE: usize = 3_000_000;
 
 /// 图表书签的 id 从这里开始，不与章节书签（按章节序号）重复。
 const ELEMENT_BOOKMARK_BASE: usize = 1_000_000;
@@ -1390,6 +1427,20 @@ mod tests {
     }
 
     #[test]
+    fn table_of_contents_follows_the_cover_and_lists_two_heading_levels() {
+        let dir = project();
+        let (bytes, _) = export_ok(&dir, &[("a", vec![1], "绪论", "正文"), ("a1", vec![1, 1], "背景", ""), ("b", vec![2], "方法", "")]);
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains(r#"TOC \o &quot;1-2&quot;"#) || xml.contains("TOC \\o \"1-2\""), "{xml}");
+        assert!(xml.contains(r#"<w:pStyle w:val="TOCHeading" />"#));
+        let toc = xml.find("目录").unwrap();
+        assert!(xml.find("示例论文").unwrap() < toc);
+        // 目录中预先列出标题，之后才是正文中的第一个标题。
+        assert!(xml[toc..].contains("背景"));
+        assert!(part(&bytes, "word/styles.xml").contains(r#"w:styleId="TOCHeading""#));
+    }
+
+    #[test]
     fn footnotes_become_word_footnotes_with_number_marks() {
         let dir = project();
         let (bytes, _) = export_ok(&dir, &[("a", vec![1], "绪论", "正文[^a]与[^b]。\n\n[^a]: 脚注**甲**\n\n[^b]: 脚注乙")]);
@@ -1416,14 +1467,23 @@ mod tests {
         );
         let xml = part(&bytes, "word/document.xml");
         for index in 0..3 {
-            assert!(xml.contains(&format!(r#"<w:bookmarkStart w:id="{index}" w:name="_WriterChapter{index}" />"#)), "{xml}");
-            assert!(xml.contains(&format!(r#"<w:bookmarkEnd w:id="{index}" />"#)));
+            let id = CHAPTER_BOOKMARK_BASE + index;
+            assert!(xml.contains(&format!(r#"<w:bookmarkStart w:id="{id}" w:name="_WriterChapter{index}" />"#)), "{xml}");
+            assert!(xml.contains(&format!(r#"<w:bookmarkEnd w:id="{id}" />"#)));
         }
         assert!(xml.contains(r#"<w:hyperlink w:anchor="_WriterChapter2" "#), "{xml}");
         assert!(xml.contains(r#"<w:hyperlink w:anchor="_WriterChapter1" "#));
         assert!(xml.contains(">2 方法</w:t>") && xml.contains(">1.1</w:t>") && xml.contains(">原目标</w:t>"));
         assert!(!xml.contains(">旧</w:t>"));
-        assert_eq!(xml.matches("<w:hyperlink").count(), 2);
+        // 目录中的条目另有自己的超链接；引用只有两个。
+        assert_eq!(xml.matches(r#"<w:hyperlink w:anchor="_WriterChapter"#).count(), 2);
+        // 目录生成的书签与章节书签的 id 不重复。
+        let ids: Vec<&str> = xml.match_indices(r#"<w:bookmarkStart w:id=""#).map(|(i, m)| {
+            let rest = &xml[i + m.len()..];
+            &rest[..rest.find('"').unwrap()]
+        }).collect();
+        let unique: std::collections::HashSet<&&str> = ids.iter().collect();
+        assert_eq!(unique.len(), ids.len(), "{ids:?}");
         assert_eq!(report.broken_references, vec!["原目标"]);
     }
 
