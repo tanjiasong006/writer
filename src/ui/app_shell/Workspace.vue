@@ -32,6 +32,8 @@ import { useFind } from './use_find.ts'
 import { useRemovedChapters } from './use_removed_chapters.ts'
 import FindBar from './FindBar.vue'
 import HistoryDialog from './HistoryDialog.vue'
+import ExternalChangeDialog from './ExternalChangeDialog.vue'
+import { useExternalChanges } from './use_external_changes.ts'
 import { useHistory } from './use_history.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
@@ -540,6 +542,9 @@ onMounted(() => void history.autoSnapshot())
 function snapshotName(snapshot: { readonly label: string; readonly createdAt: number }): string {
   return snapshot.label || new Date(snapshot.createdAt).toLocaleString('zh-CN')
 }
+
+/** 其他程序对项目文件的修改（known-risks #4）。 */
+const external = useExternalChanges({ session: props.session, name: (id) => chapterName(id) })
 
 /** 撤销删除章节（ui-spec §23）。 */
 const removedChapters = useRemovedChapters({
@@ -1067,6 +1072,9 @@ async function createFirstChapter(): Promise<void> {
             <button type="button" @click="undoDelete">撤销</button>
           </template>
         </Toast>
+        <Toast v-if="external.notice.value" class="workspace__external" @dismiss="external.dismiss">
+          {{ external.notice.value }}
+        </Toast>
         <Toast v-if="exportNotice" class="workspace__notice" @dismiss="exportNotice = null">
           {{ exportNotice.message }}
           <template #actions>
@@ -1077,6 +1085,14 @@ async function createFirstChapter(): Promise<void> {
         </Toast>
       </div>
     </main>
+
+    <ExternalChangeDialog
+      v-if="external.conflict.value"
+      :chapters="external.conflict.value.chapters.map(chapterName)"
+      :structure="external.conflict.value.structure"
+      @keep="external.keepWriter"
+      @disk="external.useDisk"
+    />
 
     <HistoryDialog
       v-if="history.open.value"

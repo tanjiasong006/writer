@@ -182,6 +182,12 @@ fn percent_decode(value: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// 读取磁盘上的项目（不取得独占锁）：检查其他程序是否修改了已打开项目的文件（known-risks #4）。
+#[tauri::command]
+pub async fn project_read(path: PathBuf) -> Result<storage::OpenedProject, StorageError> {
+    run_storage(move || storage::open_project(&RealFs, &path)).await
+}
+
 /// 把磁盘上已提交的项目保存为一个版本（docs/project-format.md 第 7.1 节）。
 #[tauri::command]
 pub async fn snapshot_create(

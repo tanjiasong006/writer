@@ -57,6 +57,8 @@ export class ProjectSession {
   private savedRevision = 0
   /** 磁盘上已确认的正文；用来计算下次保存需要携带哪些章节。 */
   private savedContents: ReadonlyMap<ChapterId, string>
+  /** 最近一次确认与磁盘一致的项目状态（打开、成功保存或采用磁盘上的修改之后）。 */
+  private savedState: ProjectState
   private error: StorageFailure | null = null
   private inFlight: Promise<boolean> | null = null
   private queued: Promise<boolean> | null = null
@@ -76,6 +78,7 @@ export class ProjectSession {
     this.current = project.document
     this.layout = project.pdfLayout
     this.savedContents = project.document.contents
+    this.savedState = { document: project.document, pdfLayout: project.pdfLayout }
     this.autosaveDelayMs =
       options.autosaveDelayMs === undefined ? DEFAULT_AUTOSAVE_DELAY_MS : options.autosaveDelayMs
     this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
@@ -182,6 +185,81 @@ export class ProjectSession {
     this.changed()
   }
 
+  /** 最近一次确认与磁盘一致的项目状态。 */
+  get saved(): ProjectState {
+    return this.savedState
+  }
+
+  /** 正在保存（此时磁盘上的状态可能正在变化）。 */
+  get saving(): boolean {
+    return this.inFlight !== null
+  }
+
+  /** 读取磁盘上的项目（检查其他程序的修改）。 */
+  readFromDisk(): Promise<StorageResult<ProjectState>> {
+    return this.storage.read(this.path)
+  }
+
+  /**
+   * 采用其他程序在磁盘上做的正文修改（known-risks #4）：texts 中的章节以磁盘上的正文为已保存的内容；
+   * useDisk 中的章节同时把当前内容换成磁盘上的（Writer 中没有修改，或用户选择了磁盘上的版本），
+   * 其余章节保留 Writer 中的内容（之后正常保存时覆盖磁盘）。
+   */
+  adoptDiskContents(texts: ReadonlyMap<ChapterId, string>, useDisk: ReadonlySet<ChapterId>): void {
+    const saved = new Map(this.savedContents)
+    for (const [id, text] of texts) saved.set(id, text)
+    this.savedContents = saved
+    const savedDocument = { ...this.savedState.document, contents: saved }
+    this.savedState = { ...this.savedState, document: savedDocument }
+    let next = this.current
+    for (const id of useDisk) {
+      const text = texts.get(id)
+      if (text === undefined) continue
+      const result = setContent(next, id, text)
+      if (result.ok) next = result.document
+    }
+    const dirty = [...next.contents].some(([id, text]) => saved.get(id) !== text)
+    this.current = next
+    if (!dirty && this.revision !== this.savedRevision && !this.inFlight && this.onlyContentsDiffer()) {
+      this.savedRevision = this.revision
+    }
+    this.notify()
+    if (this.isDirty) this.schedule(this.autosaveDelayMs)
+  }
+
+  /**
+   * 以磁盘上的状态为准（用户选择采用其他程序的修改，包括结构变化）：当前与已保存的状态都换成它，不再有未保存的修改。
+   * 正在保存时不调用。
+   */
+  resetToDisk(project: ProjectState): void {
+    this.current = project.document
+    this.layout = project.pdfLayout
+    this.savedContents = project.document.contents
+    this.savedState = { document: project.document, pdfLayout: project.pdfLayout }
+    this.savedRevision = this.revision
+    this.error = null
+    this.cancelTimer()
+    this.notify()
+  }
+
+  /** 保留 Writer 中的版本：标记为未保存，之后的保存以 Writer 中的内容覆盖磁盘。 */
+  markChanged(): void {
+    this.changed()
+  }
+
+  /** 除正文外，当前状态与已保存的状态相同（结构、标题、排版配置与参考文献）。 */
+  private onlyContentsDiffer(): boolean {
+    const saved = this.savedState
+    return (
+      saved.document.tree === this.current.tree &&
+      saved.document.title === this.current.title &&
+      saved.document.subtitle === this.current.subtitle &&
+      saved.document.author === this.current.author &&
+      saved.document.references === this.current.references &&
+      saved.pdfLayout === this.layout
+    )
+  }
+
   /** 会话关闭 / 放弃后，等已开始的保存结束再释放存储资源（如独占锁）。 */
   async releaseStorage(): Promise<void> {
     await (this.queued ?? this.inFlight)
@@ -284,6 +362,7 @@ export class ProjectSession {
       // 磁盘已提交这份快照：只推进到快照的 revision，期间的新修改仍然是 dirty。
       this.savedRevision = revision
       this.savedContents = snapshot.contents
+      this.savedState = { document: snapshot, pdfLayout: layout }
       this.error = null
       if (this.isDirty) this.schedule(this.autosaveDelayMs)
       return true

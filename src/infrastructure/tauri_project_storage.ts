@@ -73,6 +73,11 @@ export function createTauriProjectStorage(): ProjectStorage {
       return { ok: true, value: { fileName: result.value, reference: assetReference(result.value) } }
     },
 
+    async read(path) {
+      const result = await call(() => invoke<unknown>('project_read', { path }))
+      return result.ok ? decodeOpened(result.value) : result
+    },
+
     createSnapshot(path, label, kind) {
       return call(() => invoke<SnapshotInfo>('snapshot_create', { path, label, kind }))
     },

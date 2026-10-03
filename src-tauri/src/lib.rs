@@ -36,6 +36,7 @@ pub fn run() {
             commands::project_write_ui_state,
             commands::project_import_asset,
             commands::project_import_asset_data,
+            commands::project_read,
             commands::snapshot_create,
             commands::snapshot_list,
             commands::snapshot_read,

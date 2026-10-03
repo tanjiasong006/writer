@@ -873,7 +873,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 4. ~~数学公式（未发现）：Typst 原生支持，PDF 成本低；Word 需要转换为 OMML。~~（完成，见下方“P1-4 数学公式”）
 5. ~~Word 导出目录：PDF 已有目录选项，Word 未发现。~~（完成，见下方“P1-5 Word 目录”）
 6. ~~版本快照 / 历史（未发现）。~~（完成，见下方“P1-6 版本历史”）
-7. 外部修改检测（文件监听 + 冲突提示，known-risks #4）。
+7. ~~外部修改检测（文件监听 + 冲突提示，known-risks #4）。~~（完成，见下方“P1-7 外部修改检测”）
 8. 打包开源中文字体，保证不同机器上 PDF 排版一致。
 9. ~~最近项目列表（目前只记住上次打开的项目）。~~（完成，见下方“P1-9 最近项目”）
 
@@ -942,6 +942,14 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - “文件 → 版本历史…”（`HistoryDialog.vue`、`use_history.ts`）：保存当前版本（可命名）、列表、恢复（确认后先留下恢复前的版本）、删除；
   打开文档后距最近版本超过一天时自动留下一个版本。
 - 验证：Rust 快照（读写、顺延、损坏忽略、自动版本上限、路径校验）、工作区（自动版本、保存、恢复与保存、取消、删除）测试；Story `HistoryDialog`。
+
+#### P1-7 外部修改检测（完成，2026-10-03）
+
+- 规则见 known-risks #4。Rust `project_read`（不取锁读取）；`ProjectStorage.read`；`application/external_changes.ts`（比较）；
+  `ProjectSession.saved` / `adoptDiskContents` / `resetToDisk` / `markChanged`。
+- 工作区 `use_external_changes.ts`（焦点与 15 秒定时检查）、`ExternalChangeDialog.vue`；静默载入时提示载入的章节。
+- 验证：比较规则、工作区（静默载入、保留并覆盖、使用磁盘、结构变化、自己的保存不误报）测试；Story `ExternalChangeDialog`。
+  采用定时读取而不是系统文件监听：实现简单、跨平台一致，代价是最多约 15 秒的延迟。
 
 ### P2：体验提升
 

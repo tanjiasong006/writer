@@ -59,6 +59,8 @@ export interface ProjectStorage {
   /** 在不存在或为空的目录中新建项目，写入文档的全部内容。 */
   create(path: string, project: ProjectState): Promise<StorageResult<void>>
   open(path: string): Promise<StorageResult<OpenedProject>>
+  /** 读取已打开项目在磁盘上的状态（不取得独占锁），用于发现其他程序的修改。 */
+  read(path: string): Promise<StorageResult<OpenedProject>>
   /**
    * 把项目状态（文档与 PDF 排版配置）完整提交到磁盘。changed 是自上次成功保存后正文发生变化的章节（含新章节）；
    * 其余章节的正文由存储层从磁盘保留（编号变化时按字节换名）。

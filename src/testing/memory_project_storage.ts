@@ -108,6 +108,17 @@ export class MemoryProjectStorage implements ProjectStorage {
   /** 下一个快照的时间（测试中可以设定）。 */
   now = 1_700_000_000_000
 
+  /** 模拟其他程序修改了磁盘上的项目。 */
+  modifyOnDisk(path: string, change: (state: ProjectState) => ProjectState): void {
+    const state = this.projects.get(path)
+    if (state) this.projects.set(path, change(state))
+  }
+
+  async read(path: string): Promise<StorageResult<OpenedProject>> {
+    const state = this.projects.get(path)
+    return state ? { ok: true, value: { ...state, orphanFiles: [] } } : { ok: false, error: { code: 'not-a-project' } }
+  }
+
   async createSnapshot(path: string, label: string, kind: SnapshotKind): Promise<StorageResult<SnapshotInfo>> {
     const failure = this.failures.shift()
     if (failure) return { ok: false, error: failure }
