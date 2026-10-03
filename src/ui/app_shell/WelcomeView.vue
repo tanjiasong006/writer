@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 没有打开项目时的欢迎页：新建或打开文档。
+ * 没有打开项目时的欢迎页：新建或打开文档，下方列出最近打开的文档（单击打开）。
  * macOS 窗口没有单独的标题栏（标题栏与内容合一），欢迎页的空白背景就是拖动窗口的区域。
  */
 defineProps<{
@@ -8,12 +8,17 @@ defineProps<{
   error?: string | null
   /** 正在新建或打开时禁用按钮，避免重复操作。 */
   busy?: boolean
+  /** 最近打开的项目（路径），最近的在前。 */
+  recent?: readonly string[]
 }>()
 
 const emit = defineEmits<{
   'new-project': []
   'open-project': []
+  'open-recent': [path: string]
 }>()
+
+import { projectName } from '../../application/recent_projects.ts'
 
 import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
 </script>
@@ -34,6 +39,17 @@ import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
         </button>
       </div>
       <p class="welcome__hint">每个文档保存为一个文件夹，打开时选择该文件夹即可。</p>
+      <section v-if="recent && recent.length > 0" class="welcome__recent" aria-label="最近打开">
+        <h2 class="welcome__recent-title">最近打开</h2>
+        <ul class="welcome__recent-list">
+          <li v-for="path in recent" :key="path">
+            <button type="button" class="welcome__recent-item" tabindex="0" :disabled="busy" :title="path" @click="emit('open-recent', path)">
+              <span class="welcome__recent-name">{{ projectName(path) }}</span>
+              <span class="welcome__recent-path">{{ path }}</span>
+            </button>
+          </li>
+        </ul>
+      </section>
       <p v-if="error" class="welcome__error" role="alert">{{ error }}</p>
     </div>
   </div>
@@ -137,6 +153,63 @@ import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
   color: var(--color-text-tertiary);
   font-size: var(--text-s);
   line-height: var(--leading-tight);
+}
+
+.welcome__recent {
+  margin-top: var(--space-8);
+}
+
+.welcome__recent-title {
+  margin: 0 0 var(--space-3);
+  padding: 0 var(--space-4);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-s);
+  font-weight: normal;
+}
+
+.welcome__recent-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 每个最近的文档：名称与路径两行，hover 出现浅底。 */
+.welcome__recent-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  border-radius: var(--radius-m);
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+}
+
+.welcome__recent-item:hover:not(:disabled) {
+  background: var(--color-fill-hover);
+}
+
+.welcome__recent-item:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.welcome__recent-name {
+  font-size: var(--text-m);
+  font-weight: var(--weight-medium);
+}
+
+.welcome__recent-path {
+  overflow: hidden;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-s);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
 }
 
 .welcome__error {

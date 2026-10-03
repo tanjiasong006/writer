@@ -3,6 +3,7 @@ import type { KeyboardMoveDirection } from '../../application/move_chapter.ts'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import { COMMAND_LABELS, LIST_COMMANDS, commandEntry } from '../editor/editor_menu.ts'
 import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
+import { projectName } from '../../application/recent_projects.ts'
 
 /**
  * 应用菜单栏（文件、编辑、格式、插入、表格、章节、显示）。快捷键的定义在 common/shortcuts.ts；
@@ -34,6 +35,8 @@ export interface AppMenuContext {
   readonly canGoForward: boolean
   /** 是否有可以撤销的章节删除（章节树获得焦点时 ⌘Z 撤销删除）。 */
   readonly canUndoDelete?: boolean
+  /** 最近打开的项目（文件 → 打开最近）。 */
+  readonly recent?: readonly string[]
   readonly appearance: Appearance
 }
 
@@ -67,6 +70,10 @@ export type MenuItemId =
   | `insert:${InsertAction}`
   | `appearance:${Appearance}`
   | `app:${AppAction}`
+  /** 打开最近的第 n 个项目；recent-clear 清除列表。 */
+  | `file:recent-${number}`
+  | 'file:recent-clear'
+  | 'file:recent'
   /** 子菜单本身（不对应命令）。 */
   | 'appearance'
   | 'list'
@@ -84,6 +91,8 @@ export type MenuCommand =
   | { readonly group: 'appearance'; readonly appearance: Appearance }
   /** 应用级命令（检查更新），与打开的文档无关。 */
   | { readonly group: 'app'; readonly action: AppAction }
+  /** 打开最近的项目（index 为 null 表示清除列表）。 */
+  | { readonly group: 'recent'; readonly index: number | null }
 
 function oneOf<T extends string>(values: readonly T[], value: string): value is T {
   return (values as readonly string[]).includes(value)
@@ -100,8 +109,12 @@ export function parseMenuItemId(id: string): MenuCommand | null {
   const group = id.slice(0, separator)
   const name = id.slice(separator + 1)
   switch (group) {
-    case 'file':
+    case 'file': {
+      if (name === 'recent-clear') return { group: 'recent', index: null }
+      const recent = /^recent-(\d+)$/.exec(name)
+      if (recent) return { group: 'recent', index: Number(recent[1]) }
       return oneOf(FILE_ACTIONS, name) ? { group: 'file', action: name } : null
+    }
     case 'edit':
       return oneOf(EDIT_ACTIONS, name) ? { group: 'edit', action: name } : null
     case 'editor':
@@ -167,14 +180,29 @@ function appearanceMenu(current: Appearance): WorkspaceMenuEntry {
 /** 帮助：检查更新（macOS 上系统把“帮助”菜单放在最后）。欢迎页与工作区相同。 */
 const HELP_MENU: WorkspaceMenu = { label: '帮助', items: [{ id: 'app:check-update', label: '检查更新…' }] }
 
+/** 文件 → 打开最近：最近的项目（文件夹名）与“清除菜单”；没有记录时不可用。 */
+function recentMenu(recent: readonly string[]): WorkspaceMenuEntry {
+  return {
+    id: 'file:recent',
+    label: '打开最近',
+    disabled: recent.length === 0,
+    submenu: [
+      ...recent.map((path, index): WorkspaceMenuItem => ({ id: `file:recent-${index}`, label: projectName(path) })),
+      { separator: true },
+      { id: 'file:recent-clear', label: '清除菜单', disabled: recent.length === 0 },
+    ],
+  }
+}
+
 /** 欢迎页（没有打开文档）时的菜单栏。 */
-export function welcomeMenus(appearance: Appearance): WorkspaceMenu[] {
+export function welcomeMenus(appearance: Appearance, recent: readonly string[] = []): WorkspaceMenu[] {
   return [
     {
       label: '文件',
       items: [
         { id: 'file:new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
         { id: 'file:open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
+        recentMenu(recent),
         { separator: true },
         { role: 'close-window' },
       ],
@@ -217,6 +245,7 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
       items: [
         { id: 'file:new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
         { id: 'file:open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
+        recentMenu(context.recent ?? []),
         { separator: true },
         { role: 'close-window' },
         { id: 'file:save', label: '保存', shortcut: SHORTCUTS.save },

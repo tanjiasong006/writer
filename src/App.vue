@@ -16,6 +16,12 @@ import Toast from './ui/common/Toast.vue'
 import { menuItemForKey, parseMenuItemId, welcomeMenus } from './ui/app_shell/app_menu.ts'
 import { useAppearance } from './ui/app_shell/use_appearance.ts'
 import { useUpdates } from './ui/app_shell/use_updates.ts'
+import {
+  clearRecentProjects,
+  forgetRecentProject,
+  recentProjects,
+  rememberRecentProject,
+} from './application/recent_projects.ts'
 import UpdateDialog from './ui/app_shell/UpdateDialog.vue'
 import { blockReload, isHandled } from './ui/common/shortcuts.ts'
 import './ui/base.css'
@@ -75,7 +81,10 @@ function blockPageContextMenu(event: MouseEvent): void {
 /**
  * 没有打开文档时的菜单栏与快捷键（新建、打开、外观）。打开文档后由工作区设置完整的菜单栏并响应快捷键。
  */
-const welcome = computed(() => welcomeMenus(appearance.current.value))
+/** 最近打开的项目（文件 → 打开最近、欢迎页）。 */
+const recent = ref<string[]>(recentProjects(shell))
+
+const welcome = computed(() => welcomeMenus(appearance.current.value, recent.value))
 
 function runWelcomeMenuItem(id: string): void {
   if (view.value.kind === 'open') return
@@ -83,7 +92,8 @@ function runWelcomeMenuItem(id: string): void {
   if (command?.group === 'appearance') appearance.set(command.appearance)
   if (command?.group === 'app') void updates.check()
   if (busy.value) return
-  if (id === 'file:new') void newProject()
+  if (command?.group === 'recent') void openRecent(command.index)
+  else if (id === 'file:new') void newProject()
   else if (id === 'file:open') void openExisting()
 }
 
@@ -177,6 +187,7 @@ async function enter(load: () => Promise<OpenSessionResult>): Promise<string | n
       return error.value
     }
     shell.setLastProjectPath(result.session.path)
+    recent.value = rememberRecentProject(shell, result.session.path)
     view.value = { kind: 'open', session: result.session, key: nextKey++ }
     if (result.orphanFiles.length > 0) {
       notice.value = `content 文件夹中有 ${result.orphanFiles.length} 个未被文档引用的文件，已原样保留。`
@@ -207,6 +218,24 @@ async function newProject(): Promise<void> {
   await switchTo(() => createProject(storage, path, titleFromPath(path)))
 }
 
+/** 打开最近的第 index 个项目（null 清除列表）；打不开的从列表中去掉。 */
+async function openRecent(index: number | null): Promise<void> {
+  if (index === null) {
+    recent.value = clearRecentProjects(shell)
+    return
+  }
+  const path = recent.value[index]
+  if (path !== undefined) await openRecentPath(path)
+}
+
+async function openRecentPath(path: string): Promise<void> {
+  const current = view.value
+  if (current.kind === 'open' && current.session.path === path) return
+  await switchTo(() => openProject(storage, path))
+  const opened = view.value.kind === 'open' && view.value.session.path === path
+  if (!opened) recent.value = forgetRecentProject(shell, path)
+}
+
 async function openExisting(): Promise<void> {
   const path = await shell.pickProjectPath()
   if (path === null) return
@@ -231,6 +260,8 @@ function titleFromPath(path: string): string {
       @dismiss-notice="notice = null"
       @set-appearance="appearance.set"
       :update-notice="updates.notice.value"
+      :recent="recent"
+      @open-recent="openRecent"
       @new-project="newProject"
       @open-project="openExisting"
       @check-update="updates.check"
@@ -238,7 +269,14 @@ function titleFromPath(path: string): string {
       @dismiss-update="updates.dismissNotice"
     />
     <template v-else-if="view.kind === 'welcome'">
-      <WelcomeView :error="error" :busy="busy" @new-project="newProject" @open-project="openExisting" />
+      <WelcomeView
+        :error="error"
+        :busy="busy"
+        :recent="recent"
+        @new-project="newProject"
+        @open-project="openExisting"
+        @open-recent="openRecentPath"
+      />
       <div v-if="notice || updates.notice.value" class="app__toasts">
         <Toast v-if="notice" class="app__notice" @dismiss="notice = null">{{ notice }}</Toast>
         <Toast v-if="updates.notice.value" class="app__update" @dismiss="updates.dismissNotice">

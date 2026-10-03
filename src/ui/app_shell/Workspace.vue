@@ -69,6 +69,8 @@ const props = defineProps<{
   notice?: string | null
   /** 后台检查发现的新版本（提示中带“查看”）。 */
   updateNotice?: string | null
+  /** 最近打开的项目（文件 → 打开最近）。 */
+  recent?: readonly string[]
   appearance: Appearance
 }>()
 
@@ -79,6 +81,8 @@ const emit = defineEmits<{
   'set-appearance': [appearance: Appearance]
   /** 帮助 → 检查更新…（应用级，由 App 处理）。 */
   'check-update': []
+  /** 文件 → 打开最近（index 为 null 表示清除列表），由 App 处理。 */
+  'open-recent': [index: number | null]
   'show-update': []
   'dismiss-update': []
 }>()
@@ -640,6 +644,7 @@ const menus = computed(() =>
     canGoBack: jumps.canGoBack.value,
     canGoForward: jumps.canGoForward.value,
     canUndoDelete: removedChapters.canUndo.value,
+    recent: props.recent,
     appearance: props.appearance,
   }),
 )
@@ -719,6 +724,9 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       return
     case 'app':
       emit('check-update')
+      return
+    case 'recent':
+      emit('open-recent', command.index)
       return
     case 'chapter':
     case 'move-chapter': {
