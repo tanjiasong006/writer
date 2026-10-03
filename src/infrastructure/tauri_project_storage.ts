@@ -62,6 +62,16 @@ export function createTauriProjectStorage(): ProjectStorage {
       return { ok: true, value: { fileName: result.value, reference: assetReference(result.value) } }
     },
 
+    async importAssetData(path, fileName, data) {
+      const result = await call(() =>
+        invoke<string>('project_import_asset_data', data, {
+          headers: { 'writer-project': encodeURIComponent(path), 'writer-file-name': encodeURIComponent(fileName) },
+        }),
+      )
+      if (!result.ok) return result
+      return { ok: true, value: { fileName: result.value, reference: assetReference(result.value) } }
+    },
+
     assetPath(path, reference) {
       return resolveAssetReference(path, reference)
     },

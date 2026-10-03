@@ -22,23 +22,64 @@ pub fn import_asset(fs: &dyn Fs, root: &Path, source: &Path) -> Result<String> {
     if !fs.exists(&paths.manifest) {
         return Err(StorageError::NotAProject);
     }
-
-    let extension = source
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase)
-        .filter(|e| SUPPORTED_EXTENSIONS.contains(&e.as_str()))
-        .ok_or(StorageError::AssetUnsupported)?;
-
+    let extension = supported_extension(source).ok_or(StorageError::AssetUnsupported)?;
     let bytes = fs.read(source).map_err(|error| match error.kind() {
         io::ErrorKind::NotFound => StorageError::AssetNotFound,
         _ => io_error("read", source)(error),
     })?;
+    let stem = source.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    write_asset(fs, root, stem, &extension, &bytes)
+}
+
+/// 导入粘贴或拖入的图片数据（没有源文件路径）：file_name 只用来取文件名与扩展名。
+/// 格式按文件内容判断（剪贴板中的图片名称常常不可靠），只接受与 import_asset 相同的格式。
+pub fn import_asset_bytes(fs: &dyn Fs, root: &Path, file_name: &str, bytes: &[u8]) -> Result<String> {
+    let paths = Paths::new(root);
+    if !fs.exists(&paths.manifest) {
+        return Err(StorageError::NotAProject);
+    }
+    let extension = sniff_extension(bytes).ok_or(StorageError::AssetUnsupported)?;
+    let name = Path::new(file_name);
+    // 名称中的扩展名与内容一致时保留原写法（jpeg / jpg），否则用内容对应的扩展名。
+    let extension = supported_extension(name)
+        .filter(|named| same_format(named, extension))
+        .unwrap_or_else(|| extension.to_owned());
+    let stem = name.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    write_asset(fs, root, stem, &extension, bytes)
+}
+
+fn supported_extension(path: &Path) -> Option<String> {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|e| SUPPORTED_EXTENSIONS.contains(&e.as_str()))
+}
+
+/// 按文件头判断图片格式。
+fn sniff_extension(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("jpg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("gif")
+    } else {
+        None
+    }
+}
+
+fn same_format(a: &str, b: &str) -> bool {
+    let normalize = |e: &str| if e == "jpeg" { "jpg".to_owned() } else { e.to_owned() };
+    normalize(a) == normalize(b)
+}
+
+fn write_asset(fs: &dyn Fs, root: &Path, stem: &str, extension: &str, bytes: &[u8]) -> Result<String> {
+    let paths = Paths::new(root);
     if bytes.len() > MAX_ASSET_BYTES {
         return Err(StorageError::AssetTooLarge);
     }
 
-    let stem = sanitize_stem(source.file_stem().and_then(|s| s.to_str()).unwrap_or(""));
+    let stem = sanitize_stem(stem);
     let assets = root.join(ASSETS_DIR);
     fs.create_dir_all(&assets)
         .map_err(io_error("create-dir", &assets))?;
@@ -59,7 +100,7 @@ pub fn import_asset(fs: &dyn Fs, root: &Path, source: &Path) -> Result<String> {
         fs.create_dir_all(&paths.internal)
             .map_err(io_error("create-dir", &paths.internal))?;
         let tmp = paths.internal.join(ASSET_TMP);
-        fs.write_synced(&tmp, &bytes)
+        fs.write_synced(&tmp, bytes)
             .map_err(io_error("write", &tmp))?;
         fs.rename(&tmp, &target)
             .map_err(io_error("rename", &target))?;
@@ -111,6 +152,28 @@ mod tests {
         let path = dir.path().join(name);
         fs::write(&path, bytes).unwrap();
         path
+    }
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\nrest";
+
+    #[test]
+    fn imports_pasted_bytes_by_content() {
+        let dir = TempDir::new().unwrap();
+        let root = project(&dir);
+        // 名称的扩展名与内容不符时按内容。
+        assert_eq!(import_asset_bytes(&RealFs, &root, "截屏 2026.jpeg", PNG).unwrap(), "截屏-2026.png");
+        assert_eq!(fs::read(root.join("assets/截屏-2026.png")).unwrap(), PNG);
+        // 相同内容复用，没有名称时叫 image。
+        assert_eq!(import_asset_bytes(&RealFs, &root, "截屏 2026.png", PNG).unwrap(), "截屏-2026.png");
+        assert_eq!(import_asset_bytes(&RealFs, &root, "", &[0xff, 0xd8, 0xff, 0]).unwrap(), "image.jpg");
+        assert_eq!(import_asset_bytes(&RealFs, &root, "a.JPEG", &[0xff, 0xd8, 0xff, 1]).unwrap(), "a.jpeg");
+        assert!(matches!(
+            import_asset_bytes(&RealFs, &root, "a.webp", b"RIFF....WEBP"),
+            Err(StorageError::AssetUnsupported)
+        ));
+        let missing = dir.path().join("不是项目");
+        fs::create_dir_all(&missing).unwrap();
+        assert!(matches!(import_asset_bytes(&RealFs, &missing, "a.png", PNG), Err(StorageError::NotAProject)));
     }
 
     #[test]

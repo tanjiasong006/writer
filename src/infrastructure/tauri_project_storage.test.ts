@@ -172,3 +172,13 @@ test('旧项目的 style（已取消的文档样式）：打开时忽略，正�
   expect(sent.request.contents).toEqual({})
   expect(sent.request.manifest).toEqual(manifest)
 })
+
+test('importAssetData：图片数据作为原始正文发送，路径与文件名百分号编码放在请求头中', async () => {
+  invokeMock.mockResolvedValue('截屏.png')
+  const data = new Uint8Array([1, 2, 3])
+  const result = await createTauriProjectStorage().importAssetData('/文稿/论文', '截屏.png', data)
+  expect(result).toEqual({ ok: true, value: { fileName: '截屏.png', reference: '../assets/截屏.png' } })
+  expect(invokeMock).toHaveBeenCalledWith('project_import_asset_data', data, {
+    headers: { 'writer-project': '%2F%E6%96%87%E7%A8%BF%2F%E8%AE%BA%E6%96%87', 'writer-file-name': '%E6%88%AA%E5%B1%8F.png' },
+  })
+})

@@ -33,6 +33,7 @@ import { useRemovedChapters } from './use_removed_chapters.ts'
 import FindBar from './FindBar.vue'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
+import { embeddableImage } from './embeddable_image.ts'
 import { chapterRefLabels } from '../editor/chapter_ref_view.ts'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
@@ -177,10 +178,34 @@ async function insertImage(chapterId: ChapterId): Promise<void> {
     actionError.value = messageForStorageFailure(result.error)
     return
   }
-  // 图注为空，不用文件名代替（图注会出现在导出中），需要时由作者添加。
-  const { reference } = result.value
+  placeImage(chapterId, result.value.reference)
+}
+
+/**
+ * 粘贴或拖入的图片：依次导入项目 assets/（Word / PDF 不能直接嵌入的格式先转为 PNG），在光标处插入。
+ * 某一张失败时说明原因，其余照常插入。
+ */
+async function insertImageFiles(chapterId: ChapterId, files: readonly File[]): Promise<void> {
+  actionError.value = null
+  for (const file of files) {
+    const data = await embeddableImage(file)
+    if (data === null) {
+      actionError.value = `无法插入图片“${file.name || '粘贴的图片'}”：不支持这种图片格式。`
+      continue
+    }
+    const result = await props.session.importAssetData(data.name, data.bytes)
+    if (!result.ok) {
+      actionError.value = messageForStorageFailure(result.error)
+      continue
+    }
+    placeImage(chapterId, result.value.reference)
+  }
+}
+
+/** 在发起请求的章节中插入图片引用。图注为空，不用文件名代替（图注会出现在导出中），需要时由作者添加。 */
+function placeImage(chapterId: ChapterId, reference: string): void {
   if (editor.value?.insertImage(chapterId, reference, '')) return
-  // 选择文件期间切换了章节：追加到发起请求的章节末尾，不插错位置。
+  // 期间切换了章节：追加到发起请求的章节末尾，不插错位置。
   const text = props.session.document.contents.get(chapterId)
   if (text !== undefined) props.session.setContent(chapterId, appendImage(text, reference, ''))
 }
@@ -833,6 +858,7 @@ async function createFirstChapter(): Promise<void> {
           @stats="stats = $event"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
           @request-image="insertImage"
+          @request-image-files="insertImageFiles"
           @request-chapter-ref="requestChapterRef"
           @open-chapter="jumps.jump"
           @tools="showTools"

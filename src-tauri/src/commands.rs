@@ -143,6 +143,45 @@ pub async fn project_import_asset(path: PathBuf, source: PathBuf) -> Result<Stri
     run_storage(move || storage::assets::import_asset(&RealFs, &path, &source)).await
 }
 
+/// 导入粘贴或拖入的图片：正文是图片数据（原始字节，不经 JSON），
+/// 项目路径与文件名放在请求头中（百分号编码，头部只能是 ASCII）。
+#[tauri::command]
+pub async fn project_import_asset_data(request: tauri::ipc::Request<'_>) -> Result<String, StorageError> {
+    let header = |name: &str| -> Result<String, StorageError> {
+        let value = request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .ok_or(StorageError::AssetUnsupported)?;
+        percent_decode(value).ok_or(StorageError::AssetUnsupported)
+    };
+    let path = PathBuf::from(header("writer-project")?);
+    let name = header("writer-file-name")?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(StorageError::AssetUnsupported);
+    };
+    let bytes = bytes.clone();
+    run_storage(move || storage::assets::import_asset_bytes(&RealFs, &path, &name, &bytes)).await
+}
+
+/// encodeURIComponent 的逆运算；不是合法的 UTF-8 时为 None。
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(index + 1..index + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
 /// 导出 Word：在后台线程生成，原子写入目标文件。
 #[tauri::command]
 pub async fn export_docx(
@@ -217,4 +256,18 @@ pub async fn preview_pdf(
     .map_err(|error| ExportError::RenderFailed {
         message: error.to_string(),
     })?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percent_decode;
+
+    #[test]
+    fn percent_decode_reverses_encode_uri_component() {
+        assert_eq!(percent_decode("%2F%E6%96%87%E7%A8%BF%2Fa%20b.png").as_deref(), Some("/文稿/a b.png"));
+        assert_eq!(percent_decode("plain").as_deref(), Some("plain"));
+        assert_eq!(percent_decode("%E6%96"), None);
+        assert_eq!(percent_decode("%zz"), None);
+        assert_eq!(percent_decode("%4"), None);
+    }
 }

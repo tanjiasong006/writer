@@ -156,6 +156,11 @@ export class ProjectSession {
     return this.storage.importAsset(this.path, sourcePath)
   }
 
+  /** 把粘贴或拖入的图片数据导入项目资源目录。不改变文档。 */
+  importAssetData(fileName: string, data: Uint8Array): Promise<StorageResult<ImportedAsset>> {
+    return this.storage.importAssetData(this.path, fileName, data)
+  }
+
   /**
    * 保存当前文档。返回本次（或合并后的那次）保存是否成功提交。
    * 没有未保存的修改时直接成功。

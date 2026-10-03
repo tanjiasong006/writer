@@ -81,6 +81,7 @@ export class MemoryProjectStorage implements ProjectStorage {
 
   /** 导入过的资源：项目路径 → 源路径列表。 */
   readonly importedAssets: Array<{ path: string; sourcePath: string }> = []
+  readonly importedData: Array<{ path: string; fileName: string; data: Uint8Array }> = []
 
   async importAsset(path: string, sourcePath: string): Promise<StorageResult<ImportedAsset>> {
     const failure = this.failures.shift()
@@ -89,6 +90,15 @@ export class MemoryProjectStorage implements ProjectStorage {
     this.importedAssets.push({ path, sourcePath })
     const fileName = sourcePath.split(/[\\/]/).pop() ?? 'image.png'
     return { ok: true, value: { fileName, reference: `../assets/${fileName}` } }
+  }
+
+  async importAssetData(path: string, fileName: string, data: Uint8Array): Promise<StorageResult<ImportedAsset>> {
+    const failure = this.failures.shift()
+    if (failure) return { ok: false, error: failure }
+    if (!this.projects.has(path)) return { ok: false, error: { code: 'not-a-project' } }
+    this.importedData.push({ path, fileName, data })
+    const name = fileName || 'image.png'
+    return { ok: true, value: { fileName: name, reference: `../assets/${name}` } }
   }
 
   assetPath(path: string, reference: string): string | null {

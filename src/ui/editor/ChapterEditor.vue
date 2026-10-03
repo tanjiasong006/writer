@@ -74,6 +74,10 @@ const emit = defineEmits<{
   change: [chapterId: ChapterId, text: string]
   /** 用户点击了"插入图片"；由上层选择并导入图片后调用 insertImage。 */
   'request-image': [chapterId: ChapterId]
+  /**
+   * 粘贴或拖入了图片文件：光标已放在插入处（拖入时是放下的位置），由上层导入项目资源后调用 insertImage。
+   */
+  'request-image-files': [chapterId: ChapterId, files: File[]]
   /** 编辑命令的可用 / 勾选状态（由上层的工具栏与菜单栏显示）。 */
   tools: [state: CommandState]
   /**
@@ -233,6 +237,26 @@ onMounted(() => {
     dispatchTransaction,
     scrollThreshold: CARET_MARGIN,
     scrollMargin: CARET_MARGIN,
+    handlePaste: (_view, event, slice) => {
+      // 同时有文字（如从网页或 Word 复制的图文）时按文字粘贴；只有图片时导入图片。
+      const files = imageFiles(event.clipboardData)
+      if (files.length === 0 || slice.content.textBetween(0, slice.content.size, '', '').trim() !== '') return false
+      emit('request-image-files', currentId, files)
+      return true
+    },
+    handleDrop: (dropView, event, _slice, moved) => {
+      const files = moved ? [] : imageFiles(event.dataTransfer)
+      if (files.length === 0) return false
+      event.preventDefault()
+      const hit = dropView.posAtCoords({ left: event.clientX, top: event.clientY })
+      if (hit) {
+        const { doc } = dropView.state
+        dropView.dispatch(dropView.state.tr.setSelection(TextSelection.near(doc.resolve(hit.pos))))
+      }
+      dropView.focus()
+      emit('request-image-files', currentId, files)
+      return true
+    },
     decorations: (state) =>
       props.findQuery ? findDecorations(state.doc, currentMatches(state), state.selection) : null,
     nodeViews: {
@@ -438,6 +462,11 @@ function onMousedownCapture(event: MouseEvent): void {
   event.preventDefault()
   event.stopPropagation()
   openChapterRef(view.state.doc.nodeAt(pos)!.attrs.href as string)
+}
+
+/** 剪贴板或拖入内容中的图片文件。 */
+function imageFiles(data: DataTransfer | null): File[] {
+  return [...(data?.files ?? [])].filter((file) => file.type.startsWith('image/'))
 }
 
 function isCaption(target: EventTarget | null): boolean {
