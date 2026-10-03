@@ -140,7 +140,7 @@ pub fn list_snapshots(fs: &dyn Fs, root: &Path) -> Result<Vec<SnapshotInfo>> {
             Some(info(id, &file))
         })
         .collect();
-    list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    list.sort_by_key(|info| std::cmp::Reverse(info.created_at));
     Ok(list)
 }
 
