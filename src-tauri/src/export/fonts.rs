@@ -149,6 +149,12 @@ pub fn docx_fonts(family: FontFamily) -> DocxFonts {
 pub const CJK_PROBE: char = '中';
 
 /// 随应用打包的字体目录（按优先级）。目前为空目录也无妨，存在即参与查找。
+pub fn bundled_font_dirs(resource_dir: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
+    resource_dir
+        .map(|dir| vec![dir.join("fonts")])
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod bundled_tests {
     use super::*;
@@ -183,10 +189,4 @@ mod bundled_tests {
         }
         assert!(found.contains("Noto Serif CJK SC") && found.contains("Noto Sans CJK SC"), "{found:?}");
     }
-}
-
-pub fn bundled_font_dirs(resource_dir: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
-    resource_dir
-        .map(|dir| vec![dir.join("fonts")])
-        .unwrap_or_default()
 }
