@@ -1,0 +1,40 @@
+{
+  "说明": "公式（docs/decisions.md 第 14 节，pulldown-cmark ENABLE_MATH 的规则）：$…$ 行内，$$…$$ 行间；只含一个行间公式的段落是公式块（内容去掉首尾空白）。开头 $ 后、结尾 $ 前是空白，花括号不平衡，转义的 $ 都不是公式。表格中公式里的 \\| 是 |。",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "勾股定理 " },
+        { "math": "a^2+b^2=c^2", "display": false },
+        { "text": " 与段落中的 " },
+        { "math": "E=mc^2", "display": true },
+        { "text": "，" },
+        { "text": "加粗中的 ", "marks": ["strong"] },
+        { "math": "x", "display": false, "marks": ["strong"] },
+        { "text": "。" }
+      ]
+    },
+    { "type": "math", "tex": "\\int_0^1 x\\,dx = \\frac{1}{2}" },
+    { "type": "math", "tex": "\\sum_{i=1}^{n} i" },
+    {
+      "type": "paragraph",
+      "inlines": [{ "text": "不是公式：价格 $5 与 $ 6，$ x$ 与 $x $，转义 $y$，不平衡 $}z$。" }]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "花括号中的 $ 不结束：" },
+        { "math": "\\text{a$b} + 1", "display": false },
+        { "text": "；公式中的转义：" },
+        { "math": "p \\$ q", "display": false },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "table",
+      "align": ["none"],
+      "header": [[{ "text": "公式" }]],
+      "rows": [[[{ "math": "\\alpha|\\beta", "display": false }]]]
+    }
+  ]
+}

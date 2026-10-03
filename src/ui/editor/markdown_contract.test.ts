@@ -34,11 +34,13 @@ type SemInline =
   | { footnote: string; marks?: string[] }
   | { element: { kind: string; id: string }; cached: string; marks?: string[] }
   | { cite: string; cached: string; marks?: string[] }
+  | { math: string; display: boolean; marks?: string[] }
   | { break: true }
 type SemItem = { task: boolean | null; blocks: SemBlock[] }
 type SemBlock =
   | { type: 'paragraph'; inlines: SemInline[] }
   | { type: 'figure'; src: string; alt: string; id?: string }
+  | { type: 'math'; tex: string }
   | { type: 'quote'; blocks: SemBlock[] }
   | { type: 'code'; language: string | null; text: string }
   | { type: 'rule' }
@@ -81,6 +83,8 @@ function inlines(node: Node): SemInline[] {
         const ref = address.kind === 'ref' ? { id: address.id, show: address.show } : null
         out.push(withMarks({ ref, cached: child.attrs.cached as string }, marks))
       }
+    } else if (child.type === nodes.math) {
+      out.push(withMarks({ math: child.attrs.tex as string, display: child.attrs.display as boolean }, marks))
     } else if (child.type === nodes.footnote) {
       out.push(withMarks({ footnote: (child.attrs.text as string).split(/\s+/).filter(Boolean).join(' ') }, marks))
     } else if (child.type === nodes.image) {
@@ -109,6 +113,8 @@ function block(node: Node): SemBlock {
   switch (node.type) {
     case nodes.paragraph:
       return { type: 'paragraph', inlines: inlines(node) }
+    case nodes.math_block:
+      return { type: 'math', tex: node.attrs.tex as string }
     case nodes.figure: {
       const id = /^fig:([A-Za-z0-9_-]+)$/.exec((node.attrs.title as string | null) ?? '')?.[1]
       const figure: SemBlock = { type: 'figure', src: node.attrs.src as string, alt: node.attrs.alt as string }

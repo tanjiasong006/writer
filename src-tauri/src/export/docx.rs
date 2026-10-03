@@ -332,6 +332,13 @@ impl Writer<'_> {
     }
 
     fn block(&mut self, block: &Block, section: &Section, context: BlockContext) {
+        // 独立的公式块：居中的一段。
+        if let Some(tex) = block.as_math() {
+            let run = self.formula_run(tex, true, RunStyle::default());
+            let p = self.indent(Paragraph::new().align(AlignmentType::Center), context).add_run(run);
+            self.items.push(Item::Paragraph(p));
+            return;
+        }
         let element = self.elements.of(block).cloned();
         if let Some((src, alt)) = block.as_figure() {
             self.figure(src, alt, element.as_ref(), context);
@@ -582,6 +589,23 @@ impl Writer<'_> {
 
     /// 独立成段的图片：居中；有图注时图注紧随其后，两者保持在同一页。
     /// 尺寸上限是完整正文区（不是当前页剩余空间）扣除图片前后间距与图注占用的高度。
+    /// 公式图片（按正文字号排版）；失败时是红色的 LaTeX 原文并列入导出报告。
+    fn formula_run(&mut self, tex: &str, display: bool, style: RunStyle) -> Run {
+        let size = self.theme.body.size;
+        let fonts = crate::export::pdf::font_store(None);
+        match super::math::render_png(tex, display, size, fonts) {
+            Some(image) => {
+                let pic = Pic::new_with_dimensions(image.png, image.width_px, image.height_px)
+                    .size(pt_to_emu(image.width_pt), pt_to_emu(image.height_pt));
+                Run::new().add_image(pic)
+            }
+            None => {
+                self.report.invalid_formulas.push(tex.trim().to_owned());
+                styled(Run::new().add_text(xml_safe(tex.trim())), RunStyle { code: true, ..style }).color("B91C1C")
+            }
+        }
+    }
+
     /// 图注 / 表格标题段落：Caption 样式；有编号的图表带书签（图表引用的跳转目标）。
     fn caption_paragraph(&self, text: &str, target: &ElementTarget, context: BlockContext) -> Paragraph {
         let id = ELEMENT_BOOKMARK_BASE + target.anchor;
@@ -742,6 +766,11 @@ impl Writer<'_> {
                 Inline::Image { src, alt, .. } => {
                     // 与文字同段的图片：不超过所在容器的宽度与高度上限。
                     let run = self.image_run(src, alt, bounds);
+                    p.add_run(run)
+                }
+                // 公式：用 Typst 排版后以图片嵌入（docs/decisions.md 第 14 节）；排版失败时输出红色的 LaTeX 原文。
+                Inline::Math { tex, display } => {
+                    let run = self.formula_run(tex, *display, style);
                     p.add_run(run)
                 }
                 // 脚注：Word 的脚注（页底，自动编号）。内容段落以编号标记开头（见 footnote_marks）。
@@ -1345,6 +1374,19 @@ mod tests {
         assert!(xml.find("[2]\t甲. 书[M]. 2020.").unwrap() > heading);
         assert!(xml.contains(r#"w:name="_WriterCite1""#));
         assert!(part(&bytes, "word/styles.xml").contains(r#"w:styleId="Bibliography""#));
+    }
+
+    #[test]
+    fn formulas_are_embedded_as_images() {
+        let dir = project();
+        let (bytes, report) = export_ok(
+            &dir,
+            &[("a", vec![1], "公式", "行内 $x^2$。\n\n$$\\frac{a}{b}$$\n\n错误 $\\notacommand$")],
+        );
+        assert_eq!(media_count(&bytes), 2);
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains("\\notacommand"));
+        assert_eq!(report.invalid_formulas, vec!["\\notacommand"]);
     }
 
     #[test]

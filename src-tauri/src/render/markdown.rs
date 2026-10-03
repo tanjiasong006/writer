@@ -85,6 +85,12 @@ pub enum Inline {
         id: String,
         cached: String,
     },
+    /// 公式（`$…$` 行内、`$$…$$` 行间，内容是 LaTeX，docs/decisions.md 第 14 节）。
+    /// 段落中只有一个行间公式时是独立的公式块（`Block::as_math`）。
+    Math {
+        tex: String,
+        display: bool,
+    },
     /// 脚注（GFM `[^label]`）：内容是定义的行内文字（多段以空格连接），出现在引用处。
     /// 同一定义被引用多次时每个引用各是一条脚注（与编辑器相同）。
     Footnote(Vec<Inline>),
@@ -96,6 +102,17 @@ impl Block {
     /// 只含一张图片的段落，渲染为独立的图（居中、限宽）。
     pub fn as_figure(&self) -> Option<(&str, &str)> {
         self.figure().map(|(src, alt, _)| (src, alt))
+    }
+
+    /// 只含一个行间公式的段落：独立的公式块（居中），返回 LaTeX 原文（去掉首尾空白）。
+    pub fn as_math(&self) -> Option<&str> {
+        match self {
+            Block::Paragraph(inlines) => match inlines.as_slice() {
+                [Inline::Math { tex, display: true }] => Some(tex.trim()),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// 独立的图：地址、图注与标识。
@@ -150,7 +167,8 @@ pub fn parse(markdown: &str) -> Vec<Block> {
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_FOOTNOTES;
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_MATH;
     let mut events = HeadingsAsText {
         source: markdown,
         inner: Parser::new_ext(markdown, options).into_offset_iter(),
@@ -555,9 +573,15 @@ fn inline_from_leaf(event: Event) -> Option<Inline> {
         Event::Text(text) | Event::Html(text) | Event::InlineHtml(text) => {
             Inline::Text(text.into_string())
         }
-        Event::Code(code) | Event::InlineMath(code) | Event::DisplayMath(code) => {
-            Inline::Code(code.into_string())
-        }
+        Event::Code(code) => Inline::Code(code.into_string()),
+        Event::InlineMath(tex) => Inline::Math {
+            tex: tex.into_string(),
+            display: false,
+        },
+        Event::DisplayMath(tex) => Inline::Math {
+            tex: tex.into_string(),
+            display: true,
+        },
         Event::SoftBreak => Inline::SoftBreak,
         Event::HardBreak => Inline::HardBreak,
         Event::TaskListMarker(done) => Inline::Text(if done { "☑ " } else { "☐ " }.to_owned()),
@@ -652,6 +676,7 @@ pub fn plain_text(inlines: &[Inline]) -> String {
     for inline in inlines {
         match inline {
             Inline::Text(t) | Inline::Code(t) => text.push_str(t),
+            Inline::Math { tex, .. } => text.push_str(tex),
             Inline::Strong(c) | Inline::Emphasis(c) | Inline::Strike(c) => {
                 text.push_str(&plain_text(c))
             }
@@ -819,6 +844,23 @@ mod tests {
         assert_eq!(parse("Table: 只是文字").len(), 1);
         // 标题不在正文中重复出现。
         assert_eq!(parse("Table: 甲\n\n| a |\n| - |").len(), 1);
+    }
+
+    #[test]
+    fn math_inline_and_display() {
+        let blocks = parse("面积 $\\pi r^2$ 与 $$E=mc^2$$。\n\n$$\n\\int_0^1 x\\,dx\n$$\n\n价格 $5 与 $ 6$ 不是公式");
+        assert_eq!(
+            blocks[0],
+            Block::Paragraph(vec![
+                text("面积 "),
+                Inline::Math { tex: "\\pi r^2".into(), display: false },
+                text(" 与 "),
+                Inline::Math { tex: "E=mc^2".into(), display: true },
+                text("。"),
+            ])
+        );
+        assert_eq!(blocks[1].as_math(), Some("\\int_0^1 x\\,dx"));
+        assert_eq!(blocks[2], Block::Paragraph(vec![text("价格 $5 与 $ 6$ 不是公式")]));
     }
 
     #[test]

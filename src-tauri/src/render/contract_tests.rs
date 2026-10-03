@@ -57,6 +57,7 @@ fn runs(inlines: &[Inline], marks: &[String], out: &mut Vec<Value>) {
                     .join(" ");
                 out.push(with_marks(object(json!({ "footnote": text }))))
             }
+            Inline::Math { tex, display } => out.push(with_marks(object(json!({ "math": tex, "display": display })))),
             Inline::Citation { id, cached } => {
                 out.push(with_marks(object(json!({ "cite": id, "cached": cached }))))
             }
@@ -115,6 +116,9 @@ fn blocks(blocks: &[Block]) -> Value {
 }
 
 fn block(block: &Block) -> Value {
+    if let Some(tex) = block.as_math() {
+        return json!({ "type": "math", "tex": tex });
+    }
     if let Some((src, alt, id)) = block.figure() {
         let mut figure = json!({ "type": "figure", "src": src, "alt": alt });
         if let Some(id) = id {

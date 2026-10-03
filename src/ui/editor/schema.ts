@@ -29,7 +29,7 @@ function parseAlign(value: string | null | undefined): Align | null {
 const table = tableNodes({
   tableGroup: 'block',
   // GFM 表格的单元格只能是一行行内内容：不允许硬换行与块级内容。
-  cellContent: '(text | image | chapter_ref | footnote)*',
+  cellContent: '(text | image | chapter_ref | footnote | math)*',
   cellAttributes: {
     align: {
       default: null,
@@ -274,6 +274,43 @@ export const schema = new Schema({
         { class: 'chapter-ref', 'data-chapter-ref': node.attrs.href },
         node.attrs.cached,
       ],
+    },
+
+    /**
+     * 行内公式（docs/decisions.md 第 14 节）：Markdown 中的 `$…$`（display 为 true 时是段落中的 `$$…$$`）。
+     * 原子节点，tex 是 LaTeX 原文；显示由节点视图用 KaTeX 渲染（math_view.ts）。
+     */
+    math: {
+      inline: true,
+      group: 'inline',
+      atom: true,
+      attrs: {
+        tex: { default: '', validate: 'string' },
+        display: { default: false, validate: 'boolean' },
+      },
+      leafText: (node) => node.attrs.tex as string,
+      parseDOM: [
+        {
+          tag: 'span[data-math]',
+          getAttrs: (dom) => ({ tex: dom.getAttribute('data-math') ?? '', display: dom.hasAttribute('data-display') }),
+        },
+      ],
+      toDOM: (node): DOMOutputSpec => [
+        'span',
+        { class: 'math-inline', 'data-math': node.attrs.tex, ...(node.attrs.display ? { 'data-display': '' } : {}) },
+        node.attrs.tex,
+      ],
+    },
+
+    /**
+     * 公式块：只含一个 `$$…$$` 的段落，居中显示的行间公式。块级原子节点，tex 是 LaTeX 原文。
+     */
+    math_block: {
+      group: 'block',
+      atom: true,
+      attrs: { tex: { default: '', validate: 'string' } },
+      parseDOM: [{ tag: 'div[data-math-block]', getAttrs: (dom) => ({ tex: dom.getAttribute('data-math-block') ?? '' }) }],
+      toDOM: (node): DOMOutputSpec => ['div', { class: 'math-block', 'data-math-block': node.attrs.tex }, node.attrs.tex],
     },
 
     /**

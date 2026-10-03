@@ -72,6 +72,49 @@ const MAX_NESTING = 100
 const tokenizer = MarkdownIt('commonmark', { html: false }).enable(['table', 'strikethrough']).use(footnotePlugin)
 // pulldown-cmark 不支持行内脚注 ^[…]：按文字处理。
 tokenizer.inline.ruler.disable(['footnote_inline'])
+
+/** ASCII 空白（pulldown-cmark 判断 $ 能否开始 / 结束公式时使用的范围）。 */
+const isAsciiSpace = (char: string | undefined) => char !== undefined && /[ \t\n\r\f\v]/.test(char)
+const isAsciiPunct = (char: string | undefined) => char !== undefined && /[!-/:-@[-`{-~]/.test(char)
+
+/**
+ * 公式（docs/decisions.md 第 14 节），与 pulldown-cmark 的 ENABLE_MATH 规则相同：
+ * - `$…$` 行内公式：开头的 $ 后面不是空白，结尾的 $ 前面不是空白；`$$…$$` 是行间公式（可以在段落中）。
+ * - 结束的 $ 必须与开始的 $ 处在同一层花括号中（花括号不平衡时不是公式）；遇到的第一个同层 $ 不能结束时不是公式
+ *   （公式中不能有未转义的 $）。转义的字符（\$、\{ 等）不参与判断，原样留在公式中。
+ */
+tokenizer.inline.ruler.before('escape', 'writer_math', (state, silent) => {
+  const { src, posMax } = state
+  const start = state.pos
+  if (src[start] !== '$') return false
+  // 前一个字符是反斜杠时这个 $ 已被转义（由 escape 规则处理）。
+  const display = src[start + 1] === '$'
+  if (!display && (start + 1 >= posMax || isAsciiSpace(src[start + 1]))) return false
+  let depth = 0
+  for (let pos = start + (display ? 2 : 1); pos < posMax; pos++) {
+    const char = src[pos]
+    if (char === '\\' && isAsciiPunct(src[pos + 1])) {
+      pos++
+      continue
+    }
+    if (char === '{') depth++
+    else if (char === '}' && --depth < 0) return false
+    else if (char === '$' && depth === 0) {
+      const closingDisplay = src[pos + 1] === '$'
+      if (display ? !closingDisplay : isAsciiSpace(src[pos - 1])) return false
+      const tex = src.slice(start + (display ? 2 : 1), pos)
+      if (!display && tex === '') return false
+      if (!silent) {
+        const token = state.push('math', '', 0)
+        token.content = tex
+        token.meta = { display }
+      }
+      state.pos = pos + (display ? 2 : 1)
+      return true
+    }
+  }
+  return false
+})
 // commonmark 预设只允许 20 层；maxNesting 是 markdown-it 的运行时选项，类型定义中没有列出。
 Object.assign(tokenizer.options, { maxNesting: MAX_NESTING })
 // 保留链接与图片地址的原文：不做百分号编码，也不因协议拒绝（导出时由 Rust 决定是否可用）。
@@ -268,6 +311,21 @@ tokenizer.core.ruler.push('writer_table_caption', (state) => {
   }
 })
 
+/** 只含一个行间公式的段落是公式块（与 Rust 的 Block::as_math 相同）。 */
+tokenizer.core.ruler.push('writer_math_block', (state) => {
+  const tokens = state.tokens
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    if (tokens[i].type !== 'paragraph_open' || tokens[i + 2].type !== 'paragraph_close') continue
+    const children = tokens[i + 1].children ?? []
+    if (children.length !== 1 || children[0].type !== 'math' || !(children[0].meta as { display: boolean }).display) continue
+    const block = new state.Token('math_block', '', 0)
+    block.content = children[0].content.trim()
+    block.map = tokens[i].map
+    block.hidden = tokens[i].hidden
+    tokens.splice(i, 3, block)
+  }
+})
+
 tokenizer.core.ruler.push('writer_task_list', (state) => {
   const tokens = state.tokens
   for (let i = 0; i + 2 < tokens.length; i++) {
@@ -389,6 +447,11 @@ const parser = new MarkdownParser(schema, tokenizer, {
   figure: { node: 'figure', getAttrs: imageAttrs },
   hardbreak: { node: 'hard_break' },
   chapter_ref: { node: 'chapter_ref', getAttrs: (token) => ({ href: token.attrGet('href') ?? '', cached: token.content }) },
+  math: {
+    node: 'math',
+    getAttrs: (token) => ({ tex: token.content, display: (token.meta as { display: boolean }).display }),
+  },
+  math_block: { node: 'math_block', getAttrs: (token) => ({ tex: token.content }) },
   footnote: {
     node: 'footnote',
     getAttrs: (token) => ({ text: token.attrGet('text') ?? '', source: token.attrGet('source') || null }),
@@ -566,6 +629,15 @@ const serializer = new MarkdownSerializer(
       const text = writingRefLabel?.(node.attrs.href)?.text ?? node.attrs.cached
       state.write(`[${state.esc(text)}](${destination(node.attrs.href)})`)
     },
+    math(state, node) {
+      state.write(mathMarkdown(node.attrs.tex as string, node.attrs.display as boolean))
+    },
+    // 单独一段的行间公式；多行的写成 $$ 各占一行。
+    math_block(state, node) {
+      const tex = blockTex(node.attrs.tex as string)
+      state.write(tex.includes('\n') ? `$$\n${tex}\n$$` : `$$${tex}$$`)
+      state.closeBlock(node)
+    },
     // 先写占位，整章写出后按顺序编号并在末尾写出定义（withFootnotes）。
     footnote(state) {
       state.write(FOOTNOTE_PLACEHOLDER)
@@ -598,7 +670,8 @@ const serializer = new MarkdownSerializer(
   },
   {
     // 正文中的 HTML 与实体在 Rust 渲染器中不生效，但会改变解析结构：一律转义为文字。
-    escapeExtraCharacters: /<(?=[A-Za-z/!?])|&(?=#?[0-9A-Za-z]+;)/g,
+    // $ 会开始公式（docs/decisions.md 第 14 节），文字中的 $ 一律转义。
+    escapeExtraCharacters: /<(?=[A-Za-z/!?])|&(?=#?[0-9A-Za-z]+;)|\$/g,
   },
 )
 
@@ -654,6 +727,55 @@ function serializeBlock(block: Node, alternate: boolean, refLabel: ChapterRefLab
 
 function isList(node: Node): boolean {
   return node.type === nodes.bullet_list || node.type === nodes.ordered_list
+}
+
+// ---------------------------------------------------------------------------
+// 公式：写成 $…$ / $$…$$（与解析规则对应）。公式中未转义的 $ 写成 \$；行内公式去掉首尾空白，
+// 不能表达的（花括号不平衡、去掉空白后为空）写成转义后的文字，读回时是同样的文字。
+
+/** 公式中未转义的 $ 加上反斜杠。 */
+function escapeDollars(tex: string): string {
+  // 花括号中的 $ 不会结束公式，原样保留。
+  let out = ''
+  let depth = 0
+  for (let i = 0; i < tex.length; i++) {
+    if (tex[i] === '\\' && i + 1 < tex.length) {
+      out += tex[i] + tex[i + 1]
+      i++
+      continue
+    }
+    if (tex[i] === '{') depth++
+    else if (tex[i] === '}') depth--
+    out += tex[i] === '$' && depth <= 0 ? '\\$' : tex[i]
+  }
+  return out
+}
+
+/** 花括号（不计转义的）是否平衡，且任何时候都不出现多余的 }。 */
+function balancedBraces(tex: string): boolean {
+  let depth = 0
+  for (let i = 0; i < tex.length; i++) {
+    if (tex[i] === '\\' && isAsciiPunct(tex[i + 1])) i++
+    else if (tex[i] === '{') depth++
+    else if (tex[i] === '}' && --depth < 0) return false
+  }
+  return depth === 0
+}
+
+function mathMarkdown(tex: string, display: boolean): string {
+  const body = escapeDollars(display ? tex.replace(/\n\s*\n/g, '\n') : tex.trim())
+  if (body.trim() === '' || !balancedBraces(body)) return escapeText(display ? `$$${tex}$$` : `$${tex}$`)
+  return display ? `$$${body}$$` : `$${body}$`
+}
+
+/** 公式块的内容：去掉首尾空白与空行（空行会结束段落）。 */
+function blockTex(tex: string): string {
+  return escapeDollars(tex.trim().replace(/\n\s*\n/g, '\n'))
+}
+
+/** 不能作为公式写出的内容：转义后的文字。 */
+function escapeText(text: string): string {
+  return text.replace(/[\\`*_{}[\]()#+\-.!$<>|~]/g, '\\$&')
 }
 
 // ---------------------------------------------------------------------------
@@ -808,7 +930,7 @@ function unwrapChapterRefs(block: Node): Node {
   let changed = false
   const children: Node[] = []
   block.forEach((child) => {
-    const kept = child.type === nodes.chapter_ref || child.type === nodes.footnote ? child.marks.filter((mark) => !UNWRAPPED.includes(mark.type)) : null
+    const kept = child.type === nodes.chapter_ref || child.type === nodes.footnote || child.type === nodes.math ? child.marks.filter((mark) => !UNWRAPPED.includes(mark.type)) : null
     if (kept && kept.length !== child.marks.length) {
       changed = true
       children.push(child.mark(kept))
@@ -864,6 +986,7 @@ function adjustEmphasis(block: Node): Node {
   block.forEach((child) => {
     if (child.type === nodes.chapter_ref) units.push({ first: '[', last: ')', node: child })
     else if (child.type === nodes.footnote) units.push({ first: '[', last: ']', node: child })
+    else if (child.type === nodes.math) units.push({ first: '$', last: '$', node: child })
     else if (!child.isText) units.push({ first: null, last: null, node: child })
     else for (const char of child.text!) units.push({ first: char, last: char, node: schema.text(char, child.marks) })
   })

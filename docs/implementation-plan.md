@@ -912,6 +912,15 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 验证：著录格式与编号、manifest、导出请求、契约 fixture `citations`、Rust 编号与 Word / PDF 输出、工作区端到端
   （插入与编号后移、对话框新建 / 取消 / 删除确认、浮层中添加）测试；Story `CitationPicker`、`ReferencesDialog`（Storybook 中目视检查了对话框）。
 
+#### P1-4 数学公式（进行中，2026-10-03）
+
+- 已完成：Markdown `$…$` / `$$…$$`（pulldown-cmark ENABLE_MATH 规则，编辑器 markdown-it 规则相同，共享 fixture `math`）；
+  schema `math` / `math_block`，写出时文字中的 `$` 转义；Rust `Inline::Math`、`Block::as_math`；
+  PDF 用 mitex 转换为 Typst 公式（vendored 规格见 `src-tauri/vendor/mitex-specs/WRITER-PATCH.md`，含 Typst 0.15 兼容补丁），
+  出错的公式回退为红色原文并列入报告 `invalidFormulas`；Word 中公式用 Typst 渲染为 PNG 嵌入。
+- 未完成：编辑器中用 KaTeX 显示公式（节点视图）、插入 / 编辑公式的入口与浮层、全文阅读显示、前端导出提示中的
+  `invalidFormulas`、Story、decisions 第 14 节文档。
+
 ### P2：体验提升
 
 1. 专注模式 / 全屏写作。

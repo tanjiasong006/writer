@@ -33,6 +33,8 @@ typst-svg = "0.15"
 comemo = "0.5"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tauri-plugin-updater = "2"
+mitex = "0.2"
+typst-render = "0.15"
 
 # 开发版也优化图片解码与排版的热点依赖，避免图文 PDF 导出被无优化构建拖慢。
 # Writer 自身保留默认开发配置与调试断言；这些设置不改变 release 配置。

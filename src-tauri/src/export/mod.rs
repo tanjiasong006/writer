@@ -8,6 +8,7 @@
 pub mod docx;
 pub mod fonts;
 pub mod images;
+pub mod math;
 pub mod pdf;
 pub mod pdf_layout;
 pub mod theme;
@@ -42,6 +43,8 @@ pub struct ExportReport {
     pub missing_images: Vec<String>,
     /// 失效的章节引用（目标章节不存在或地址格式错误）的链接文字，已按文字输出。
     pub broken_references: Vec<String>,
+    /// 无法排版的公式（LaTeX 原文），已按原文输出。
+    pub invalid_formulas: Vec<String>,
 }
 
 /// 原子写出导出文件：临时文件 → fsync → rename。

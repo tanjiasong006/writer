@@ -28,12 +28,17 @@ use super::fonts::{bundled_font_dirs, families, FontFamily, CJK_PROBE};
 use super::images::{display_size_pt, load_for_export, Bounds};
 use super::pdf_layout::{Binding, ChapterNumber, Header, PageNumber, PageSetup, ParagraphStyle, PdfLayout, TableStyle};
 use super::theme::{HeadingStyle, Theme};
-use super::{ExportError, ExportReport};
+use super::{math, ExportError, ExportReport};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::citations::Citations;
 use crate::render::elements::ElementTargets;
 use crate::render::markdown::{plain_text, Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
+
+/// Typst 字符串字面量（供公式模块使用）。
+pub(crate) fn string_literal(text: &str) -> String {
+    string(text)
+}
 
 /// 图片高度上限再留出的余量（磅），吸收取整差异，保证图片与图注不会被挤出正文区。
 const IMAGE_HEIGHT_SLACK: f64 = 2.0;
@@ -95,11 +100,41 @@ fn layout(
     }
     writer.bibliography();
 
-    let world = PdfWorld::new(writer.out, writer.images, fonts);
-    let compiled = typst::compile::<PagedDocument>(&world)
-        .output
-        .map_err(|errors| render_failed(&errors));
-    Ok((compiled?, writer.report))
+    // 公式定义放在源码开头（docs/decisions.md 第 14 节）。某个公式排版出错时改用替代再排一次，不让整个导出失败。
+    let mut invalid: std::collections::HashSet<usize> = writer
+        .formulas
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, typst))| typst.is_none())
+        .map(|(index, _)| index)
+        .collect();
+    loop {
+        let (definitions, ranges) = if writer.formulas.is_empty() {
+            (String::new(), Vec::new())
+        } else {
+            math::definitions(&writer.formulas, &invalid)
+        };
+        let world = PdfWorld::new(format!("{definitions}{}", writer.out), writer.images.clone(), fonts);
+        match typst::compile::<PagedDocument>(&world).output {
+            Ok(paged) => {
+                let mut indices: Vec<usize> = invalid.into_iter().collect();
+                indices.sort_unstable();
+                writer.report.invalid_formulas = indices.into_iter().map(|i| writer.formulas[i].0.trim().to_owned()).collect();
+                return Ok((paged, writer.report));
+            }
+            Err(errors) => {
+                let failing: Vec<usize> = math::error_offsets(&world.main, &errors)
+                    .into_iter()
+                    .filter_map(|offset| ranges.iter().position(|range| range.contains(&offset)))
+                    .filter(|index| !invalid.contains(index))
+                    .collect();
+                if failing.is_empty() {
+                    return Err(render_failed(&errors));
+                }
+                invalid.extend(failing);
+            }
+        }
+    }
 }
 
 pub fn export(
@@ -245,6 +280,9 @@ struct Writer<'a> {
     elements: ElementTargets,
     /// 文献引用的编号（docs/decisions.md 第 13 节）。
     citations: Citations,
+    /// 正文中的公式：LaTeX 原文与转换结果（转换失败为 None），按出现顺序，相同的公式只有一项。
+    formulas: Vec<(String, Option<String>)>,
+    formula_index: HashMap<String, usize>,
 }
 
 impl<'a> Writer<'a> {
@@ -263,6 +301,8 @@ impl<'a> Writer<'a> {
             targets: ChapterTargets::default(),
             elements: ElementTargets::default(),
             citations: Citations::default(),
+            formulas: Vec::new(),
+            formula_index: HashMap::new(),
         }
     }
 
@@ -492,6 +532,19 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// 公式的名称（`writer-math-<n>`，定义在源码开头）。
+    fn formula(&mut self, tex: &str) -> String {
+        let index = match self.formula_index.get(tex) {
+            Some(index) => *index,
+            None => {
+                self.formulas.push((tex.to_owned(), math::to_typst(tex)));
+                self.formula_index.insert(tex.to_owned(), self.formulas.len() - 1);
+                self.formulas.len() - 1
+            }
+        };
+        format!("writer-math-{index}")
+    }
+
     /// 参考文献表（docs/decisions.md 第 13 节）：正文之后一个不编号的一级标题，按编号列出被引用的条目。
     fn bibliography(&mut self) {
         if self.citations.is_empty() {
@@ -518,6 +571,10 @@ impl<'a> Writer<'a> {
     }
 
     fn block(&mut self, block: &Block, section: &Section) -> String {
+        // 独立的公式块：居中的行间公式。
+        if let Some(tex) = block.as_math() {
+            return format!("#math.equation(block: true, {})", self.formula(tex));
+        }
         let element = self.elements.of(block).cloned();
         if let Some((src, alt)) = block.as_figure() {
             // 有编号的图：图注前是编号（“图 2-1　图注”），并带标签供图表引用跳转。
@@ -730,6 +787,12 @@ impl<'a> Writer<'a> {
                     // 与文字同段的图片（含表格单元格中的）：不超过所在容器的宽度与高度上限。
                     let image = self.image(src, alt, container.width, &container.max_height);
                     out.push_str(&format!("#box({image})"));
+                }
+                // 行内公式；段落中的行间公式（$$…$$）以行间样式排在行内。
+                Inline::Math { tex, display } => {
+                    let name = self.formula(tex);
+                    let body = if *display { format!("math.display({name})") } else { name };
+                    out.push_str(&format!("#math.equation(block: false, {body})"));
                 }
                 // 脚注：Typst 的 footnote 在页底按全文连续编号。
                 Inline::Footnote(content) => {
@@ -968,11 +1031,13 @@ fn is_safe_url(url: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:")
 }
 
-struct PdfWorld {
+pub(crate) struct PdfWorld {
     library: LazyHash<Library>,
     fonts: &'static FontStore,
-    main: Source,
+    pub(crate) main: Source,
     images: Vec<(FileId, Bytes)>,
+    /// 公式的 mitex 规格（`export::math::SCOPE_FILES`）。
+    scope: Vec<Source>,
 }
 
 fn file_id(path: &str) -> FileId {
@@ -981,7 +1046,7 @@ fn file_id(path: &str) -> FileId {
 }
 
 impl PdfWorld {
-    fn new(source: String, images: Vec<Bytes>, fonts: &'static FontStore) -> Self {
+    pub(crate) fn new(source: String, images: Vec<Bytes>, fonts: &'static FontStore) -> Self {
         let images = images
             .into_iter()
             .enumerate()
@@ -992,6 +1057,10 @@ impl PdfWorld {
             fonts,
             main: Source::new(file_id("/main.typ"), source),
             images,
+            scope: math::SCOPE_FILES
+                .iter()
+                .map(|(path, text)| Source::new(file_id(path), (*text).to_owned()))
+                .collect(),
         }
     }
 }
@@ -1011,15 +1080,21 @@ impl World for PdfWorld {
 
     fn source(&self, id: FileId) -> FileResult<Source> {
         if id == self.main.id() {
-            Ok(self.main.clone())
-        } else {
-            Err(FileError::NotSource)
+            return Ok(self.main.clone());
         }
+        self.scope
+            .iter()
+            .find(|source| source.id() == id)
+            .cloned()
+            .ok_or(FileError::NotSource)
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
         if id == self.main.id() {
             return Ok(Bytes::from_string(self.main.clone()));
+        }
+        if let Some(source) = self.scope.iter().find(|source| source.id() == id) {
+            return Ok(Bytes::from_string(source.clone()));
         }
         self.images
             .iter()
@@ -1863,6 +1938,44 @@ mod tests {
         assert!(!text.contains("未引用"));
         assert_eq!(internal_links(&paged), 3);
         assert_eq!(report.broken_references, vec!["[旧]"]);
+    }
+
+    #[test]
+    fn formulas_are_typeset_and_invalid_ones_fall_back_to_their_source() {
+        let document = build(&request(
+            "",
+            &[("a", vec![1], "公式", "勾股定理 $a^2+b^2=c^2$ 成立。\n\n$$\n\\frac{1}{2}\\sum_{i=1}^{n} x_i\n$$\n\n错误：$\\notacommand{x}$。")],
+        ));
+        let dir = project();
+        let (paged, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        let text = page_texts(&paged).concat();
+        assert!(text.contains("勾股定理") && text.contains("成立"), "{text}");
+        assert!(text.contains("\\notacommand{x}"), "{text}");
+        assert_eq!(report.invalid_formulas, vec!["\\notacommand{x}"]);
+    }
+
+    #[test]
+    fn common_latex_constructs_typeset_without_falling_back() {
+        let formulas = [
+            r"\frac{a}{b} + \sqrt{x} + \sqrt[3]{y}",
+            r"\sum_{i=1}^{n} i = \frac{n(n+1)}{2}",
+            r"\int_0^\infty e^{-x}\,dx = 1",
+            r"\lim_{x \to 0} \frac{\sin x}{x} = 1",
+            r"\alpha\beta\gamma\delta\epsilon\theta\lambda\mu\pi\sigma\phi\omega\Omega",
+            r"\mathbb{R} \mathbf{v} \mathrm{d} \mathcal{L} \text{当且仅当}",
+            r"\left( \frac{1}{2} \right) \cdot \times \leq \geq \neq \approx \infty \partial \nabla",
+            r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}",
+            r"\begin{aligned} f(x) &= x^2 \\ g(x) &= 2x \end{aligned}",
+            r"f(x) = \begin{cases} 1 & x > 0 \\ 0 & x \le 0 \end{cases}",
+            r"\hat{x} \bar{y} \vec{v} \dot{x} \tilde{z} \overline{AB}",
+            r"A \xrightarrow{f} B \Rightarrow C \iff D",
+            r"\{ x \mid x \in \mathbb{N} \}",
+        ];
+        let markdown = formulas.iter().map(|tex| format!("$${tex}$$")).collect::<Vec<_>>().join("\n\n");
+        let document = build(&request("", &[("a", vec![1], "公式", &markdown)]));
+        let dir = project();
+        let (_, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        assert_eq!(report.invalid_formulas, Vec::<String>::new());
     }
 
     fn three_chapters(title: &str) -> Document {
