@@ -286,6 +286,8 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         editorItem('chapter-ref'),
         editorItem('footnote'),
         editorItem('citation'),
+        editorItem('math'),
+        editorItem('math-block'),
         { separator: true },
         // 管理文档的参考文献条目（docs/decisions.md 第 13 节）。全文阅读中也可以打开。
         { id: 'insert:references', label: '参考文献…' },

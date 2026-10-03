@@ -12,6 +12,10 @@ import {
   insertChapterRef,
   insertFootnote,
   insertImage,
+  insertMath,
+  insertMathBlock,
+  selectedMath,
+  setMath,
   setTableCaption,
   setElementId,
   selectedFootnote,
@@ -28,6 +32,8 @@ import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import TextPopover from './TextPopover.vue'
+import MathPopover from './MathPopover.vue'
+import { mathNodeView } from './math_view.ts'
 import { chapterLabels, NO_ELEMENT_START, type ElementStart } from './element_numbering.ts'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { footnoteNumber, footnotesOf } from './footnote_view.ts'
@@ -348,6 +354,8 @@ onMounted(() => {
       image: imageNodeView(resolveImage),
       figure: figureNodeView(resolveImage),
       chapter_ref: chapterRefs.nodeView,
+      math: mathNodeView,
+      math_block: mathNodeView,
     },
     attributes: { class: 'chapter-editor__content document-body', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '正文' },
   })
@@ -402,6 +410,10 @@ function runCommand(command: EditorCommand): void {
     requestCitation()
     return
   }
+  if (command === 'math' || command === 'math-block') {
+    startNewMath(command === 'math-block')
+    return
+  }
   editorCommands[command](view.state, view.dispatch)
   focus()
 }
@@ -429,7 +441,7 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
     const { doc, selection } = view.state
     const inside = hit.inside >= 0 ? doc.nodeAt(hit.inside) : null
     const onFigure = (event.target as Element).closest?.('.editor-figure') && inside?.type === nodes.figure
-    const ref = chapterRefPos(view, event.target) ?? footnotePos(event.target)
+    const ref = chapterRefPos(view, event.target) ?? footnotePos(event.target) ?? mathPos(event.target)
     if (ref !== null) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, ref)))
     else if (onFigure) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, hit.inside)))
     else if (!inSelection(selection, hit.pos) || selection instanceof NodeSelection) {
@@ -443,6 +455,13 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
 /** 选中脚注时按 Enter 编辑它（在 ProseMirror 处理 Enter 之前）。 */
 function onFootnoteKeydown(event: KeyboardEvent): void {
   if (event.key !== 'Enter' || event.isComposing || event.metaKey || event.ctrlKey || !view) return
+  const math = selectedMath(view.state)
+  if (math) {
+    event.preventDefault()
+    event.stopPropagation()
+    editMath(math.pos)
+    return
+  }
   const note = selectedFootnote(view.state)
   if (!note) return
   event.preventDefault()
@@ -493,6 +512,7 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
     ref ? chapterRefMenu(ref.attrs.href as string) : null,
     selectedFootnote(view.state) !== null,
     tableCaptionState(),
+    selectedMath(view.state) !== null,
   )
   const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
@@ -506,6 +526,10 @@ function runMenuItem(id: string): void {
     focus()
   }
   else if (id === 'figure:caption' && view) editSelectedCaption(view)
+  else if (id === 'math:edit' && view) {
+    const math = selectedMath(view.state)
+    if (math) editMath(math.pos)
+  }
   else if (id === 'table:caption') {
     const pos = tableAtSelection()
     if (pos !== null) editTableCaption(pos)
@@ -707,6 +731,73 @@ function cancelFootnote(): void {
   focus()
 }
 
+/**
+ * 公式的编辑（docs/decisions.md 第 14 节）：插入时先在浮层中填写 LaTeX，完成后才插入（取消不留下空公式）；
+ * 已有公式双击、选中后按 Enter 或右键“编辑公式…”时编辑；清空即删除。修改是一个可撤销的事务。
+ */
+const mathEditor = shallowRef<{
+  readonly chapterId: ChapterId
+  /** 已有公式的位置；新公式为 null。 */
+  readonly pos: number | null
+  readonly block: boolean
+  readonly tex: string
+  readonly anchor: { readonly x: number; readonly y: number }
+} | null>(null)
+
+function startNewMath(block: boolean): void {
+  if (!view || !(block ? insertMathBlock('x') : insertMath('x'))(view.state)) return
+  const { from, to } = view.state.selection
+  const caret = view.coordsAtPos(to)
+  // 选中的文字作为行内公式的初始内容。
+  const tex = block ? '' : view.state.doc.textBetween(from, to, ' ', '')
+  mathEditor.value = { chapterId: currentId, pos: null, block, tex, anchor: { x: caret.left, y: caret.bottom } }
+}
+
+function editMath(pos: number): void {
+  if (!view) return
+  const node = view.state.doc.nodeAt(pos)
+  if (node?.type !== nodes.math && node?.type !== nodes.math_block) return
+  const dom = view.nodeDOM(pos)
+  const rect = dom instanceof Element ? dom.getBoundingClientRect() : view.coordsAtPos(pos)
+  mathEditor.value = {
+    chapterId: currentId,
+    pos,
+    block: node.type === nodes.math_block,
+    tex: node.attrs.tex as string,
+    anchor: { x: rect.left, y: rect.bottom },
+  }
+}
+
+function commitMath(tex: string): void {
+  const editing = mathEditor.value
+  mathEditor.value = null
+  if (!view || !editing || editing.chapterId !== currentId) return
+  if (editing.pos === null) {
+    if (tex !== '') (editing.block ? insertMathBlock(tex) : insertMath(tex))(view.state, view.dispatch)
+  } else if (tex === '') {
+    const node = view.state.doc.nodeAt(editing.pos)
+    if (node) view.dispatch(view.state.tr.delete(editing.pos, editing.pos + node.nodeSize))
+  } else {
+    setMath(editing.pos, tex)(view.state, view.dispatch)
+  }
+  focus()
+}
+
+function cancelMath(): void {
+  mathEditor.value = null
+  focus()
+}
+
+/** 点在公式上时它在文档中的位置。 */
+function mathPos(target: EventTarget | null): number | null {
+  if (!view || !(target instanceof Element)) return null
+  const dom = target.closest('.math-inline, .math-block')
+  if (!dom || !view.dom.contains(dom)) return null
+  const pos = view.posAtDOM(dom, 0)
+  const node = view.state.doc.nodeAt(pos)
+  return node?.type === nodes.math || node?.type === nodes.math_block ? pos : null
+}
+
 /** 点在脚注上时它在文档中的位置。 */
 function footnotePos(target: EventTarget | null): number | null {
   if (!view || !(target instanceof Element)) return null
@@ -732,6 +823,12 @@ function onFootnoteClick(event: MouseEvent): void {
     return
   }
   if (event.detail !== 2) return
+  const math = mathPos(event.target)
+  if (math !== null) {
+    event.preventDefault()
+    editMath(math)
+    return
+  }
   const pos = footnotePos(event.target)
   if (pos === null) return
   event.preventDefault()
@@ -944,6 +1041,15 @@ defineExpose({
         ></div>
       </div>
     </div>
+    <MathPopover
+      v-if="mathEditor"
+      :anchor="mathEditor.anchor"
+      :label="mathEditor.block ? '公式块' : '行内公式'"
+      :tex="mathEditor.tex"
+      :display="mathEditor.block"
+      @commit="commitMath"
+      @cancel="cancelMath"
+    />
     <TextPopover
       v-if="footnoteEditor"
       :anchor="footnoteEditor.anchor"

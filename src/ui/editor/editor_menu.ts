@@ -43,6 +43,9 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   footnote: { label: '脚注…' },
   // 文献引用同样没有自然的单键，只在插入菜单与右键菜单中。
   citation: { label: '文献引用…' },
+  // 公式与 Pages（⌥⌘E）一样没有“⌘ + 单键”，只在插入菜单与右键菜单中。
+  math: { label: '行内公式…' },
+  'math-block': { label: '公式块…' },
   'row-before': { label: '在上方插入行' },
   'row-after': { label: '在下方插入行' },
   'column-before': { label: '在左侧插入列' },
@@ -146,7 +149,10 @@ export function editorContextMenu(
   footnote = false,
   /** 光标在表格中时表格是否有标题；不在表格中时为 null。 */
   tableCaption: boolean | null = null,
+  /** 选中了公式。 */
+  math = false,
 ): MenuEntry[] {
+  if (math) return [{ id: 'math:edit', label: '编辑公式…' }, { separator: true }, { role: 'cut' }, { role: 'copy' }]
   if (chapterRef !== null) return chapterRefMenu(state, chapterRef)
   if (footnote) {
     return [{ id: 'footnote:edit', label: '编辑脚注…' }, { separator: true }, { role: 'cut' }, { role: 'copy' }]
@@ -199,6 +205,7 @@ export function editorContextMenu(
       commandEntry('chapter-ref', state, { label: '插入章节引用…' }),
       commandEntry('footnote', state, { label: '插入脚注…' }),
       commandEntry('citation', state, { label: '插入文献引用…' }),
+      commandEntry('math', state, { label: '插入行内公式…' }),
     )
   }
   return entries

@@ -267,9 +267,24 @@ function blockInputRules(): Plugin {
       (match, node) => node.childCount + node.attrs.order === Number(match[1]),
     ),
     textblockTypeInputRule(/^```$/, nodes.code_block),
+    mathInputRule(),
     horizontalRuleRule(nodes.horizontal_rule),
   ]
   return inputRules({ rules })
+}
+
+/**
+ * 输入 $…$（与 Markdown 的规则相同：开头 $ 后、结尾 $ 前不是空白，前面不是另一个 $ 或反斜杠）变成行内公式。
+ * 代码块与行内代码中不转换。刚转换后按 Backspace 或 ⌘Z 回到输入的文字。
+ */
+function mathInputRule(): InputRule {
+  return new InputRule(/(^|[^$\\])\$([^\s$](?:[^$]*[^\s$])?)\$$/, (state, match, start, end) => {
+    const $start = state.doc.resolve(start)
+    if ($start.parent.type.spec.code || $start.marks().some((mark) => mark.type.spec.code)) return null
+    const from = start + match[1].length
+    if (!$start.parent.canReplaceWith($start.index(), $start.index(), nodes.math)) return null
+    return state.tr.replaceWith(from, end, nodes.math.create({ tex: match[2] }))
+  })
 }
 
 /** 空段落中输入 --- 变成分隔线，光标进入其后的新段落。 */

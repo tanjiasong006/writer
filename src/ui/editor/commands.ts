@@ -50,6 +50,8 @@ export type EditorCommand =
   | 'chapter-ref'
   | 'footnote'
   | 'citation'
+  | 'math'
+  | 'math-block'
   | 'row-before'
   | 'row-after'
   | 'column-before'
@@ -355,6 +357,50 @@ export function setElementId(kind: 'figure' | 'table', index: number, id: string
   }
 }
 
+/**
+ * 行内公式（docs/decisions.md 第 14 节）：替换选中的内容，之后光标在公式之后。代码块中不能插入。
+ */
+export function insertMath(tex: string): Command {
+  return (state, dispatch) => {
+    const { $from } = state.selection
+    const parent = $from.parent
+    if (!parent.inlineContent || parent.type.spec.code || !parent.canReplaceWith($from.index(), $from.index(), nodes.math)) {
+      return false
+    }
+    if (dispatch) dispatch(state.tr.replaceSelectionWith(nodes.math.create({ tex }), true).scrollIntoView())
+    return true
+  }
+}
+
+/** 公式块：作为独立的一块插入（与插入表格相同的位置规则），光标放在其后的段落中。 */
+export function insertMathBlock(tex: string): Command {
+  const block = nodes.math_block.create({ tex })
+  return insertBlock(block, (tr, start) => {
+    const after = start + block.nodeSize
+    if (tr.doc.resolve(after).nodeAfter?.type !== nodes.paragraph) tr.insert(after, nodes.paragraph.create())
+    tr.setSelection(TextSelection.create(tr.doc, after + 1))
+  })
+}
+
+/** 修改 pos 处公式（行内或公式块）的 LaTeX。 */
+export function setMath(pos: number, tex: string): Command {
+  return (state, dispatch) => {
+    const node = state.doc.nodeAt(pos)
+    if (node?.type !== nodes.math && node?.type !== nodes.math_block) return false
+    if (node.attrs.tex === tex) return true
+    if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, tex }))
+    return true
+  }
+}
+
+/** 选中的公式（行内或公式块）；没有时为 null。 */
+export function selectedMath(state: EditorState): { readonly pos: number; readonly node: Node } | null {
+  const { selection } = state
+  if (!(selection instanceof NodeSelection)) return null
+  const type = selection.node.type
+  return type === nodes.math || type === nodes.math_block ? { pos: selection.from, node: selection.node } : null
+}
+
 /** 选中的脚注；没有选中脚注时为 null。 */
 export function selectedFootnote(state: EditorState): { readonly pos: number; readonly node: Node } | null {
   const { selection } = state
@@ -436,7 +482,9 @@ const removeColumn = thenSelectCell(
   (before, after) => ({ row: before.top, col: Math.min(before.left, after.width - 1) }),
 )
 
-export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote' | 'citation'>, Command>> = {
+export const editorCommands: Readonly<
+  Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote' | 'citation' | 'math' | 'math-block'>, Command>
+> = {
   undo,
   redo,
   bold: toggleBold,
@@ -486,6 +534,8 @@ export function commandState(state: EditorState): CommandState {
     'chapter-ref': plain(insertChapterRef('writer:chapter/_', '')),
     footnote: plain(insertFootnote('')),
     citation: plain(insertChapterRef('writer:cite/_', '')),
+    math: plain(insertMath('x')),
+    'math-block': plain(insertMathBlock('x')),
     'row-before': plain(rowBefore),
     'row-after': plain(rowAfter),
     'column-before': plain(columnBefore),

@@ -6,6 +6,7 @@ import { highlightedCodeDOM } from '../editor/code_highlight.ts'
 import { staticImageDOM, type ImageResolver } from '../editor/image_view.ts'
 import { staticChapterRefDOM, type ChapterRefLabel } from '../editor/chapter_ref_view.ts'
 import { footnoteListDOM, footnotesOf } from '../editor/footnote_view.ts'
+import { staticMathDOM } from '../editor/math_view.ts'
 
 /**
  * 章节正文 → 只读展示的 DOM：与编辑器使用同一个 Markdown 解析与 schema，
@@ -50,6 +51,8 @@ export function renderChapterBody(
       image: (node) => staticImageDOM(node, resolveImage),
       code_block: (node) => highlightedCodeDOM(node),
       chapter_ref: (node) => staticChapterRefDOM(node, refLabel),
+      math: (node) => staticMathDOM(node),
+      math_block: (node) => staticMathDOM(node),
     },
     base.marks,
   )

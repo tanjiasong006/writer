@@ -16,7 +16,7 @@
 - 后续正文编辑能力优先基于 ProseMirror schema / command / plugin 扩展，而不是通过 Markdown 文本操作实现。
 - Markdown 继续作为正文的持久化格式；领域模型（正文是 Markdown 字符串）、正文磁盘格式及 Rust 导出内容解析保持不变。
   Markdown ⇄ ProseMirror 文档的转换只发生在编辑器层（`ui/editor/markdown.ts`）。
-- Markdown 方言与导出的 pulldown-cmark 一致：CommonMark + GFM 表格、删除线、任务列表、脚注（第 11 节）；原始 HTML 与 Markdown 标题视为文字
+- Markdown 方言与导出的 pulldown-cmark 一致：CommonMark + GFM 表格、删除线、任务列表、脚注（第 11 节）、公式（第 14 节）；原始 HTML 与 Markdown 标题视为文字
   （见第 8 节“正文不支持标题与 HTML”）。
 - schema 只包含 Markdown 能保存、且 Rust 渲染器能渲染的结构；不能用 Markdown 保存的能力（合并单元格、
   单元格内多段落、列宽等）不进入编辑器。需要新增此类能力时，先与产品负责人确认是否调整持久化格式。
@@ -368,3 +368,18 @@
 - **输出**：正文之后一个不编号的一级标题“参考文献”，按编号列出被引用的条目（未被引用的不输出）；
   引用是上标的“[编号]”，链接到条目（Word 书签 / PDF 标签）。PDF 目录中包含“参考文献”。
 - 契约：共享 fixture `citations`，语义投影为 `{cite: 标识, cached}`。
+
+## 14. 数学公式（2026-10-03 实施，待产品负责人确认）
+
+- **持久化**：`$…$` 行内公式、`$$…$$` 行间公式，内容是 LaTeX（与 GitHub、Typora、pulldown-cmark 的 ENABLE_MATH 相同）。
+  只含一个 `$$…$$` 的段落是公式块。规则：开头的 `$` 后与结尾的 `$` 前不是空白，结束的 `$` 与开始的处在同一层花括号中，
+  公式中不能有未转义的 `$`。编辑器写出时文字中的 `$` 一律转义（`\$`）。
+- 已接受的变化：已有正文中成对的 `$`（如“$5 与 6$”）从此显示为公式；不需要时写成 `\$`。
+- **编辑器**：行内公式与公式块是原子节点，用 KaTeX 显示（无法识别的写法以红色原文显示）；
+  “插入 → 行内公式… / 公式块…”与右键菜单（无快捷键，与 Pages 相同），先在浮层中填写 LaTeX（下方实时预览），
+  Enter 完成，⇧Enter 换行；双击、选中后按 Enter 或右键“编辑公式…”编辑，清空即删除。输入 `$…$` 自动转换为行内公式。
+- **输出**：PDF 用 mitex 把 LaTeX 转换为 Typst 公式排版（规格文件 vendored，见 `src-tauri/vendor/mitex-specs/WRITER-PATCH.md`）；
+  Word 中每个公式用同样的 Typst 排版渲染为图片嵌入（接收者不能编辑公式，不生成 OMML）。
+  转换或排版失败的公式以红色 LaTeX 原文输出，导出提示中说明数量（报告 `invalidFormulas`），导出不失败。
+  编辑展示（KaTeX）与输出（Typst）是两套排版，支持的命令范围略有不同。
+- 契约：共享 fixture `math`，语义投影为 `{math: tex, display}` 与 `{type: "math", tex}`。

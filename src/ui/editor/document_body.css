@@ -293,6 +293,25 @@
   color: var(--color-doc-text);
 }
 
+/* 公式（math_view.ts，KaTeX）：行内公式随正文字号；公式块居中，与前后段落留出间距，过宽时横向滚动。 */
+.document-body .math-inline {
+  white-space: nowrap;
+}
+
+.document-body .math-block {
+  margin: 0.8em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+.document-body .math-inline.is-invalid,
+.document-body .math-block.is-invalid {
+  color: var(--color-danger-text);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
 /* 文献引用：上标的“[编号]”，不加下划线。 */
 .document-body .chapter-ref.is-citation {
   font-size: 0.72em;

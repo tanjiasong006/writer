@@ -295,3 +295,16 @@ export const FiguresAndTables: Story = {
       '| 没有标题的表格 |\n| --- |\n| 不编号 |\n',
   },
 }
+
+/** 公式：行内公式随正文排列，公式块居中；无法识别的写法以红色原文显示。双击编辑，输入 $…$ 也会变成公式。 */
+export const Formulas: Story = {
+  args: {
+    chapterId: 'formulas',
+    number: '3',
+    title: '模型',
+    content:
+      '设样本均值为 $\\bar{x} = \\frac{1}{n}\\sum_{i=1}^{n} x_i$，方差为 $s^2$。\n\n' +
+      '$$\n\\hat{\\beta} = (X^\\top X)^{-1} X^\\top y\n$$\n\n' +
+      '写错的公式：$\\notacommand{x}$。\n',
+  },
+}

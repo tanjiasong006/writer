@@ -870,7 +870,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 1. ~~脚注：Markdown 解析未开启脚注，导出为字面 `[^1]`（`render/markdown.rs`）。~~（完成，见下方“P1-1 脚注”）
 2. ~~图表自动编号与引用（"见图 3""见表 2"）：已有图注，未发现自动编号，也不能像章节一样被交叉引用。~~（完成，见下方“P1-2 图表编号与引用”）
 3. ~~参考文献 / 文献引用（未发现）。~~（完成，见下方“P1-3 参考文献”）
-4. 数学公式（未发现）：Typst 原生支持，PDF 成本低；Word 需要转换为 OMML。
+4. ~~数学公式（未发现）：Typst 原生支持，PDF 成本低；Word 需要转换为 OMML。~~（完成，见下方“P1-4 数学公式”）
 5. Word 导出目录：PDF 已有目录选项，Word 未发现。
 6. 版本快照 / 历史（未发现）。
 7. 外部修改检测（文件监听 + 冲突提示，known-risks #4）。
@@ -912,14 +912,16 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 验证：著录格式与编号、manifest、导出请求、契约 fixture `citations`、Rust 编号与 Word / PDF 输出、工作区端到端
   （插入与编号后移、对话框新建 / 取消 / 删除确认、浮层中添加）测试；Story `CitationPicker`、`ReferencesDialog`（Storybook 中目视检查了对话框）。
 
-#### P1-4 数学公式（进行中，2026-10-03）
+#### P1-4 数学公式（完成，2026-10-03）
 
-- 已完成：Markdown `$…$` / `$$…$$`（pulldown-cmark ENABLE_MATH 规则，编辑器 markdown-it 规则相同，共享 fixture `math`）；
-  schema `math` / `math_block`，写出时文字中的 `$` 转义；Rust `Inline::Math`、`Block::as_math`；
-  PDF 用 mitex 转换为 Typst 公式（vendored 规格见 `src-tauri/vendor/mitex-specs/WRITER-PATCH.md`，含 Typst 0.15 兼容补丁），
-  出错的公式回退为红色原文并列入报告 `invalidFormulas`；Word 中公式用 Typst 渲染为 PNG 嵌入。
-- 未完成：编辑器中用 KaTeX 显示公式（节点视图）、插入 / 编辑公式的入口与浮层、全文阅读显示、前端导出提示中的
-  `invalidFormulas`、Story、decisions 第 14 节文档。
+- 规则见 decisions 第 14 节。Markdown：编辑器 `writer_math` 行内规则与 `writer_math_block`（与 pulldown-cmark ENABLE_MATH 相同），
+  写出 `$…$` / `$$…$$`，文字中的 `$` 转义；schema `math` / `math_block`。
+- 编辑器：`math_view.ts`（KaTeX，`renderToString`）、`MathPopover.vue`（LaTeX + 实时预览）、命令 `math` / `math-block`、
+  `insertMath` / `insertMathBlock` / `setMath`、输入规则 `$…$`；全文阅读同样显示。
+- Rust：`Inline::Math`、`Block::as_math`；`export::math`（mitex 转换、vendored 规格与 Typst 0.15 兼容补丁、Word 中渲染为 PNG）；
+  PDF 公式定义放在源码开头，出错的公式改用替代后重排；报告 `invalidFormulas`，导出提示中说明。
+- 验证：解析 / 写出、共享 fixture `math`、编辑交互（显示、插入、编辑、删除、撤销、输入规则、阅读）、常用 LaTeX 写法在 PDF 中都能排版、
+  Word 中嵌入图片、失败回退测试；Story `ChapterEditor/Formulas`、`MathPopover`（Storybook 中目视检查了公式显示）。
 
 ### P2：体验提升
 

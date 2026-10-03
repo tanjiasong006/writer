@@ -55,6 +55,8 @@ export interface ExportReport {
   readonly missingImages: readonly string[]
   /** 失效的章节引用（目标章节不存在或地址格式错误）的链接文字，已按文字输出。 */
   readonly brokenReferences: readonly string[]
+  /** 无法排版的公式（LaTeX 原文），已按原文输出；旧的报告中没有这一项。 */
+  readonly invalidFormulas?: readonly string[]
 }
 
 export interface DocumentOutput {

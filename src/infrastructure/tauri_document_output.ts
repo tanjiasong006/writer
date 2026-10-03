@@ -16,10 +16,14 @@ export function createTauriDocumentOutput(): DocumentOutput {
           : invoke<unknown>('export_pdf', { ...args, layout: pdfLayout }),
       )
       if (!result.ok) return result
-      const raw = result.value as { missingImages?: unknown; brokenReferences?: unknown } | null
+      const raw = result.value as { missingImages?: unknown; brokenReferences?: unknown; invalidFormulas?: unknown } | null
       return {
         ok: true,
-        value: { missingImages: strings(raw?.missingImages), brokenReferences: strings(raw?.brokenReferences) },
+        value: {
+          missingImages: strings(raw?.missingImages),
+          brokenReferences: strings(raw?.brokenReferences),
+          invalidFormulas: strings(raw?.invalidFormulas),
+        },
       }
     },
     async previewPdf(projectPath, request, pdfLayout) {
