@@ -13,7 +13,9 @@ import SaveStatus from './SaveStatus.vue'
 import DocumentInfoDialog from './DocumentInfoDialog.vue'
 import PdfLayoutDialog from './PdfLayoutDialog.vue'
 import DocumentTitle from './DocumentTitle.vue'
-import ChapterEditor, { type ChapterRefRequest } from '../editor/ChapterEditor.vue'
+import ChapterEditor, { type ChapterRefRequest, type EditorStats } from '../editor/ChapterEditor.vue'
+import WordCountPopover from './WordCountPopover.vue'
+import { useDocumentCount } from './use_word_count.ts'
 import ChapterRefPicker from '../editor/ChapterRefPicker.vue'
 import { chapterRefAddress, type ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
 import { useChapterJumps } from './use_chapter_jumps.ts'
@@ -356,6 +358,31 @@ async function openFind(withReplace: boolean): Promise<void> {
 function closeFind(): void {
   find.close()
   editor.value?.focus()
+}
+
+/** 字数：编辑器报告当前章节与选区，全文按需计算（打开字数统计时）。 */
+const stats = shallowRef<EditorStats | null>(null)
+const documentCount = useDocumentCount({
+  contents: () => document.value.contents,
+  refLabel: () => refLabel.value,
+  live: () => stats.value,
+})
+/** 工具栏中字数显示的文字：有选中内容时是选中的字数。 */
+const countLabel = computed(() => {
+  const current = stats.value
+  if (!current || current.chapterId !== selectedId.value) return ''
+  const format = (value: number) => value.toLocaleString('zh-CN')
+  return current.selection ? `已选 ${format(current.selection.words)} 字` : `${format(current.chapter.words)} 字`
+})
+const countPopover = shallowRef<{ readonly right: number; readonly bottom: number } | null>(null)
+
+function openCountPopover(event: MouseEvent): void {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  countPopover.value = { right: window.innerWidth - rect.right, bottom: rect.bottom }
+}
+
+function closeCountPopover(): void {
+  countPopover.value = null
 }
 
 /** 撤销删除章节（ui-spec §23）。 */
@@ -701,6 +728,20 @@ async function createFirstChapter(): Promise<void> {
 
         <div class="workspace__spacer" data-tauri-drag-region></div>
 
+        <button
+          v-if="selectedChapter && !reading && countLabel"
+          type="button"
+          class="workspace__count"
+          :class="{ 'workspace__count--open': countPopover !== null }"
+          tabindex="0"
+          aria-haspopup="dialog"
+          :aria-expanded="countPopover !== null"
+          title="字数统计"
+          @click="openCountPopover"
+        >
+          {{ countLabel }}
+        </button>
+
         <div v-if="selectedChapter && !reading" class="workspace__group" role="toolbar" aria-label="插入">
           <button
             type="button"
@@ -789,6 +830,7 @@ async function createFirstChapter(): Promise<void> {
           :ref-label="refLabel"
           :find-query="find.open.value && !reading ? find.query.value : ''"
           @find-status="find.setSelected"
+          @stats="stats = $event"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
           @request-image="insertImage"
           @request-chapter-ref="requestChapterRef"
@@ -857,6 +899,15 @@ async function createFirstChapter(): Promise<void> {
         </Toast>
       </div>
     </main>
+
+    <WordCountPopover
+      v-if="countPopover && stats"
+      :anchor="countPopover"
+      :selection="stats.selection"
+      :chapter="stats.chapter"
+      :document="documentCount"
+      @close="closeCountPopover"
+    />
 
     <ChapterRefReportDialog
       v-if="refReport"
@@ -1046,6 +1097,34 @@ async function createFirstChapter(): Promise<void> {
   flex: 1;
   align-self: stretch;
   min-width: var(--space-5);
+}
+
+/* 字数：安静的次级文字，点击查看本章与全文的统计。宽度随数字变化时不推动右侧按钮（右对齐、等宽数字）。 */
+.workspace__count {
+  flex: none;
+  height: var(--control-h-m);
+  margin-right: var(--space-4);
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-m);
+  background: none;
+  color: var(--color-text-tertiary);
+  font: inherit;
+  font-size: var(--text-s);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
+}
+
+.workspace__count:hover,
+.workspace__count--open {
+  background: var(--color-fill-hover);
+  color: var(--color-text-secondary);
+}
+
+.workspace__count:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }
 
 .workspace__group {

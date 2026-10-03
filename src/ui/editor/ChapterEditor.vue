@@ -28,6 +28,8 @@ import { NO_CHAPTER_REFS, chapterRefNodeViews, chapterRefPos, type ChapterRefLab
 import { parseChapterRefAddress, type ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
 import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from './editor_theme.ts'
 import { topBlock, type BlockPosition } from './block_position.ts'
+import { countDoc, countSelection } from './text_stats.ts'
+import type { TextCount } from '../../domain/word_count/word_count.ts'
 import {
   findDecorations,
   findMatches,
@@ -83,7 +85,17 @@ const emit = defineEmits<{
   'open-chapter': [chapterId: ChapterId]
   /** 查找中：选区恰好是第几个匹配（-1 表示不是匹配），选区或正文变化时发出。 */
   'find-status': [chapterId: ChapterId, selected: number]
+  /** 当前章节与选区的字数（text_stats.ts），正文、选区或章节变化时发出。 */
+  stats: [stats: EditorStats]
 }>()
+
+/** 编辑器报告的字数。 */
+export interface EditorStats {
+  readonly chapterId: ChapterId
+  readonly chapter: TextCount
+  /** 选中内容的字数；没有选中内容时为 null。 */
+  readonly selection: TextCount | null
+}
 
 /** 选择引用目标时的上下文。 */
 export interface ChapterRefRequest {
@@ -112,6 +124,9 @@ watch(
   (label) => {
     documents.refLabel = label ?? NO_CHAPTER_REFS
     chapterRefs.setLabel(documents.refLabel)
+    // 引用的文字变了，字数可能随之变化。
+    statsCache = null
+    reportStats()
   },
 )
 /** 每个章节离开时的滚动位置；回到该章节时恢复，继续在原处写作。 */
@@ -133,6 +148,34 @@ function dispatchTransaction(tr: Transaction): void {
   const text = documents.update(currentId, state)
   if (text !== null) emit('change', currentId, text)
   reportFind()
+  reportStats()
+}
+
+/** 字数：章节的字数按文档缓存，只移动光标时不重新计算。 */
+let statsCache: { readonly doc: EditorState['doc']; readonly count: TextCount } | null = null
+let lastStats: EditorStats | null = null
+
+function reportStats(): void {
+  if (!view) return
+  const { doc, selection } = view.state
+  const label = documents.refLabel ?? NO_CHAPTER_REFS
+  if (statsCache?.doc !== doc) statsCache = { doc, count: countDoc(doc, label) }
+  const next: EditorStats = {
+    chapterId: currentId,
+    chapter: statsCache.count,
+    selection: countSelection(doc, selection.from, selection.to, label),
+  }
+  if (
+    lastStats?.chapterId === next.chapterId &&
+    sameCount(lastStats.chapter, next.chapter) &&
+    sameCount(lastStats.selection, next.selection)
+  ) return
+  lastStats = next
+  emit('stats', next)
+}
+
+function sameCount(a: TextCount | null, b: TextCount | null): boolean {
+  return a === b || (a !== null && b !== null && a.words === b.words && a.characters === b.characters)
 }
 
 /** 查找：当前文档中的匹配（按文档缓存，输入时只在文档变化后重新计算）。 */
@@ -200,6 +243,7 @@ onMounted(() => {
     attributes: { class: 'chapter-editor__content document-body', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '正文' },
   })
   showState(state)
+  reportStats()
 })
 
 onBeforeUnmount(() => {
@@ -221,6 +265,7 @@ watch(
       showState(next)
       scroller.value.scrollTop = reused ? (scrolls.get(chapterId) ?? 0) : 0
       reportFind()
+      reportStats()
       return
     }
     if (documents.isCurrent(chapterId, text)) return
