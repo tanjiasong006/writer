@@ -149,8 +149,9 @@ defineExpose({ focusQuery })
     <div v-if="showReplace" class="find-bar__row">
       <span class="find-bar__disclosure-space" aria-hidden="true"></span>
       <div class="find-bar__field">
+        <!-- 与查找框的文字左边缘对齐。 -->
         <input
-          class="find-bar__input"
+          class="find-bar__input find-bar__input--indented"
           type="text"
           :value="replacement"
           placeholder="替换为"
@@ -237,7 +238,8 @@ defineExpose({ focusQuery })
   user-select: text;
 }
 
-.find-bar__field-icon + .find-bar__input {
+.find-bar__field-icon + .find-bar__input,
+.find-bar__input--indented {
   padding-left: calc(var(--space-3) + var(--icon-s) + var(--space-3));
 }
 

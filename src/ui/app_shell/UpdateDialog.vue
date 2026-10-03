@@ -120,9 +120,7 @@ onBeforeUnmount(() => {
       <h2 id="update-dialog-title" class="update-dialog__title">{{ title }}</h2>
       <p id="update-dialog-text" class="update-dialog__text">{{ text }}</p>
       <p v-if="detail" class="update-dialog__detail">{{ detail }}</p>
-      <div v-if="state.kind === 'available' && state.notes" class="update-dialog__notes" tabindex="0" aria-label="更新说明">
-        {{ state.notes }}
-      </div>
+      <div v-if="state.kind === 'available' && state.notes" class="update-dialog__notes" tabindex="0" aria-label="更新说明">{{ state.notes.trim() }}</div>
       <div class="update-dialog__actions">
         <template v-if="state.kind === 'available'">
           <button type="button" class="update-dialog__button" @click="emit('close')">稍后</button>

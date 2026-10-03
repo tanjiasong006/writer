@@ -62,7 +62,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
         </tr>
       </tbody>
     </table>
-    <p class="word-count__note">汉字与中文标点逐字计，英文按词计；章节标题不计入。</p>
+    <p class="word-count__note">汉字与中文标点逐字计，英文按词计，不含章节标题。</p>
   </div>
 </template>
 
@@ -124,7 +124,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown, true))
 }
 
 .word-count__note {
-  max-width: 280px;
+  /* 不撑宽浮层：宽度跟随上方的表格。 */
+  width: 0;
+  min-width: 100%;
   margin: var(--space-4) 0 0;
   color: var(--color-text-tertiary);
   font-size: var(--text-s);
