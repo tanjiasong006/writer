@@ -10,6 +10,11 @@ import {
 } from '../../domain/chapter_numbering/chapter_numbering.ts'
 import type { DocumentInfo, WriterDocument } from '../../domain/document/document.ts'
 import {
+  serializeReference,
+  validateReferences,
+  type ReferenceEntry,
+} from '../../domain/bibliography/bibliography.ts'
+import {
   PDF_LAYOUT_KEYS,
   isPdfLayoutValue,
   type PdfLayoutSettings,
@@ -34,6 +39,8 @@ export interface Manifest {
   readonly author?: string
   /** PDF 排版配置中用户改过的项；没有改动时省略。 */
   readonly pdf?: PdfLayoutSettings
+  /** 参考文献条目（只写出非空字段）；没有条目时省略。 */
+  readonly references?: ReadonlyArray<Record<string, string>>
   readonly chapters: ChapterTree
   /** ChapterId → 当前正文文件名（相对 content/）。 */
   readonly files: Readonly<Record<ChapterId, string>>
@@ -112,6 +119,7 @@ export function buildManifest(document: WriterDocument, pdfLayout: PdfLayoutSett
     ...(document.subtitle === '' ? {} : { subtitle: document.subtitle }),
     ...(document.author === '' ? {} : { author: document.author }),
     ...(Object.keys(pdf).length === 0 ? {} : { pdf }),
+    ...(document.references.length === 0 ? {} : { references: document.references.map(serializeReference) }),
     chapters: document.tree,
     files: Object.fromEntries(contentFiles(document.tree)),
   }
@@ -124,6 +132,7 @@ export type ManifestIssue =
   | { readonly code: 'title-invalid' }
   | { readonly code: 'subtitle-invalid' }
   | { readonly code: 'author-invalid' }
+  | { readonly code: 'references-invalid' }
   | { readonly code: 'tree-invalid'; readonly issues: readonly TreeIssue[] }
   | { readonly code: 'files-invalid' }
   | { readonly code: 'file-name-invalid'; readonly chapterId: ChapterId }
@@ -133,6 +142,7 @@ export type ManifestIssue =
 
 export interface ParsedManifest {
   readonly info: DocumentInfo
+  readonly references: readonly ReferenceEntry[]
   readonly pdfLayout: PdfLayoutSettings
   readonly tree: ChapterTree
   readonly files: ReadonlyMap<ChapterId, string>
@@ -160,6 +170,9 @@ export function parseManifest(raw: unknown): ParseManifestResult {
   if (m.subtitle !== undefined && typeof m.subtitle !== 'string') return fail({ code: 'subtitle-invalid' })
   if (m.author !== undefined && typeof m.author !== 'string') return fail({ code: 'author-invalid' })
   const info = { title: m.title, subtitle: m.subtitle ?? '', author: m.author ?? '' }
+  // 参考文献是内容：存在但不合法时拒绝打开（docs/project-format.md 第 3.3 节）。
+  const references = m.references === undefined ? [] : validateReferences(m.references)
+  if (references === null) return fail({ code: 'references-invalid' })
 
   const tree = validateTree(m.chapters)
   if (!tree.ok) return fail({ code: 'tree-invalid', issues: tree.issues })
@@ -185,7 +198,7 @@ export function parseManifest(raw: unknown): ParseManifestResult {
     if (!files.has(chapterId)) return fail({ code: 'file-missing', chapterId })
   }
 
-  return { ok: true, manifest: { info, pdfLayout: parsePdfLayout(m.pdf), tree: tree.tree, files } }
+  return { ok: true, manifest: { info, references, pdfLayout: parsePdfLayout(m.pdf), tree: tree.tree, files } }
 }
 
 /**

@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import type { ChapterId } from '../domain/chapter_tree/chapter_tree.ts'
-import { createDocument, setDocumentInfo } from '../domain/document/document.ts'
+import { createDocument, setDocumentInfo, setReferences } from '../domain/document/document.ts'
 import type {
   OpenedProject,
   ProjectStorage,
@@ -137,7 +137,7 @@ export function decodeOpened(raw: unknown): StorageResult<OpenedProject> {
     texts.set(id, text)
   }
 
-  const { info, pdfLayout, tree } = parsed.manifest
+  const { info, references, pdfLayout, tree } = parsed.manifest
   const document = createDocument(info.title, tree, texts)
   if (!document.ok) return invalid(document.reason)
 
@@ -146,6 +146,10 @@ export function decodeOpened(raw: unknown): StorageResult<OpenedProject> {
     : []
   return {
     ok: true,
-    value: { document: setDocumentInfo(document.document, info), pdfLayout, orphanFiles: orphans },
+    value: {
+      document: setReferences(setDocumentInfo(document.document, info), references),
+      pdfLayout,
+      orphanFiles: orphans,
+    },
   }
 }

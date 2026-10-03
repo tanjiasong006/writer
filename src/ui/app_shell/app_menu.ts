@@ -40,7 +40,7 @@ export interface AppMenuContext {
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find-replace'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete'] as const
-const INSERT_ACTIONS = ['update-chapter-refs'] as const
+const INSERT_ACTIONS = ['update-chapter-refs', 'references'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back', 'forward'] as const
 const APP_ACTIONS = ['check-update'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
@@ -285,7 +285,10 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         editorItem('image'),
         editorItem('chapter-ref'),
         editorItem('footnote'),
+        editorItem('citation'),
         { separator: true },
+        // 管理文档的参考文献条目（docs/decisions.md 第 13 节）。全文阅读中也可以打开。
+        { id: 'insert:references', label: '参考文献…' },
         // 刷新全部章节引用的链接文字并列出失效引用（docs/decisions.md 第 9 节）。不设快捷键。
         { id: 'insert:update-chapter-refs', label: '更新交叉引用', disabled: !context.hasChapters || context.reading },
       ],

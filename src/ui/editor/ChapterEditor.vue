@@ -96,6 +96,8 @@ const emit = defineEmits<{
    * current 是选中引用当前的目标与格式（失效或插入时为 null / 只有格式）。
    */
   'request-chapter-ref': [chapterId: ChapterId, request: ChapterRefRequest]
+  /** 插入文献引用（选中文献引用时是更改它）：由上层在 anchor 处选择文献后调用 insertChapterRef。 */
+  'request-citation': [chapterId: ChapterId, request: CitationRequest]
   /** 前往章节引用的目标章节（⌘ + 单击、右键菜单“前往”）。 */
   'open-chapter': [chapterId: ChapterId]
   /** 查找中：选区恰好是第几个匹配（-1 表示不是匹配），选区或正文变化时发出。 */
@@ -110,6 +112,14 @@ export interface EditorStats {
   readonly chapter: TextCount
   /** 选中内容的字数；没有选中内容时为 null。 */
   readonly selection: TextCount | null
+}
+
+/** 选择文献时的上下文：浮层的位置与选中的文献引用当前的条目。 */
+export interface CitationRequest {
+  readonly anchor: { readonly x: number; readonly y: number }
+  readonly current: string | null
+  /** 插入处之前已有的文献引用数量（插入时计算新引用的编号）。 */
+  readonly index: number
 }
 
 /** 选择引用目标时的上下文。 */
@@ -388,6 +398,10 @@ function runCommand(command: EditorCommand): void {
     startNewFootnote()
     return
   }
+  if (command === 'citation') {
+    requestCitation()
+    return
+  }
   editorCommands[command](view.state, view.dispatch)
   focus()
 }
@@ -523,7 +537,27 @@ function chapterRefMenu(href: string) {
   return {
     name: documents.refLabel?.(href)?.name ?? null,
     show: address.kind === 'ref' ? address.show : null,
+    citation: address.kind === 'cite',
   }
+}
+
+/** 请求选择文献：在光标（或选中的文献引用）下方，选中文献引用时带上它当前的条目。 */
+function requestCitation(): void {
+  if (!view) return
+  const { state } = view
+  if (!insertChapterRef('writer:cite/_', '')(state)) return
+  const caret = view.coordsAtPos(state.selection.from)
+  const ref = selectedChapterRef(state)
+  const address = ref ? parseChapterRefAddress(ref.attrs.href as string) : null
+  let index = 0
+  state.doc.nodesBetween(0, state.selection.from, (node) => {
+    if (node.type === nodes.chapter_ref && (node.attrs.href as string).startsWith('writer:cite/')) index++
+  })
+  emit('request-citation', currentId, {
+    anchor: { x: caret.left, y: caret.bottom },
+    current: address?.kind === 'cite' ? address.id : null,
+    index,
+  })
 }
 
 /** 请求选择引用目标：在光标（或选中的引用）下方，选中引用时带上它当前的目标与格式。 */

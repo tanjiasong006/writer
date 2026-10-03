@@ -33,6 +33,7 @@ type SemInline =
   | { ref: { id: string; show: string } | null; cached: string; marks?: string[] }
   | { footnote: string; marks?: string[] }
   | { element: { kind: string; id: string }; cached: string; marks?: string[] }
+  | { cite: string; cached: string; marks?: string[] }
   | { break: true }
 type SemItem = { task: boolean | null; blocks: SemBlock[] }
 type SemBlock =
@@ -72,7 +73,9 @@ function inlines(node: Node): SemInline[] {
     if (child.type === nodes.hard_break) out.push({ break: true })
     else if (child.type === nodes.chapter_ref) {
       const address = parseChapterRefAddress(child.attrs.href as string)
-      if (address.kind === 'element') {
+      if (address.kind === 'cite') {
+        out.push(withMarks({ cite: address.id, cached: child.attrs.cached as string }, marks))
+      } else if (address.kind === 'element') {
         out.push(withMarks({ element: { kind: address.element, id: address.id }, cached: child.attrs.cached as string }, marks))
       } else {
         const ref = address.kind === 'ref' ? { id: address.id, show: address.show } : null

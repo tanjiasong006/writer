@@ -30,6 +30,7 @@ use super::pdf_layout::{Binding, ChapterNumber, Header, PageNumber, PageSetup, P
 use super::theme::{HeadingStyle, Theme};
 use super::{ExportError, ExportReport};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
+use crate::render::citations::Citations;
 use crate::render::elements::ElementTargets;
 use crate::render::markdown::{plain_text, Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
@@ -86,11 +87,13 @@ fn layout(
     let mut writer = Writer::new(project_root, pdf_layout);
     writer.targets = ChapterTargets::new(document);
     writer.elements = ElementTargets::new(document);
+    writer.citations = Citations::new(document);
     writer.report.broken_references = broken_references(document);
     writer.preamble(document, book);
     for section in &document.sections {
         writer.section(section);
     }
+    writer.bibliography();
 
     let world = PdfWorld::new(writer.out, writer.images, fonts);
     let compiled = typst::compile::<PagedDocument>(&world)
@@ -240,6 +243,8 @@ struct Writer<'a> {
     targets: ChapterTargets,
     /// 图表的编号与引用目标（docs/decisions.md 第 12 节）。
     elements: ElementTargets,
+    /// 文献引用的编号（docs/decisions.md 第 13 节）。
+    citations: Citations,
 }
 
 impl<'a> Writer<'a> {
@@ -257,6 +262,7 @@ impl<'a> Writer<'a> {
             title_block_before_body: false,
             targets: ChapterTargets::default(),
             elements: ElementTargets::default(),
+            citations: Citations::default(),
         }
     }
 
@@ -486,6 +492,31 @@ impl<'a> Writer<'a> {
         }
     }
 
+    /// 参考文献表（docs/decisions.md 第 13 节）：正文之后一个不编号的一级标题，按编号列出被引用的条目。
+    fn bibliography(&mut self) {
+        if self.citations.is_empty() {
+            return;
+        }
+        if self.layout.chapter_new_page {
+            let page_break = if self.layout.binding == Binding::Double { ODD_PAGE_BREAK } else { "#pagebreak(weak: true)\n" };
+            self.out.push_str(&format!("{page_break}#v({}pt)\n", num(CHAPTER_TOP_SPACE_PT)));
+        }
+        self.out.push_str(&format!("#heading(level: 1)[#{}]\n\n", string(BIBLIOGRAPHY_TITLE)));
+        let entries: Vec<String> = self
+            .citations
+            .list()
+            .map(|(number, text)| {
+                format!(
+                    "#block(above: 0.5em, below: 0.5em)[#par(first-line-indent: 0em, hanging-indent: 2em)[#{}]] {}",
+                    string(&breakable(&format!("[{number}] {text}"))),
+                    citation_label(number)
+                )
+            })
+            .collect();
+        self.out.push_str(&entries.join("\n"));
+        self.out.push_str("\n\n");
+    }
+
     fn block(&mut self, block: &Block, section: &Section) -> String {
         let element = self.elements.of(block).cloned();
         if let Some((src, alt)) = block.as_figure() {
@@ -648,6 +679,18 @@ impl<'a> Writer<'a> {
                             string(&breakable(&text))
                         ));
                     }
+                    None => {
+                        out.push('#');
+                        out.push_str(&string(&breakable(cached)));
+                    }
+                },
+                // 文献引用：上标的“[编号]”，链接到参考文献表中的条目；条目不存在时输出链接文字（列入导出报告）。
+                Inline::Citation { id, cached } => match self.citations.number(id) {
+                    Some(number) => out.push_str(&format!(
+                        "#super(typographic: false)[#link({})[#{}]]",
+                        citation_label(number),
+                        string(&format!("[{number}]"))
+                    )),
                     None => {
                         out.push('#');
                         out.push_str(&string(&breakable(cached)));
@@ -875,6 +918,14 @@ fn breakable(text: &str) -> String {
 /// Typst 字符串字面量：转义反斜杠、引号与换行，去掉其余控制字符。
 /// 图表编号与图注 / 标题之间的分隔（全角空格）。
 const ELEMENT_SEPARATOR: &str = "\u{3000}";
+
+/// 参考文献表的标题（输出中的文字）。
+const BIBLIOGRAPHY_TITLE: &str = "参考文献";
+
+/// 参考文献条目的标签（文献引用的跳转目标）。
+fn citation_label(number: usize) -> String {
+    format!("<writer-cite-{number}>")
+}
 
 /// 有编号的图表的标签（图表引用的跳转目标）。
 fn element_label(anchor: usize) -> String {
@@ -1790,6 +1841,30 @@ mod tests {
         assert_eq!(report.broken_references, vec!["原图"]);
     }
 
+    #[test]
+    fn citations_are_superscript_numbers_and_the_bibliography_follows_the_body() {
+        let mut request = request(
+            "",
+            &[("a", vec![1], "绪论", "见[[x]](writer:cite/b)与[[y]](writer:cite/a)，再见[[z]](writer:cite/b)；失效[[旧]](writer:cite/gone)。")],
+        );
+        request.references = vec![
+            crate::render::RenderReference { id: "a".into(), text: "甲. 书[M]. 2020.".into() },
+            crate::render::RenderReference { id: "b".into(), text: "乙. 文[J]. 刊, 2021.".into() },
+            crate::render::RenderReference { id: "c".into(), text: "未引用[M].".into() },
+        ];
+        let document = build(&request);
+        let dir = project();
+        let (paged, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        let texts = page_texts(&paged);
+        let text = texts.concat();
+        assert!(text.contains("见[1]与[2]，再见[1]；失效[旧]。"), "{text}");
+        let last = texts.last().unwrap();
+        assert!(last.starts_with("参考文献[1] 乙. 文[J]. 刊, 2021.[2] 甲. 书[M]. 2020."), "{last}");
+        assert!(!text.contains("未引用"));
+        assert_eq!(internal_links(&paged), 3);
+        assert_eq!(report.broken_references, vec!["[旧]"]);
+    }
+
     fn three_chapters(title: &str) -> Document {
         build(&request(
             title,
@@ -2469,6 +2544,7 @@ fn write_sample_pdf() {
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
+        references: Vec::new(),
     };
     let (bytes, report) = export(&build(&request), &root, font_store(None), &sample_layout()).unwrap();
     assert!(report.missing_images.is_empty());

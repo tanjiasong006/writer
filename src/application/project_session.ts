@@ -3,11 +3,13 @@ import {
   replaceTree,
   setContent,
   setDocumentInfo,
+  setReferences,
   setTitle,
   type DocumentInfo,
   type WriterDocument,
 } from '../domain/document/document.ts'
 import type { PdfLayoutSettings } from '../domain/pdf_layout/pdf_layout.ts'
+import type { ReferenceEntry } from '../domain/bibliography/bibliography.ts'
 import type {
   ImportedAsset,
   ProjectState,
@@ -131,6 +133,11 @@ export class ProjectSession {
   /** 修改文档信息（标题、副标题、作者）；与当前相同时不产生修改。 */
   setDocumentInfo(info: DocumentInfo): void {
     this.commit(setDocumentInfo(this.current, info))
+  }
+
+  /** 替换参考文献条目（文档内容，与正文一起保存）；与当前相同时不产生修改。 */
+  setReferences(references: readonly ReferenceEntry[]): void {
+    this.commit(setReferences(this.current, references))
   }
 
   /** 替换 PDF 排版配置（由 pdf_layout 的纯函数生成）；与当前相同时不产生修改。 */

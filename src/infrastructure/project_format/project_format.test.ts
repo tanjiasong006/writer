@@ -2,7 +2,8 @@ import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import type { ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { MAX_CHAPTER_DEPTH } from '../../domain/chapter_tree/chapter_tree.ts'
-import { replaceTree, emptyDocument, setDocumentInfo } from '../../domain/document/document.ts'
+import { replaceTree, emptyDocument, setDocumentInfo, createDocument, setReferences } from '../../domain/document/document.ts'
+import { emptyReference } from '../../domain/bibliography/bibliography.ts'
 import {
   buildManifest,
   contentFileName,
@@ -264,8 +265,23 @@ test('旧项目的 style（已取消的文档样式）：无论内容如何都�
     const parsed = parseManifest(manifestJson({ style }))
     assert.ok(parsed.ok, JSON.stringify(style))
     if (!parsed.ok) return
-    assert.deepEqual(Object.keys(parsed.manifest).sort(), ['files', 'info', 'pdfLayout', 'tree'])
+    assert.deepEqual(Object.keys(parsed.manifest).sort(), ['files', 'info', 'pdfLayout', 'references', 'tree'])
   }
   const document = replaceTree(emptyDocument('我的论文'), tree)
   assert.equal('style' in buildManifest(document), false)
+})
+
+test('参考文献：写出非空字段，读回相同；不合法时拒绝打开（它们是内容）', () => {
+  const doc = createDocument('论文', [{ id: 'a', title: '一', children: [] }], new Map([['a', '']]))
+  assert.equal(doc.ok, true)
+  if (!doc.ok) return
+  const entry = { ...emptyReference('r1', 'article'), author: '张三', title: '题名', year: '2020' }
+  const manifest = buildManifest(setReferences(doc.document, [entry]))
+  assert.deepEqual(manifest.references, [{ id: 'r1', type: 'article', author: '张三', title: '题名', year: '2020' }])
+  const parsed = parseManifest(JSON.parse(JSON.stringify(manifest)))
+  assert.equal(parsed.ok, true)
+  if (parsed.ok) assert.deepEqual(parsed.manifest.references, [entry])
+  assert.equal(buildManifest(doc.document).references, undefined)
+  const bad = parseManifest({ ...JSON.parse(JSON.stringify(manifest)), references: [{ id: 'r1', type: 'novel' }] })
+  assert.deepEqual(bad, { ok: false, issue: { code: 'references-invalid' } })
 })

@@ -57,6 +57,9 @@ fn runs(inlines: &[Inline], marks: &[String], out: &mut Vec<Value>) {
                     .join(" ");
                 out.push(with_marks(object(json!({ "footnote": text }))))
             }
+            Inline::Citation { id, cached } => {
+                out.push(with_marks(object(json!({ "cite": id, "cached": cached }))))
+            }
             Inline::ElementRef { kind, id, cached } => {
                 let kind = match kind {
                     crate::render::chapter_reference::ElementKind::Figure => "figure",

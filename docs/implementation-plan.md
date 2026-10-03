@@ -869,7 +869,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 
 1. ~~脚注：Markdown 解析未开启脚注，导出为字面 `[^1]`（`render/markdown.rs`）。~~（完成，见下方“P1-1 脚注”）
 2. ~~图表自动编号与引用（"见图 3""见表 2"）：已有图注，未发现自动编号，也不能像章节一样被交叉引用。~~（完成，见下方“P1-2 图表编号与引用”）
-3. 参考文献 / 文献引用（未发现）。
+3. ~~参考文献 / 文献引用（未发现）。~~（完成，见下方“P1-3 参考文献”）
 4. 数学公式（未发现）：Typst 原生支持，PDF 成本低；Word 需要转换为 OMML。
 5. Word 导出目录：PDF 已有目录选项，Word 未发现。
 6. 版本快照 / 历史（未发现）。
@@ -900,6 +900,17 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 验证：Domain、编号（TS / Rust 相同用例）、解析与写出、工作区端到端（显示、⌘K、标识写入、编号变化后的文字、前往、表格标题编辑、全文阅读）、
   Word / PDF 输出测试；共享 fixture `element-refs`；Story `ChapterEditor/FiguresAndTables`、`ChapterRefPicker/WithFiguresAndTables`、
   `TextPopover`。Storybook 中目视检查了编号与表格标题。
+
+#### P1-3 参考文献（完成，2026-10-03）
+
+- 规则见 decisions 第 13 节，格式见 project-format 3.3、4.3。Domain `bibliography`（条目、校验、著录格式、引用编号、标识）；
+  `WriterDocument.references`、`setReferences`，manifest 读写，`ProjectSession.setReferences`；导出请求携带格式化后的条目。
+- 编辑器：地址解析增加 `cite`，`citationRefLabels`（上标“[n]”），命令 `citation`、右键“更改文献…”；
+  `CitationPicker.vue`；工作区 `use_citations.ts`（按阅读顺序扫描引用地址编号，插入时按位置计算编号）、`ReferencesDialog.vue`。
+- Rust：`Address::Cite`、`Inline::Citation`、`render::citations`；Word / PDF 上标引用、文末参考文献（Bibliography 样式 / 悬挂缩进），
+  失效引用列入报告。
+- 验证：著录格式与编号、manifest、导出请求、契约 fixture `citations`、Rust 编号与 Word / PDF 输出、工作区端到端
+  （插入与编号后移、对话框新建 / 取消 / 删除确认、浮层中添加）测试；Story `CitationPicker`、`ReferencesDialog`（Storybook 中目视检查了对话框）。
 
 ### P2：体验提升
 

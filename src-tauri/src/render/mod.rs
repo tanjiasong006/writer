@@ -3,6 +3,7 @@
 //! 章节标题与编号只来自文档结构（前端传入），正文 Markdown 中不包含它们（docs/decisions.md 第 3 节）。
 
 pub mod chapter_reference;
+pub mod citations;
 pub mod elements;
 #[cfg(test)]
 mod contract_tests;
@@ -26,6 +27,15 @@ pub struct RenderRequest {
     #[serde(default)]
     pub author: String,
     pub chapters: Vec<RenderChapter>,
+    /// 参考文献条目（docs/decisions.md 第 13 节）：标识与按著录格式生成好的文字。
+    #[serde(default)]
+    pub references: Vec<RenderReference>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct RenderReference {
+    pub id: String,
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -45,6 +55,8 @@ pub struct Document {
     pub subtitle: String,
     pub author: String,
     pub sections: Vec<Section>,
+    /// 参考文献条目（全部，含未被引用的）；输出时只列出被引用的，按引用顺序编号。
+    pub references: Vec<RenderReference>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +75,7 @@ pub fn build(request: &RenderRequest) -> Document {
         title: request.title.clone(),
         subtitle: request.subtitle.clone(),
         author: request.author.clone(),
+        references: request.references.clone(),
         sections: request
             .chapters
             .iter()

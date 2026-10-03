@@ -49,6 +49,7 @@ export type EditorCommand =
   | 'image'
   | 'chapter-ref'
   | 'footnote'
+  | 'citation'
   | 'row-before'
   | 'row-after'
   | 'column-before'
@@ -435,7 +436,7 @@ const removeColumn = thenSelectCell(
   (before, after) => ({ row: before.top, col: Math.min(before.left, after.width - 1) }),
 )
 
-export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote'>, Command>> = {
+export const editorCommands: Readonly<Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote' | 'citation'>, Command>> = {
   undo,
   redo,
   bold: toggleBold,
@@ -484,6 +485,7 @@ export function commandState(state: EditorState): CommandState {
     image: plain(insertImage('', '')),
     'chapter-ref': plain(insertChapterRef('writer:chapter/_', '')),
     footnote: plain(insertFootnote('')),
+    citation: plain(insertChapterRef('writer:cite/_', '')),
     'row-before': plain(rowBefore),
     'row-after': plain(rowAfter),
     'column-before': plain(columnBefore),

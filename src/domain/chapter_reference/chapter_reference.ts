@@ -18,12 +18,15 @@ export type ChapterRefAddress =
   | { readonly kind: 'ref'; readonly id: ChapterId; readonly show: ChapterRefShow }
   /** 图或表：id 是图片 title 中 `fig:` 之后、表格标题中 `{#tbl:…}` 的标识。 */
   | { readonly kind: 'element'; readonly element: ElementKind; readonly id: string }
+  /** 文献引用（docs/decisions.md 第 13 节）：`writer:cite/<条目标识>`。 */
+  | { readonly kind: 'cite'; readonly id: string }
 
 /** 可以被引用的元素：图（独立成段、有图注的图片）与表（有标题的表格）。 */
 export type ElementKind = 'figure' | 'table'
 
 const SCHEME = 'writer:'
 const PREFIX = 'writer:chapter/'
+const CITE_PREFIX = 'writer:cite/'
 const ELEMENT_PREFIXES: ReadonlyArray<readonly [ElementKind, string]> = [
   ['figure', 'writer:figure/'],
   ['table', 'writer:table/'],
@@ -32,6 +35,10 @@ const ELEMENT_PREFIXES: ReadonlyArray<readonly [ElementKind, string]> = [
 /** 解析链接地址。任何输入都不会抛出。 */
 export function parseChapterRefAddress(href: string): ChapterRefAddress {
   if (!href.startsWith(SCHEME)) return { kind: 'link' }
+  if (href.startsWith(CITE_PREFIX)) {
+    const id = href.slice(CITE_PREFIX.length)
+    return isElementId(id) ? { kind: 'cite', id } : { kind: 'malformed' }
+  }
   for (const [element, prefix] of ELEMENT_PREFIXES) {
     if (!href.startsWith(prefix)) continue
     const encoded = href.slice(prefix.length)

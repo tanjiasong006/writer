@@ -11,6 +11,7 @@ const request: RenderRequest = {
   subtitle: '',
   author: '',
   chapters: [{ id: 'a', number: [1], title: '绪论', markdown: '正文' }],
+  references: [],
 }
 
 const layout = resolvePdfLayout({ toc: false })

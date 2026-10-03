@@ -4,6 +4,7 @@ import {
   type ChapterNumber,
 } from '../domain/chapter_numbering/chapter_numbering.ts'
 import type { WriterDocument } from '../domain/document/document.ts'
+import { formatReference } from '../domain/bibliography/bibliography.ts'
 import {
   resolvePdfLayout,
   type PdfLayout,
@@ -25,6 +26,8 @@ export interface RenderRequest {
   readonly subtitle: string
   readonly author: string
   readonly chapters: readonly RenderChapter[]
+  /** 参考文献条目：标识与按著录格式生成好的文字（docs/decisions.md 第 13 节）。 */
+  readonly references: ReadonlyArray<{ readonly id: string; readonly text: string }>
 }
 
 export interface RenderChapter {
@@ -138,5 +141,6 @@ export function buildRenderRequest(document: WriterDocument): RenderRequest {
     }
   }
   visit(document.tree)
-  return { title: document.title, subtitle: document.subtitle, author: document.author, chapters }
+  const references = document.references.map((entry) => ({ id: entry.id, text: formatReference(entry) }))
+  return { title: document.title, subtitle: document.subtitle, author: document.author, chapters, references }
 }

@@ -13,7 +13,7 @@ import SaveStatus from './SaveStatus.vue'
 import DocumentInfoDialog from './DocumentInfoDialog.vue'
 import PdfLayoutDialog from './PdfLayoutDialog.vue'
 import DocumentTitle from './DocumentTitle.vue'
-import ChapterEditor, { type ChapterRefRequest, type EditorStats } from '../editor/ChapterEditor.vue'
+import ChapterEditor, { type ChapterRefRequest, type CitationRequest, type EditorStats } from '../editor/ChapterEditor.vue'
 import WordCountPopover from './WordCountPopover.vue'
 import { useDocumentCount } from './use_word_count.ts'
 import ChapterRefPicker, { type RefPick } from '../editor/ChapterRefPicker.vue'
@@ -34,7 +34,11 @@ import FindBar from './FindBar.vue'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
 import { embeddableImage } from './embeddable_image.ts'
-import { chapterRefLabels, combineRefLabels, elementRefLabels } from '../editor/chapter_ref_view.ts'
+import { chapterRefLabels, citationRefLabels, combineRefLabels, elementRefLabels } from '../editor/chapter_ref_view.ts'
+import { useCitations } from './use_citations.ts'
+import CitationPicker from '../editor/CitationPicker.vue'
+import ReferencesDialog from './ReferencesDialog.vue'
+import { citationAddress, formatReference, type ReferenceEntry } from '../../domain/bibliography/bibliography.ts'
 import { useElementIndex } from './use_elements.ts'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
@@ -296,8 +300,76 @@ const elementLabels = computed(() => {
   void elements.signature.value
   return elementRefLabels((kind, id) => elements.index.value.find(kind, id))
 })
-/** 引用的文字（章节与图表）：随章节树与图表编号变化，编辑正文时不变。 */
-const refLabel = computed(() => combineRefLabels(chapterRefLabels(tree.value), elementLabels.value))
+/** 文献引用的编号（docs/decisions.md 第 13 节）：按全文中第一次引用的顺序。 */
+const citations = useCitations({
+  order: readingOrder,
+  contents: () => document.value.contents,
+  references: () => document.value.references,
+})
+const citationLabels = computed(() => {
+  void citations.signature.value
+  const references = document.value.references
+  return citationRefLabels((id) => {
+    const number = citations.numbers.value.get(id)
+    const entry = references.find((candidate) => candidate.id === id)
+    return number === undefined || !entry ? null : { number, text: formatReference(entry) }
+  })
+})
+/** 引用的文字（章节、图表与文献）：随章节树、图表编号与文献编号变化，编辑正文时不变。 */
+const refLabel = computed(() =>
+  combineRefLabels(chapterRefLabels(tree.value), elementLabels.value, citationLabels.value),
+)
+
+/** 选择文献引用的浮层与参考文献对话框。 */
+const citationPicker = shallowRef<{ readonly chapterId: ChapterId; readonly request: CitationRequest } | null>(null)
+const referencesDialog = shallowRef<{ readonly initial: string | null; readonly fromPicker: boolean } | null>(null)
+
+function requestCitation(chapterId: ChapterId, request: CitationRequest): void {
+  citationPicker.value = { chapterId, request }
+}
+
+/** 插入（或更改为）选中的文献；文字是它的编号（还没有被引用时是下一个编号）。 */
+function pickCitation(id: string): void {
+  const picker = citationPicker.value
+  citationPicker.value = null
+  const number = picker ? citations.numberIfInserted(picker.chapterId, picker.request.index, id) : 0
+  if (picker && editor.value?.insertChapterRef(picker.chapterId, citationAddress(id), `[${number}]`)) return
+  editor.value?.focus()
+}
+
+function cancelCitation(): void {
+  citationPicker.value = null
+  editor.value?.focus()
+}
+
+/** 从文献浮层打开参考文献对话框：完成后回到浮层继续选择。 */
+function manageReferences(): void {
+  const picker = citationPicker.value
+  referencesDialog.value = { initial: picker?.request.current ?? null, fromPicker: picker !== null }
+  if (picker) pendingPicker = picker
+  citationPicker.value = null
+}
+let pendingPicker: { readonly chapterId: ChapterId; readonly request: CitationRequest } | null = null
+
+function finishReferences(references: ReferenceEntry[]): void {
+  props.session.setReferences(references)
+  closeReferences()
+}
+
+function closeReferences(): void {
+  const fromPicker = referencesDialog.value?.fromPicker ?? false
+  referencesDialog.value = null
+  if (fromPicker && pendingPicker && pendingPicker.chapterId === selectedId.value) citationPicker.value = pendingPicker
+  else editor.value?.focus()
+  pendingPicker = null
+}
+
+function confirmReferenceDelete(count: number): Promise<boolean> {
+  return shell.confirm(`这条文献在正文中被引用了 ${count} 处，删除后这些引用会失效。\n\n仍要删除吗？`, {
+    ok: '删除',
+    cancel: '取消',
+  })
+}
 /** 当前章节图表编号的起点。 */
 const elementStart = computed(() =>
   selectedId.value === null ? undefined : elements.index.value.start(selectedId.value),
@@ -639,7 +711,8 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       else switchFocus()
       return
     case 'insert':
-      updateAllChapterRefs()
+      if (command.action === 'references') referencesDialog.value = { initial: null, fromPicker: false }
+      else updateAllChapterRefs()
       return
     case 'appearance':
       emit('set-appearance', command.appearance)
@@ -905,6 +978,7 @@ async function createFirstChapter(): Promise<void> {
           @request-image="insertImage"
           @request-image-files="insertImageFiles"
           @request-chapter-ref="requestChapterRef"
+          @request-citation="requestCitation"
           @open-chapter="jumps.jump"
           @tools="showTools"
         />
@@ -996,6 +1070,28 @@ async function createFirstChapter(): Promise<void> {
       :chapter-name="chapterName"
       @select="showBrokenRef"
       @close="closeRefReport"
+    />
+
+    <CitationPicker
+      v-if="citationPicker"
+      :references="document.references"
+      :numbers="citations.numbers.value"
+      :anchor="citationPicker.request.anchor"
+      :current="citationPicker.request.current"
+      @pick="pickCitation"
+      @manage="manageReferences"
+      @cancel="cancelCitation"
+    />
+
+    <ReferencesDialog
+      v-if="referencesDialog"
+      :references="document.references"
+      :numbers="citations.numbers.value"
+      :initial="referencesDialog.initial"
+      :confirm-delete="confirmReferenceDelete"
+      :citation-count="citations.count"
+      @submit="finishReferences"
+      @cancel="closeReferences"
     />
 
     <ChapterRefPicker

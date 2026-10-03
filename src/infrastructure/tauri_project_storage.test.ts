@@ -163,7 +163,7 @@ test('旧项目的 style（已取消的文档样式）：打开时忽略，正�
     orphanFiles: [],
   })
   if (!opened.ok) throw new Error('decode')
-  expect(Object.keys(opened.value.document).sort()).toEqual(['author', 'contents', 'subtitle', 'title', 'tree'])
+  expect(Object.keys(opened.value.document).sort()).toEqual(['author', 'contents', 'references', 'subtitle', 'title', 'tree'])
   expect(opened.value.document.contents.get('b1')).toBe('B1')
 
   invokeMock.mockResolvedValue(null)

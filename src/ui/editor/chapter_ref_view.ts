@@ -60,7 +60,22 @@ export function elementRefLabels(
   }
 }
 
-/** 依次尝试多个解析（章节引用、图表引用）。 */
+/**
+ * 文献引用的文字（docs/decisions.md 第 13 节）：“[编号]”，按全文中第一次引用的顺序；
+ * name 是编号与著录文字。没有前往的章节（id 为空串）。
+ */
+export function citationRefLabels(
+  find: (id: string) => { readonly number: number; readonly text: string } | null,
+): ChapterRefLabel {
+  return (href) => {
+    const address = parseChapterRefAddress(href)
+    if (address.kind !== 'cite') return null
+    const target = find(address.id)
+    return target ? { text: `[${target.number}]`, id: '', name: `[${target.number}] ${target.text}` } : null
+  }
+}
+
+/** 依次尝试多个解析（章节引用、图表引用、文献引用）。 */
 export function combineRefLabels(...labels: readonly ChapterRefLabel[]): ChapterRefLabel {
   return (href) => {
     for (const label of labels) {
@@ -87,6 +102,8 @@ function element(node: Node, label: ChapterRefLabel, hint: boolean): HTMLElement
   const dom = document.createElement('span')
   dom.className = 'chapter-ref'
   dom.dataset.chapterRef = node.attrs.href as string
+  // 文献引用显示为上标的“[编号]”。
+  dom.classList.toggle('is-citation', (node.attrs.href as string).startsWith('writer:cite/'))
   fill(dom, node, label, hint)
   return dom
 }

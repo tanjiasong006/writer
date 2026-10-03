@@ -87,3 +87,8 @@ test('图表编号与标识', () => {
   expect(isElementId(id)).toBe(true)
   expect(isElementId('图')).toBe(false)
 })
+
+test('文献引用：writer:cite/<id>', () => {
+  expect(parseChapterRefAddress('writer:cite/r1')).toEqual({ kind: 'cite', id: 'r1' })
+  expect(parseChapterRefAddress('writer:cite/a b')).toEqual({ kind: 'malformed' })
+})

@@ -29,6 +29,7 @@ use super::fonts::{docx_fonts, FontFamily};
 use super::images::{display_size_pt, load_for_export, text_height_pt, Bounds};
 use super::theme::Theme;
 use super::{ExportError, ExportReport};
+use crate::render::citations::Citations;
 use crate::render::elements::{ElementTarget, ElementTargets};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::markdown::{Align, Block, Inline};
@@ -101,6 +102,7 @@ pub fn export(
         },
         targets: ChapterTargets::new(document),
         elements: ElementTargets::new(document),
+        citations: Citations::new(document),
         next_numbering: FIRST_LIST_NUMBERING,
         numberings: Vec::new(),
         items: Vec::new(),
@@ -132,6 +134,7 @@ pub fn export(
     for section in &document.sections {
         writer.section(section);
     }
+    writer.bibliography();
 
     let mut docx = base_document(&writer.theme, document.title.trim(), cover);
     for numbering in writer.numberings.drain(..) {
@@ -260,6 +263,8 @@ struct Writer<'a> {
     targets: ChapterTargets,
     /// 图表的编号与引用目标（docs/decisions.md 第 12 节）。
     elements: ElementTargets,
+    /// 文献引用的编号（docs/decisions.md 第 13 节）。
+    citations: Citations,
     next_numbering: usize,
     numberings: Vec<Numbering>,
     items: Vec<Item>,
@@ -283,6 +288,26 @@ struct BlockContext {
 }
 
 impl Writer<'_> {
+    /// 参考文献表（docs/decisions.md 第 13 节）：正文之后一个不编号的一级标题（Heading 1，另起一页），
+    /// 按编号列出被引用的条目（Bibliography 样式，悬挂缩进），每条带书签供文献引用跳转。
+    fn bibliography(&mut self) {
+        if self.citations.is_empty() {
+            return;
+        }
+        let heading = heading(1).add_run(Run::new().add_text(BIBLIOGRAPHY_TITLE));
+        self.items.push(Item::Paragraph(heading));
+        let entries: Vec<(usize, String)> = self.citations.list().map(|(n, text)| (n, text.to_owned())).collect();
+        for (number, text) in entries {
+            let id = CITATION_BOOKMARK_BASE + number;
+            let p = Paragraph::new()
+                .style("Bibliography")
+                .add_bookmark_start(id, citation_bookmark(number))
+                .add_run(Run::new().add_text(xml_safe(&format!("[{number}]\t{text}"))))
+                .add_bookmark_end(id);
+            self.items.push(Item::Paragraph(p));
+        }
+    }
+
     fn section(&mut self, section: &Section) {
         let level = section.depth.clamp(1, MAX_HEADING);
         let text = if section.number.is_empty() {
@@ -650,6 +675,15 @@ impl Writer<'_> {
                     }
                     None => p.add_run(styled(Run::new().add_text(xml_safe(cached)), style)),
                 },
+                // 文献引用：上标的“[编号]”，链接到参考文献表中条目的书签；条目不存在时输出链接文字（列入导出报告）。
+                Inline::Citation { id, cached } => match self.citations.number(id) {
+                    Some(number) => {
+                        let mut run = styled(Run::new().add_text(format!("[{number}]")), style);
+                        run.run_property = run.run_property.vert_align(VertAlignType::SuperScript);
+                        p.add_hyperlink(Hyperlink::new(citation_bookmark(number), HyperlinkType::Anchor).add_run(run))
+                    }
+                    None => p.add_run(styled(Run::new().add_text(xml_safe(cached)), style)),
+                },
                 // 图表引用：编号文字，链接到图注 / 表格标题上的书签；失效引用输出链接文字（列入导出报告）。
                 Inline::ElementRef { kind, id, cached } => match self.elements.get(*kind, id) {
                     Some(target) => {
@@ -955,6 +989,14 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
                 ),
         )
         .add_style(
+            // 参考文献条目：编号与著录文字之间是制表位，换行后与著录文字对齐（悬挂缩进）。
+            Style::new("Bibliography", StyleType::Paragraph)
+                .name("Bibliography")
+                .based_on("Normal")
+                .align(AlignmentType::Both)
+                .indent(Some(BIBLIOGRAPHY_INDENT), Some(SpecialIndentType::Hanging(BIBLIOGRAPHY_INDENT)), None, None),
+        )
+        .add_style(
             Style::new("FootnoteText", StyleType::Paragraph)
                 .name("footnote text")
                 .based_on("Normal")
@@ -1050,6 +1092,18 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
 /// 章节标题的书签名（章节引用的跳转目标）。下划线开头是 Word 的隐藏书签，不出现在书签列表中。
 /// 图表编号与图注 / 标题之间的分隔（全角空格，与 PDF 相同）。
 const ELEMENT_SEPARATOR: &str = "\u{3000}";
+/// 参考文献条目的悬挂缩进（twip，约 2.5 字）。
+const BIBLIOGRAPHY_INDENT: i32 = 600;
+
+/// 参考文献表的标题（输出中的文字）。
+const BIBLIOGRAPHY_TITLE: &str = "参考文献";
+/// 文献书签的 id 从这里开始，不与章节、图表书签重复。
+const CITATION_BOOKMARK_BASE: usize = 2_000_000;
+
+fn citation_bookmark(number: usize) -> String {
+    format!("_WriterCite{number}")
+}
+
 /// 图表书签的 id 从这里开始，不与章节书签（按章节序号）重复。
 const ELEMENT_BOOKMARK_BASE: usize = 1_000_000;
 
@@ -1271,6 +1325,26 @@ mod tests {
         // 表格标题在表格之前。
         assert!(xml.find("表 2-1").unwrap() < xml.find("<w:tbl>").unwrap());
         assert_eq!(report.broken_references, vec!["原表"]);
+    }
+
+    #[test]
+    fn citations_link_to_a_bibliography_after_the_body() {
+        let dir = project();
+        let mut request = request(&[("a", vec![1], "绪论", "见[[x]](writer:cite/b)与[[y]](writer:cite/a)。")]);
+        request.references = vec![
+            crate::render::RenderReference { id: "a".into(), text: "甲. 书[M]. 2020.".into() },
+            crate::render::RenderReference { id: "b".into(), text: "乙. 文[J]. 2021.".into() },
+        ];
+        let (bytes, _) = export(&build(&request), dir.path()).unwrap();
+        docx_rs::read_docx(&bytes).expect("generated docx must be readable");
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains(r#"w:anchor="_WriterCite1""#) && xml.contains(r#"w:anchor="_WriterCite2""#));
+        assert!(xml.contains(r#"<w:vertAlign w:val="superscript" />"#));
+        let heading = xml.find("参考文献").unwrap();
+        assert!(xml.find("[1]\t乙. 文[J]. 2021.").unwrap() > heading, "{xml}");
+        assert!(xml.find("[2]\t甲. 书[M]. 2020.").unwrap() > heading);
+        assert!(xml.contains(r#"w:name="_WriterCite1""#));
+        assert!(part(&bytes, "word/styles.xml").contains(r#"w:styleId="Bibliography""#));
     }
 
     #[test]
@@ -1837,6 +1911,7 @@ fn write_sample_docx() {
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.jpg)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
+        references: Vec::new(),
     };
     let (bytes, report) = export(&build(&request), &root).unwrap();
     assert!(report.missing_images.is_empty());

@@ -41,6 +41,8 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   'chapter-ref': { label: '章节引用…', shortcut: SHORTCUTS.chapterRef },
   // 脚注没有自然的“⌘ + 单键”（Word 的 ⌥⌘F 是两个修饰键），只在插入菜单与右键菜单中。
   footnote: { label: '脚注…' },
+  // 文献引用同样没有自然的单键，只在插入菜单与右键菜单中。
+  citation: { label: '文献引用…' },
   'row-before': { label: '在上方插入行' },
   'row-after': { label: '在下方插入行' },
   'column-before': { label: '在左侧插入列' },
@@ -96,6 +98,8 @@ function codeLanguageMenu(current: string): MenuEntry {
 export interface ChapterRefMenu {
   readonly name: string | null
   readonly show: ChapterRefShow | null
+  /** 是文献引用（没有前往与显示格式，只能更改文献）。 */
+  readonly citation?: boolean
 }
 
 const SHOW_LABELS: ReadonlyArray<readonly [ChapterRefShow, string]> = [
@@ -105,6 +109,9 @@ const SHOW_LABELS: ReadonlyArray<readonly [ChapterRefShow, string]> = [
 ]
 
 function chapterRefMenu(state: CommandState, ref: ChapterRefMenu): MenuEntry[] {
+  if (ref.citation) {
+    return [commandEntry('citation', state, { label: '更改文献…' }), { separator: true }, { role: 'cut' }, { role: 'copy' }]
+  }
   return [
     ref.name === null
       ? { id: 'chapter-ref:open', label: '前往（引用已失效）', disabled: true }
@@ -191,6 +198,7 @@ export function editorContextMenu(
       commandEntry('image', state, { label: '插入图片…' }),
       commandEntry('chapter-ref', state, { label: '插入章节引用…' }),
       commandEntry('footnote', state, { label: '插入脚注…' }),
+      commandEntry('citation', state, { label: '插入文献引用…' }),
     )
   }
   return entries

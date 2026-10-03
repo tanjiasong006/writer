@@ -59,7 +59,7 @@ test('emptyDocument：空树、空正文，只有文档信息、结构与正文'
   const document = emptyDocument('新文档')
   assert.deepEqual(document.tree, [])
   assert.equal(document.contents.size, 0)
-  assert.deepEqual(Object.keys(document).sort(), ['author', 'contents', 'subtitle', 'title', 'tree'])
+  assert.deepEqual(Object.keys(document).sort(), ['author', 'contents', 'references', 'subtitle', 'title', 'tree'])
   assert.equal(document.subtitle, '')
   assert.equal(document.author, '')
 })

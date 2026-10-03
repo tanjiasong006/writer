@@ -1,4 +1,5 @@
 import type { ChapterId, ChapterTree } from '../chapter_tree/chapter_tree.ts'
+import type { ReferenceEntry } from '../bibliography/bibliography.ts'
 
 /**
  * 一份文档：文档信息（标题、副标题、作者）、章节树、每个章节的正文。
@@ -15,6 +16,8 @@ export interface WriterDocument {
   readonly author: string
   readonly tree: ChapterTree
   readonly contents: ReadonlyMap<ChapterId, string>
+  /** 参考文献条目（docs/decisions.md 第 13 节），按添加顺序；正文中按引用顺序编号。 */
+  readonly references: readonly ReferenceEntry[]
 }
 
 export type CreateDocumentReason = 'content-missing' | 'content-orphan'
@@ -41,12 +44,12 @@ export function createDocument(
   for (const id of contents.keys()) {
     if (!ids.has(id)) return { ok: false, reason: 'content-orphan', chapterId: id }
   }
-  return { ok: true, document: { title, subtitle: '', author: '', tree, contents } }
+  return { ok: true, document: { title, subtitle: '', author: '', tree, contents, references: [] } }
 }
 
 /** 空文档：没有章节，也没有副标题与作者。 */
 export function emptyDocument(title: string): WriterDocument {
-  return { title, subtitle: '', author: '', tree: [], contents: new Map() }
+  return { title, subtitle: '', author: '', tree: [], contents: new Map(), references: [] }
 }
 
 /**
@@ -106,6 +109,11 @@ export function setDocumentInfo(document: WriterDocument, info: DocumentInfo): W
     return document
   }
   return { ...document, title, subtitle, author }
+}
+
+/** 替换参考文献条目；与当前相同（同一个数组）时原样返回同一文档对象。 */
+export function setReferences(document: WriterDocument, references: readonly ReferenceEntry[]): WriterDocument {
+  return references === document.references ? document : { ...document, references }
 }
 
 /** 章节正文是否有实际内容（不只是空白字符）；找不到章节返回 false。 */

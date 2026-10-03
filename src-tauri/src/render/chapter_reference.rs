@@ -29,6 +29,8 @@ pub enum Address {
     Ref(RefTarget),
     /// 图表引用（docs/decisions.md 第 12 节）。
     Element(ElementKind, String),
+    /// 文献引用（docs/decisions.md 第 13 节）：`writer:cite/<id>`。
+    Cite(String),
 }
 
 /// 可以被引用的元素。
@@ -44,6 +46,13 @@ const PREFIX: &str = "writer:chapter/";
 pub fn parse_address(href: &str) -> Address {
     if !href.starts_with(SCHEME) {
         return Address::Link;
+    }
+    if let Some(id) = href.strip_prefix("writer:cite/") {
+        return if !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+            Address::Cite(id.to_owned())
+        } else {
+            Address::Malformed
+        };
     }
     for (kind, prefix) in [(ElementKind::Figure, "writer:figure/"), (ElementKind::Table, "writer:table/")] {
         let Some(encoded) = href.strip_prefix(prefix) else {
@@ -173,6 +182,7 @@ pub fn broken_references(document: &Document) -> Vec<String> {
     let targets = Targets {
         chapters: ChapterTargets::new(document),
         elements: super::elements::ElementTargets::new(document),
+        citations: super::citations::Citations::new(document),
     };
     let mut out = Vec::new();
     for section in &document.sections {
@@ -184,6 +194,7 @@ pub fn broken_references(document: &Document) -> Vec<String> {
 struct Targets {
     chapters: ChapterTargets,
     elements: super::elements::ElementTargets,
+    citations: super::citations::Citations,
 }
 
 fn broken_in_blocks(blocks: &[Block], targets: &Targets, out: &mut Vec<String>) {
@@ -215,6 +226,8 @@ fn broken_in_inlines(inlines: &[Inline], targets: &Targets, out: &mut Vec<String
             Inline::ElementRef { kind, id, cached } if targets.elements.get(*kind, id).is_none() => {
                 out.push(cached.clone())
             }
+            Inline::Citation { id, cached } if targets.citations.number(id).is_none() => out.push(cached.clone()),
+            Inline::Footnote(children) => broken_in_inlines(children, targets, out),
             Inline::Strong(children)
             | Inline::Emphasis(children)
             | Inline::Strike(children)

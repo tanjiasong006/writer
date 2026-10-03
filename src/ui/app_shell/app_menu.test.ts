@@ -170,7 +170,7 @@ describe('快捷键', () => {
       // “更新交叉引用”作用于整篇文档，不是插入命令，不设快捷键（docs/decisions.md 第 9 节）。
       // 列表缩进用正文中的 Tab / Shift+Tab（不能作菜单快捷键），⌘[ / ⌘] 留给返回 / 前进。
       // 脚注没有自然的“⌘ + 单键”（Word 是 ⌥⌘F，Pages 不设），只在菜单中。
-      .filter((entry) => 'id' in entry && !['insert:update-chapter-refs', 'editor:indent', 'editor:outdent', 'editor:footnote'].includes(entry.id))
+      .filter((entry) => 'id' in entry && !['insert:update-chapter-refs', 'editor:indent', 'editor:outdent', 'editor:footnote', 'editor:citation', 'insert:references'].includes(entry.id))
     for (const entry of entries) {
       if (!('id' in entry)) continue
       if (entry.submenu) expect(shortcuts([{ label: entry.label, items: entry.submenu }]).length).toBeGreaterThan(0)

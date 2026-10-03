@@ -293,6 +293,14 @@
   color: var(--color-doc-text);
 }
 
+/* 文献引用：上标的“[编号]”，不加下划线。 */
+.document-body .chapter-ref.is-citation {
+  font-size: 0.72em;
+  line-height: 0;
+  vertical-align: super;
+  text-decoration: none;
+}
+
 /* 失效的章节引用：显示原来的链接文字，以警示色与虚线下划线区分。 */
 .document-body .chapter-ref.is-broken {
   color: var(--color-danger-text);

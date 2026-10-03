@@ -74,6 +74,11 @@ pub enum Inline {
         alt: String,
         id: Option<String>,
     },
+    /// 文献引用（`writer:cite/<id>`）；cached 是链接文字，只在条目不存在时使用。
+    Citation {
+        id: String,
+        cached: String,
+    },
     /// 图表引用（`writer:figure/<id>`、`writer:table/<id>`）；cached 是链接文字，只在目标失效时使用。
     ElementRef {
         kind: ElementKind,
@@ -514,6 +519,10 @@ fn inline_from_start(tag: Tag, events: &mut Events) -> Option<Inline> {
                     target: None,
                     cached: plain_text(&children),
                 },
+                Address::Cite(id) => Inline::Citation {
+                    id,
+                    cached: plain_text(&children),
+                },
                 Address::Element(kind, id) => Inline::ElementRef {
                     kind,
                     id,
@@ -648,7 +657,9 @@ pub fn plain_text(inlines: &[Inline]) -> String {
             }
             Inline::Link { children, .. } => text.push_str(&plain_text(children)),
             Inline::Image { alt, .. } => text.push_str(alt),
-            Inline::ChapterRef { cached, .. } | Inline::ElementRef { cached, .. } => text.push_str(cached),
+            Inline::ChapterRef { cached, .. }
+            | Inline::ElementRef { cached, .. }
+            | Inline::Citation { cached, .. } => text.push_str(cached),
             Inline::Footnote(_) => {}
             Inline::SoftBreak | Inline::HardBreak => text.push(' '),
         }

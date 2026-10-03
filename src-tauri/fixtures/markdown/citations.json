@@ -1,0 +1,32 @@
+{
+  "说明": "文献引用（docs/decisions.md 第 13 节）：地址为 writer:cite/<条目标识> 的链接，链接文字（如 [1]）是缓存。标识只能是字母、数字、- 与 _，否则是失效引用。",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "长文档写作的研究" },
+        { "cite": "zhang2020", "cached": "[1]" },
+        { "text": "已有很多，" },
+        { "text": "近年", "marks": ["strong"] },
+        { "cite": "li-2021", "cached": "[2]" },
+        { "text": "更多。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "格式错误的引用是失效引用：" },
+        { "ref": null, "cached": "[3]" },
+        { "text": "，" },
+        { "ref": null, "cached": "[4]" },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "table",
+      "align": ["none"],
+      "header": [[{ "text": "来源" }]],
+      "rows": [[[{ "text": "表格中" }, { "cite": "zhang2020", "cached": "[1]" }]]]
+    }
+  ]
+}
