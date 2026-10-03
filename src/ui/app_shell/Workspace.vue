@@ -26,6 +26,8 @@ import { useUiState } from './use_ui_state.ts'
 import { useSidebar, SIDEBAR_DEFAULT, SIDEBAR_MIN } from './use_sidebar.ts'
 import { useExport } from './use_export.ts'
 import { useFocusRegion } from './use_focus_region.ts'
+import { useFind } from './use_find.ts'
+import FindBar from './FindBar.vue'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
 import { chapterRefLabels } from '../editor/chapter_ref_view.ts'
@@ -327,6 +329,34 @@ function chapterRefCount(chapterId: ChapterId): number {
   return countRefsTo(document.value.contents, subtree, (id) => !subtree.has(id))
 }
 
+/** 查找与替换（use_find.ts）：查找栏在工具栏下方，全文阅读中不显示。 */
+const find = useFind({
+  order: readingOrder,
+  contents: () => document.value.contents,
+  selectedId,
+  editor: () => editor.value,
+})
+const findBar = ref<InstanceType<typeof FindBar> | null>(null)
+watch(find.query, find.onQueryChange)
+
+/** 打开查找栏：正文中有选中的文字时用它作查找词；已打开时回到查找框。 */
+async function openFind(withReplace: boolean): Promise<void> {
+  if (reading.value || !selectedChapter.value) return
+  const initial = focusRegion.value === 'editor' ? (editor.value?.selectedText() ?? '') : ''
+  const wasOpen = find.open.value
+  find.show(withReplace, initial)
+  if (wasOpen) {
+    await nextTick()
+    findBar.value?.focusQuery()
+  }
+}
+
+/** 关闭查找栏：焦点回到正文，当前匹配保持选中。 */
+function closeFind(): void {
+  find.close()
+  editor.value?.focus()
+}
+
 const jumps = useChapterJumps({
   selectedId,
   exists: (id) => findChapter(tree.value, id) !== null,
@@ -475,6 +505,8 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
     case 'edit':
       if (command.action === 'list-menu') {
         if (focusRegion.value === 'editor') void editor.value?.openListMenu()
+      } else if (command.action === 'find' || command.action === 'find-replace') {
+        void openFind(command.action === 'find-replace')
       } else if (command.action === 'context-menu') {
         if (focusRegion.value === 'tree') chapters.value?.openChapterMenu()
         else void editor.value?.openMenuAtCaret()
@@ -701,6 +733,23 @@ async function createFirstChapter(): Promise<void> {
         </div>
       </header>
 
+      <FindBar
+        v-if="find.open.value && !reading && selectedChapter"
+        ref="findBar"
+        v-model:query="find.query.value"
+        v-model:replacement="find.replacement.value"
+        v-model:scope="find.scope.value"
+        v-model:show-replace="find.showReplace.value"
+        :total="find.total.value"
+        :position="find.position.value"
+        :replaced-count="find.replacedCount.value"
+        @next="find.step('next')"
+        @previous="find.step('previous')"
+        @replace="find.replace()"
+        @replace-all="find.replaceAll()"
+        @close="closeFind"
+      />
+
       <div class="workspace__content">
         <ChapterEditor
           v-if="selectedChapter && selectedId !== null"
@@ -712,6 +761,8 @@ async function createFirstChapter(): Promise<void> {
           :title="selectedChapter.title"
           :resolve-image="resolveImage"
           :ref-label="refLabel"
+          :find-query="find.open.value && !reading ? find.query.value : ''"
+          @find-status="find.setSelected"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
           @request-image="insertImage"
           @request-chapter-ref="requestChapterRef"

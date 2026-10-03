@@ -73,6 +73,9 @@
   --color-doc-selection-inactive: #e3e3e6;
   /* 自绘选区底色盖在文字上方，靠混合模式透出文字：浅色背景用正片叠底，深色背景用滤色（叠底会把浅色文字压暗）。 */
   --color-doc-selection-blend: multiply;
+  /* 查找：全部匹配淡黄，当前匹配更深（与 macOS 的查找高亮相同的黄色系，不与选区的蓝色混淆）。 */
+  --color-doc-find: rgba(255, 214, 10, 0.32);
+  --color-doc-find-current: rgba(255, 196, 0, 0.75);
   /* 正文中的链接与章节引用：接近正文墨色的低饱和深蓝，下划线更淡，不比正文更抢眼。 */
   --color-doc-link: #2f4b74;
   --color-doc-link-rule: rgba(47, 75, 116, 0.32);
@@ -183,6 +186,8 @@
     --color-doc-selection: #2d4a78;
     --color-doc-selection-inactive: #3a3a3e;
     --color-doc-selection-blend: screen;
+    --color-doc-find: rgba(255, 214, 10, 0.22);
+    --color-doc-find-current: rgba(255, 196, 0, 0.55);
     --color-doc-link: #a8bcda;
     --color-doc-link-rule: rgba(168, 188, 218, 0.36);
     --color-code-comment: #8a8a90;

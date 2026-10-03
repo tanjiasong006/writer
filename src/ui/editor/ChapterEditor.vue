@@ -28,6 +28,15 @@ import { NO_CHAPTER_REFS, chapterRefNodeViews, chapterRefPos, type ChapterRefLab
 import { parseChapterRefAddress, type ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
 import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from './editor_theme.ts'
 import { topBlock, type BlockPosition } from './block_position.ts'
+import {
+  findDecorations,
+  findMatches,
+  nextMatchIndex,
+  previousMatchIndex,
+  replaceMatches,
+  selectedMatchIndex,
+  type FindMatch,
+} from './find.ts'
 import './document_body.css'
 
 /**
@@ -55,6 +64,8 @@ const props = defineProps<{
   resolveImage?: ImageResolver
   /** 章节引用的文字（按当前章节树生成）；不提供时引用显示为失效。 */
   refLabel?: ChapterRefLabel
+  /** 查找中的文字：正文中高亮全部匹配（不进入文档）；空串表示没有在查找。 */
+  findQuery?: string
 }>()
 
 const emit = defineEmits<{
@@ -70,6 +81,8 @@ const emit = defineEmits<{
   'request-chapter-ref': [chapterId: ChapterId, request: ChapterRefRequest]
   /** 前往章节引用的目标章节（⌘ + 单击、右键菜单“前往”）。 */
   'open-chapter': [chapterId: ChapterId]
+  /** 查找中：选区恰好是第几个匹配（-1 表示不是匹配），选区或正文变化时发出。 */
+  'find-status': [chapterId: ChapterId, selected: number]
 }>()
 
 /** 选择引用目标时的上下文。 */
@@ -119,7 +132,40 @@ function dispatchTransaction(tr: Transaction): void {
   showState(state)
   const text = documents.update(currentId, state)
   if (text !== null) emit('change', currentId, text)
+  reportFind()
 }
+
+/** 查找：当前文档中的匹配（按文档缓存，输入时只在文档变化后重新计算）。 */
+let findCache: { readonly doc: EditorState['doc']; readonly query: string; readonly matches: FindMatch[] } | null = null
+
+function currentMatches(state: EditorState): FindMatch[] {
+  const query = props.findQuery ?? ''
+  if (findCache?.doc !== state.doc || findCache.query !== query) {
+    findCache = { doc: state.doc, query, matches: findMatches(state.doc, query) }
+  }
+  return findCache.matches
+}
+
+let lastFindStatus: { readonly chapterId: ChapterId; readonly selected: number } | null = null
+
+function reportFind(): void {
+  if (!view || !props.findQuery) return
+  const selected = selectedMatchIndex(currentMatches(view.state), view.state.selection)
+  if (lastFindStatus?.chapterId === currentId && lastFindStatus.selected === selected) return
+  lastFindStatus = { chapterId: currentId, selected }
+  emit('find-status', currentId, selected)
+}
+
+watch(
+  () => props.findQuery,
+  () => {
+    if (!view) return
+    // 重新计算高亮：updateState 用同一个状态时视图会重新取 decorations。
+    view.updateState(view.state)
+    lastFindStatus = null
+    reportFind()
+  },
+)
 
 function showState(state: EditorState): void {
   const next = commandState(state)
@@ -144,6 +190,8 @@ onMounted(() => {
     dispatchTransaction,
     scrollThreshold: CARET_MARGIN,
     scrollMargin: CARET_MARGIN,
+    decorations: (state) =>
+      props.findQuery ? findDecorations(state.doc, currentMatches(state), state.selection) : null,
     nodeViews: {
       image: imageNodeView(resolveImage),
       figure: figureNodeView(resolveImage),
@@ -172,6 +220,7 @@ watch(
       view.updateState(next)
       showState(next)
       scroller.value.scrollTop = reused ? (scrolls.get(chapterId) ?? 0) : 0
+      reportFind()
       return
     }
     if (documents.isCurrent(chapterId, text)) return
@@ -437,7 +486,66 @@ function revealPosition(position: BlockPosition): void {
   view.dispatch(view.state.tr.setSelection(Selection.near(view.state.doc.resolve(start), 1)))
 }
 
+/**
+ * 查找：选中当前章节中选区之后（之前）的下一个匹配并滚动到可见，不改变焦点（焦点通常在查找栏中）。
+ * where 为 'first' / 'last' 时选中第一个 / 最后一个匹配。没有可选的匹配时返回 false。
+ */
+function selectMatch(where: 'next' | 'previous' | 'first' | 'last'): boolean {
+  if (!view) return false
+  const matches = currentMatches(view.state)
+  const { selection } = view.state
+  const index =
+    where === 'first' ? 0
+    : where === 'last' ? matches.length - 1
+    : where === 'next' ? nextMatchIndex(matches, selection)
+    : previousMatchIndex(matches, selection)
+  const match = matches[index]
+  if (!match) return false
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, match.from, match.to)).scrollIntoView())
+  return true
+}
+
+/** 选区恰好是一个匹配时把它替换为 replacement（一次可撤销的修改），返回是否替换了。 */
+function replaceSelectedMatch(replacement: string): boolean {
+  if (!view) return false
+  const matches = currentMatches(view.state)
+  const index = selectedMatchIndex(matches, view.state.selection)
+  if (index < 0) return false
+  view.dispatch(replaceMatches(view.state, [matches[index]], replacement).scrollIntoView())
+  return true
+}
+
+/**
+ * 把一个章节中全部匹配替换为 replacement，返回替换的数量。当前章节在编辑器中修改；
+ * 其他章节在它们各自缓存的编辑器状态上修改（进入该章节自己的撤销历史），新正文以 change 发出。
+ */
+function replaceAllIn(chapterId: ChapterId, text: string, query: string, replacement: string): number {
+  if (!view || query === '') return 0
+  if (chapterId === currentId) {
+    const matches = findMatches(view.state.doc, query)
+    if (matches.length > 0) view.dispatch(replaceMatches(view.state, matches, replacement))
+    return matches.length
+  }
+  const state = documents.stateFor(chapterId, text)
+  const matches = findMatches(state.doc, query)
+  if (matches.length === 0) return 0
+  const next = documents.update(chapterId, state.apply(replaceMatches(state, matches, replacement)))
+  if (next !== null) emit('change', chapterId, next)
+  return matches.length
+}
+
+/** 选中的文字（只取一行），用于预先填入查找词。 */
+function selectedText(): string {
+  if (!view) return ''
+  const { from, to } = view.state.selection
+  return view.state.doc.textBetween(from, to, '\n', '').split('\n')[0]
+}
+
 defineExpose({
+  selectMatch,
+  replaceSelectedMatch,
+  replaceAllIn,
+  selectedText,
   readingPosition,
   revealPosition,
   insertImage: insertImageAt,
@@ -688,6 +796,16 @@ defineExpose({
   outline: none;
   border-radius: 2px;
   background: var(--color-doc-selection);
+}
+
+/* 查找的匹配（find.ts）：全部匹配淡黄底色，当前匹配更深。 */
+.chapter-editor__body :deep(.find-match) {
+  border-radius: 2px;
+  background: var(--color-doc-find);
+}
+
+.chapter-editor__body :deep(.find-match.is-current) {
+  background: var(--color-doc-find-current);
 }
 
 /* 选中的图片只在图片本身外画一个框（不用 ProseMirror 默认画在外层容器上的框）。 */

@@ -23,6 +23,8 @@ export const SHORTCUTS = {
   newDocument: 'CmdOrCtrl+Shift+N',
   openDocument: 'CmdOrCtrl+Shift+O',
   save: 'CmdOrCtrl+S',
+  /** 查找（find）：打开查找栏；已打开时回到查找框。 */
+  find: 'CmdOrCtrl+F',
   undo: 'CmdOrCtrl+Z',
   bold: 'CmdOrCtrl+B',
   italic: 'CmdOrCtrl+I',

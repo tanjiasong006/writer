@@ -5,6 +5,8 @@
 export const ICONS = {
   'chevron-right': 'M6.5 4 10.5 8l-4 4',
   'chevron-down': 'M4.5 6.5 8 10l3.5-3.5',
+  'chevron-up': 'M4.5 9.5 8 6l3.5 3.5',
+  search: 'M7 2.8a4.2 4.2 0 1 1 0 8.4 4.2 4.2 0 0 1 0-8.4zM10 10l3.5 3.5',
   plus: 'M8 3.5v9M3.5 8h9',
   more: 'M3.5 8h.01M8 8h.01M12.5 8h.01',
   'bullet-list': 'M6 4h8M6 8h8M6 12h8M2.5 4h.01M2.5 8h.01M2.5 12h.01',

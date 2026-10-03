@@ -36,7 +36,7 @@ export interface AppMenuContext {
 }
 
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout'] as const
-const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu'] as const
+const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find-replace'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete'] as const
 const INSERT_ACTIONS = ['update-chapter-refs'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back', 'forward'] as const
@@ -229,6 +229,10 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
           shortcut: SHORTCUTS.contextMenu,
           disabled: !(editing || (inTree && context.hasSelectedChapter)),
         },
+        { separator: true },
+        // 在当前章节或全文中查找；替换行在查找栏中展开。全文阅读中不可用。
+        { id: 'edit:find', label: '查找…', shortcut: SHORTCUTS.find, disabled: !context.hasSelectedChapter || context.reading },
+        { id: 'edit:find-replace', label: '查找并替换…', disabled: !context.hasSelectedChapter || context.reading },
       ],
     },
     {
