@@ -6,7 +6,8 @@ import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from '../
 import { topBlock, type BlockPosition } from '../editor/block_position.ts'
 import type { ImageResolver } from '../editor/image_view.ts'
 import { renderChapterBody } from './chapter_body.ts'
-import { chapterRefLabels } from '../editor/chapter_ref_view.ts'
+import { chapterRefLabels, type ChapterRefLabel } from '../editor/chapter_ref_view.ts'
+import type { ElementStart } from '../editor/element_numbering.ts'
 import '../editor/document_body.css'
 
 /** 全文中的阅读位置：章节 + 章节中的块。 */
@@ -35,6 +36,10 @@ const props = defineProps<{
   resolveImage?: ImageResolver
   /** 打开时显示的位置；不提供时从当前章节开头开始。 */
   initialPosition?: ReadingPosition | null
+  /** 引用的文字（章节与图表）；不提供时按章节树生成章节引用的文字。 */
+  refLabel?: ChapterRefLabel
+  /** 各章节图表编号的起点；不提供时不显示图表编号。 */
+  elementStart?: (chapterId: ChapterId) => ElementStart
 }>()
 
 const emit = defineEmits<{
@@ -74,19 +79,28 @@ const THEME_VARS = editorThemeCssVars(DEFAULT_EDITOR_THEME)
 
 const resolve: ImageResolver = (reference) => props.resolveImage?.(reference) ?? null
 
-const refLabel = computed(() => chapterRefLabels(props.tree))
+const refLabel = computed(() => props.refLabel ?? chapterRefLabels(props.tree))
 
-/** 正文 DOM：只在该章节的正文变化、或章节树变化且其中有引用时重新生成。 */
+function render(element: HTMLElement, text: string): void {
+  const chapterId = element.closest<HTMLElement>('[data-chapter-id]')?.dataset.chapterId
+  const start = chapterId === undefined ? null : (props.elementStart?.(chapterId) ?? null)
+  element.replaceChildren(renderChapterBody(text, resolve, refLabel.value, start))
+  labels.set(element, refLabel.value)
+}
+
+/**
+ * 正文 DOM：只在该章节的正文变化、或引用文字变化（章节树或图表编号变化）且其中有引用或图表编号时重新生成。
+ */
 const vChapterBody: Directive<HTMLElement, string> = {
   mounted(element, { value }) {
-    element.replaceChildren(renderChapterBody(value, resolve, refLabel.value))
-    labels.set(element, refLabel.value)
+    render(element, value)
   },
   updated(element, { value, oldValue }) {
-    const stale = labels.get(element) !== refLabel.value && element.querySelector('.chapter-ref') !== null
+    const stale =
+      labels.get(element) !== refLabel.value &&
+      element.querySelector('.chapter-ref, .table-caption, .editor-figure__caption-label') !== null
     if (value === oldValue && !stale) return
-    element.replaceChildren(renderChapterBody(value, resolve, refLabel.value))
-    labels.set(element, refLabel.value)
+    render(element, value)
   },
 }
 

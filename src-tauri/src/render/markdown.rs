@@ -10,7 +10,7 @@ use std::iter::Peekable;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, OffsetIter, Options, Parser, Tag, TagEnd};
 
-use super::chapter_reference::{parse_address, Address, RefTarget};
+use super::chapter_reference::{parse_address, Address, ElementKind, RefTarget};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
@@ -29,8 +29,17 @@ pub enum Block {
         alignments: Vec<Align>,
         header: Vec<Vec<Inline>>,
         rows: Vec<Vec<Vec<Inline>>>,
+        /// 表格标题：紧接在表格之前、原文以 `Table: ` 开头的段落（docs/decisions.md 第 12 节）。
+        caption: Option<Caption>,
     },
     Rule,
+}
+
+/// 表格标题：文字与可选的标识（`{#tbl:<id>}`）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Caption {
+    pub text: String,
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,9 +68,17 @@ pub enum Inline {
         cached: String,
     },
     /// src 为正文中的原始引用（如 ../assets/图.png），由各渲染器自行解析。
+    /// id 是独立成段的图被引用时的标识：图片 title 为 `fig:<id>`（docs/decisions.md 第 12 节）。
     Image {
         src: String,
         alt: String,
+        id: Option<String>,
+    },
+    /// 图表引用（`writer:figure/<id>`、`writer:table/<id>`）；cached 是链接文字，只在目标失效时使用。
+    ElementRef {
+        kind: ElementKind,
+        id: String,
+        cached: String,
     },
     /// 脚注（GFM `[^label]`）：内容是定义的行内文字（多段以空格连接），出现在引用处。
     /// 同一定义被引用多次时每个引用各是一条脚注（与编辑器相同）。
@@ -73,9 +90,14 @@ pub enum Inline {
 impl Block {
     /// 只含一张图片的段落，渲染为独立的图（居中、限宽）。
     pub fn as_figure(&self) -> Option<(&str, &str)> {
+        self.figure().map(|(src, alt, _)| (src, alt))
+    }
+
+    /// 独立的图：地址、图注与标识。
+    pub fn figure(&self) -> Option<(&str, &str, Option<&str>)> {
         match self {
             Block::Paragraph(inlines) => match inlines.as_slice() {
-                [Inline::Image { src, alt }] => Some((src, alt)),
+                [Inline::Image { src, alt, id }] => Some((src, alt, id.as_deref())),
                 _ => None,
             },
             _ => None,
@@ -89,6 +111,31 @@ const MAX_NESTING: usize = 32;
 thread_local! {
     /// 解析一章时收集的脚注定义（标签小写 → 内容）。定义可能出现在引用之后，解析完再把引用换成内容。
     static FOOTNOTES: RefCell<HashMap<String, Vec<Inline>>> = RefCell::new(HashMap::new());
+}
+
+thread_local! {
+    /// 按顺序记录每个段落的原文是否以 `Table: ` 开头（由 HeadingsAsText 在产生段落开始时记下）。
+    static CAPTION_CANDIDATES: RefCell<VecDeque<bool>> = const { RefCell::new(VecDeque::new()) };
+}
+
+const CAPTION_PREFIX: &str = "Table: ";
+
+/// 表格标题段落 → 标题：去掉 `Table: `，结尾的 `{#tbl:<id>}` 是标识。
+fn table_caption(inlines: &[Inline]) -> Caption {
+    let text = plain_text(inlines);
+    let text = text.trim().strip_prefix(CAPTION_PREFIX.trim_end()).unwrap_or(&text).trim();
+    if let Some(start) = text.rfind("{#tbl:") {
+        let id = &text[start + "{#tbl:".len()..];
+        if let Some(id) = id.strip_suffix('}') {
+            if !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+                return Caption {
+                    text: text[..start].trim_end().to_owned(),
+                    id: Some(id.to_owned()),
+                };
+            }
+        }
+    }
+    Caption { text: text.to_owned(), id: None }
 }
 
 /// 引用处的占位：解析完成后由 resolve_footnotes 换成 Footnote（有定义）或文字（没有定义）。
@@ -106,6 +153,7 @@ pub fn parse(markdown: &str) -> Vec<Block> {
     }
     .peekable();
     FOOTNOTES.with(|footnotes| footnotes.borrow_mut().clear());
+    CAPTION_CANDIDATES.with(|queue| queue.borrow_mut().clear());
     let mut parsed = blocks(&mut events, &|_| false, 0);
     let definitions = FOOTNOTES.with(|footnotes| std::mem::take(&mut *footnotes.borrow_mut()));
     for block in &mut parsed {
@@ -206,6 +254,11 @@ impl<'a> Iterator for HeadingsAsText<'a> {
             return Some(event);
         }
         let (event, range) = self.inner.next()?;
+        if matches!(event, Event::Start(Tag::Paragraph)) {
+            // 表格标题按原文判断（`Table\: …` 转义后不是标题）。
+            let candidate = self.source[range.clone()].trim_start().starts_with(CAPTION_PREFIX);
+            CAPTION_CANDIDATES.with(|queue| queue.borrow_mut().push_back(candidate));
+        }
         if !matches!(event, Event::Start(Tag::Heading { .. })) {
             return Some(event);
         }
@@ -221,6 +274,7 @@ impl<'a> Iterator for HeadingsAsText<'a> {
             self.queued.push_back(Event::Text(line.into()));
         }
         self.queued.push_back(Event::End(TagEnd::Paragraph));
+        CAPTION_CANDIDATES.with(|queue| queue.borrow_mut().push_back(false));
         Some(Event::Start(Tag::Paragraph))
     }
 }
@@ -269,6 +323,8 @@ fn atx_heading_text(line: &str) -> Option<String> {
 fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> Vec<Block> {
     let mut out = Vec::new();
     let mut pending: Vec<Inline> = Vec::new();
+    // 原文以 `Table: ` 开头的段落的位置：紧接着（之间没有其他块）是表格时成为表格的标题。
+    let mut caption_at: Option<usize> = None;
     let flush = |pending: &mut Vec<Inline>, out: &mut Vec<Block>| {
         if !pending.is_empty() {
             out.push(Block::Paragraph(normalize(std::mem::take(pending))));
@@ -280,7 +336,9 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
             Event::End(end) if stop(&end) => break,
             Event::Start(Tag::Paragraph) => {
                 flush(&mut pending, &mut out);
+                let candidate = CAPTION_CANDIDATES.with(|queue| queue.borrow_mut().pop_front()).unwrap_or(false);
                 out.push(Block::Paragraph(inlines(events, TagEnd::Paragraph)));
+                caption_at = candidate.then_some(out.len() - 1);
             }
             Event::Start(Tag::BlockQuote(_) | Tag::List(_)) if depth >= MAX_NESTING => {
                 flush(&mut pending, &mut out);
@@ -321,7 +379,15 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
             }
             Event::Start(Tag::Table(alignments)) => {
                 flush(&mut pending, &mut out);
-                out.push(table(events, &alignments));
+                let mut block = table(events, &alignments);
+                if let (Some(index), Block::Table { caption, .. }) = (caption_at.take(), &mut block) {
+                    if index + 1 == out.len() {
+                        if let Block::Paragraph(inlines) = out.remove(index) {
+                            *caption = Some(table_caption(&inlines));
+                        }
+                    }
+                }
+                out.push(block);
             }
             Event::Rule => {
                 flush(&mut pending, &mut out);
@@ -407,6 +473,7 @@ fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
         alignments,
         header,
         rows,
+        caption: None,
     }
 }
 
@@ -447,15 +514,24 @@ fn inline_from_start(tag: Tag, events: &mut Events) -> Option<Inline> {
                     target: None,
                     cached: plain_text(&children),
                 },
+                Address::Element(kind, id) => Inline::ElementRef {
+                    kind,
+                    id,
+                    cached: plain_text(&children),
+                },
                 Address::Ref(target) => Inline::ChapterRef {
                     target: Some(target),
                     cached: plain_text(&children),
                 },
             }
         }
-        Tag::Image { dest_url, .. } => Inline::Image {
+        Tag::Image { dest_url, title, .. } => Inline::Image {
             src: dest_url.into_string(),
             alt: plain_text(&inlines(events, TagEnd::Image)),
+            id: title
+                .strip_prefix("fig:")
+                .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+                .map(str::to_owned),
         },
         other => {
             // 未启用的扩展（上下标等）：保留其中的文字。
@@ -572,7 +648,7 @@ pub fn plain_text(inlines: &[Inline]) -> String {
             }
             Inline::Link { children, .. } => text.push_str(&plain_text(children)),
             Inline::Image { alt, .. } => text.push_str(alt),
-            Inline::ChapterRef { cached, .. } => text.push_str(cached),
+            Inline::ChapterRef { cached, .. } | Inline::ElementRef { cached, .. } => text.push_str(cached),
             Inline::Footnote(_) => {}
             Inline::SoftBreak | Inline::HardBreak => text.push(' '),
         }
@@ -710,8 +786,34 @@ mod tests {
                     vec![vec![text("对照")], vec![text("30")]],
                     vec![vec![text("实验")], vec![Inline::Strong(vec![text("32")])]],
                 ],
+                caption: None,
             }]
         );
+    }
+
+    #[test]
+    fn table_caption_is_the_paragraph_before_the_table_in_the_source() {
+        let caption = |markdown: &str| match parse(markdown).last() {
+            Some(Block::Table { caption, .. }) => caption.clone(),
+            _ => None,
+        };
+        assert_eq!(
+            caption("Table: 样本 *构成* {#tbl:t1}\n\n| a |\n| - |"),
+            Some(Caption { text: "样本 构成".into(), id: Some("t1".into()) })
+        );
+        assert_eq!(caption("Table: 无标识\n\n| a |\n| - |"), Some(Caption { text: "无标识".into(), id: None }));
+        // 转义后不是标题；之间隔着其他块、或标题段落后面不是表格时，段落保留。
+        assert_eq!(caption("Table\\: 文字\n\n| a |\n| - |"), None);
+        assert_eq!(caption("Table: 甲\n\n---\n\n| a |\n| - |"), None);
+        assert_eq!(parse("Table: 只是文字").len(), 1);
+        // 标题不在正文中重复出现。
+        assert_eq!(parse("Table: 甲\n\n| a |\n| - |").len(), 1);
+    }
+
+    #[test]
+    fn figure_id_comes_from_the_title() {
+        assert_eq!(parse("![图注](a.png \"fig:f1\")")[0].figure(), Some(("a.png", "图注", Some("f1"))));
+        assert_eq!(parse("![图注](a.png \"其他标题\")")[0].figure(), Some(("a.png", "图注", None)));
     }
 
     #[test]

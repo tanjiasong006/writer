@@ -12,6 +12,8 @@ import {
   insertChapterRef,
   insertFootnote,
   insertImage,
+  setTableCaption,
+  setElementId,
   selectedFootnote,
   setFootnoteText,
   selectedChapterRef,
@@ -25,7 +27,9 @@ import { editorContextMenu, listEntries } from './editor_menu.ts'
 import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
-import FootnotePopover from './FootnotePopover.vue'
+import TextPopover from './TextPopover.vue'
+import { chapterLabels, NO_ELEMENT_START, type ElementStart } from './element_numbering.ts'
+import { Decoration, DecorationSet } from 'prosemirror-view'
 import { footnoteNumber, footnotesOf } from './footnote_view.ts'
 import { useMenu } from '../common/use_menu.ts'
 import { editSelectedCaption, figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
@@ -73,6 +77,8 @@ const props = defineProps<{
   refLabel?: ChapterRefLabel
   /** 查找中的文字：正文中高亮全部匹配（不进入文档）；空串表示没有在查找。 */
   findQuery?: string
+  /** 本章图表编号的起点（所在一级章节与之前的图、表数量，element_numbering.ts）；只影响显示。 */
+  elementStart?: ElementStart
 }>()
 
 const emit = defineEmits<{
@@ -111,7 +117,11 @@ export interface ChapterRefRequest {
   /** 浮层的位置：光标（或选中引用）的左下角。 */
   readonly anchor: { readonly x: number; readonly y: number }
   /** 选中的引用当前的目标与格式；插入新引用时为 null。 */
-  readonly current: { readonly id: ChapterId | null; readonly show: ChapterRefShow } | null
+  readonly current: {
+    readonly id: ChapterId | null
+    readonly show: ChapterRefShow
+    readonly element?: { readonly kind: 'figure' | 'table'; readonly id: string }
+  } | null
 }
 
 /** 滚动容器（每个章节记住自己的滚动位置）。 */
@@ -186,6 +196,62 @@ function reportStats(): void {
 function sameCount(a: TextCount | null, b: TextCount | null): boolean {
   return a === b || (a !== null && b !== null && a.words === b.words && a.characters === b.characters)
 }
+
+/**
+ * 图表编号（docs/decisions.md 第 12 节）：有图注的图在图注前显示“图 2-1”（交给图片的节点视图），
+ * 有标题的表格上方显示“表 2-1　标题”（单击编辑）。只是显示，不进入文档；按文档与起点缓存。
+ */
+let elementCache: { readonly doc: EditorState['doc']; readonly start: ElementStart; readonly set: DecorationSet } | null = null
+
+function elementDecorations(doc: EditorState['doc']): DecorationSet {
+  const start = props.elementStart ?? NO_ELEMENT_START
+  if (elementCache?.doc === doc && sameStart(elementCache.start, start)) return elementCache.set
+  const decorations: Decoration[] = []
+  for (const [pos, label] of chapterLabels(doc, start)) {
+    const node = doc.nodeAt(pos)!
+    if (node.type === nodes.figure) {
+      decorations.push(Decoration.node(pos, pos + node.nodeSize, {}, { elementLabel: label }))
+    } else {
+      const caption = (node.attrs.caption as string).trim()
+      decorations.push(
+        Decoration.widget(pos, () => tableCaptionDOM(label, caption, pos), {
+          side: -1,
+          key: `table-caption:${pos}:${label}:${caption}`,
+          ignoreSelection: true,
+          stopEvent: () => true,
+        }),
+      )
+    }
+  }
+  const set = decorations.length === 0 ? DecorationSet.empty : DecorationSet.create(doc, decorations)
+  elementCache = { doc, start, set }
+  return set
+}
+
+function sameStart(a: ElementStart, b: ElementStart): boolean {
+  return a.chapter === b.chapter && a.figures === b.figures && a.tables === b.tables
+}
+
+function tableCaptionDOM(label: string, caption: string, pos: number): HTMLElement {
+  const dom = document.createElement('div')
+  dom.className = 'table-caption'
+  dom.contentEditable = 'false'
+  dom.dataset.tableCaptionPos = String(pos)
+  dom.title = '单击编辑表格标题'
+  const number = document.createElement('span')
+  number.className = 'table-caption__label'
+  number.textContent = label
+  dom.append(number, caption)
+  return dom
+}
+
+watch(
+  () => props.elementStart,
+  (next, previous) => {
+    if (!view || (next && previous && sameStart(next, previous))) return
+    view.updateState(view.state)
+  },
+)
 
 /** 查找：当前文档中的匹配（按文档缓存，输入时只在文档变化后重新计算）。 */
 let findCache: { readonly doc: EditorState['doc']; readonly query: string; readonly matches: FindMatch[] } | null = null
@@ -262,8 +328,12 @@ onMounted(() => {
       emit('request-image-files', currentId, files)
       return true
     },
-    decorations: (state) =>
-      props.findQuery ? findDecorations(state.doc, currentMatches(state), state.selection) : null,
+    decorations: (state) => {
+      const elements = elementDecorations(state.doc)
+      if (!props.findQuery) return elements
+      const find = findDecorations(state.doc, currentMatches(state), state.selection)
+      return elements === DecorationSet.empty ? find : elements.add(state.doc, find.find())
+    },
     nodeViews: {
       image: imageNodeView(resolveImage),
       figure: figureNodeView(resolveImage),
@@ -408,6 +478,7 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
     inCode ? fenceLanguage(selection.$from.parent.attrs.params as string) : null,
     ref ? chapterRefMenu(ref.attrs.href as string) : null,
     selectedFootnote(view.state) !== null,
+    tableCaptionState(),
   )
   const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
@@ -421,6 +492,10 @@ function runMenuItem(id: string): void {
     focus()
   }
   else if (id === 'figure:caption' && view) editSelectedCaption(view)
+  else if (id === 'table:caption') {
+    const pos = tableAtSelection()
+    if (pos !== null) editTableCaption(pos)
+  }
   else if (id === 'footnote:edit' && view) {
     const note = selectedFootnote(view.state)
     if (note) editFootnote(note.pos)
@@ -433,6 +508,13 @@ function runMenuItem(id: string): void {
       focus()
     }
   }
+}
+
+/** 光标在表格中时表格是否有标题（右键菜单中“添加 / 编辑表格标题…”）；不在表格中时为 null。 */
+function tableCaptionState(): boolean | null {
+  const pos = tableAtSelection()
+  if (pos === null || !view) return null
+  return ((view.state.doc.nodeAt(pos)?.attrs.caption as string | null) ?? '').trim() !== ''
 }
 
 /** 选中引用的右键菜单内容：目标的完整名称与当前格式。 */
@@ -457,7 +539,9 @@ function requestChapterRef(): void {
       ? null
       : address.kind === 'ref'
         ? { id: address.id, show: address.show }
-        : { id: null, show: 'number-title' as const }
+        : address.kind === 'element'
+          ? { id: null, show: 'number-title' as const, element: { kind: address.element, id: address.id } }
+          : { id: null, show: 'number-title' as const }
   emit('request-chapter-ref', currentId, { anchor: { x: caret.left, y: caret.bottom }, current })
 }
 
@@ -465,9 +549,9 @@ function requestChapterRef(): void {
  * 在光标处插入章节引用（选中引用时更改它）。chapterId 是发起请求时的章节；
  * 期间切换了章节或光标处不能插入时不插入并返回 false。链接文字是当前生成的文字。
  */
-function insertChapterRefAt(chapterId: ChapterId, href: string): boolean {
+function insertChapterRefAt(chapterId: ChapterId, href: string, text?: string): boolean {
   if (!view || chapterId !== currentId) return false
-  const cached = documents.refLabel?.(href)?.text ?? ''
+  const cached = documents.refLabel?.(href)?.text ?? text ?? ''
   if (!insertChapterRef(href, cached)(view.state, view.dispatch)) return false
   focus()
   return true
@@ -499,9 +583,10 @@ function imageFiles(data: DataTransfer | null): File[] {
  */
 const footnoteEditor = shallowRef<{
   readonly chapterId: ChapterId
-  /** 已有脚注的位置；新脚注为 null。 */
-  readonly pos: number | null
-  readonly number: number
+  /** 编辑的对象：脚注（已有脚注的位置，新脚注为 null）或表格标题（表格的位置）。 */
+  readonly target: { readonly kind: 'footnote'; readonly pos: number | null } | { readonly kind: 'table-caption'; readonly pos: number }
+  readonly label: string
+  readonly placeholder: string
   readonly text: string
   readonly anchor: { readonly x: number; readonly y: number }
 } | null>(null)
@@ -511,7 +596,14 @@ function startNewFootnote(): void {
   const { to } = view.state.selection
   const caret = view.coordsAtPos(to)
   const before = footnotesOf(view.state.doc).filter((note) => note.pos < to).length
-  footnoteEditor.value = { chapterId: currentId, pos: null, number: before + 1, text: '', anchor: { x: caret.left, y: caret.bottom } }
+  footnoteEditor.value = {
+    chapterId: currentId,
+    target: { kind: 'footnote', pos: null },
+    label: `脚注 ${before + 1}`,
+    placeholder: '脚注内容',
+    text: '',
+    anchor: { x: caret.left, y: caret.bottom },
+  }
 }
 
 function editFootnote(pos: number): void {
@@ -523,24 +615,55 @@ function editFootnote(pos: number): void {
   const caret = rect ?? view.coordsAtPos(pos)
   footnoteEditor.value = {
     chapterId: currentId,
-    pos,
-    number: footnoteNumber(view.state.doc, pos),
+    target: { kind: 'footnote', pos },
+    label: `脚注 ${footnoteNumber(view.state.doc, pos)}`,
+    placeholder: '脚注内容',
     text: node.attrs.text as string,
     anchor: { x: caret.left, y: caret.bottom },
   }
+}
+
+/** 编辑 pos 处表格的标题（没有标题时添加）。标题出现在导出的表格上方，有标题的表格才有编号、能被引用。 */
+function editTableCaption(pos: number): void {
+  if (!view) return
+  const node = view.state.doc.nodeAt(pos)
+  if (node?.type !== nodes.table) return
+  const dom = view.dom.querySelector(`[data-table-caption-pos="${pos}"]`) ?? view.nodeDOM(pos)
+  const rect = dom instanceof Element ? dom.getBoundingClientRect() : view.coordsAtPos(pos + 1)
+  footnoteEditor.value = {
+    chapterId: currentId,
+    target: { kind: 'table-caption', pos },
+    label: '表格标题',
+    placeholder: '表格标题',
+    text: (node.attrs.caption as string | null) ?? '',
+    anchor: { x: rect.left, y: rect.top + 24 },
+  }
+}
+
+/** 光标所在的表格的位置；不在表格中时为 null。 */
+function tableAtSelection(): number | null {
+  if (!view) return null
+  const { $from } = view.state.selection
+  for (let depth = $from.depth; depth > 0; depth--) {
+    if ($from.node(depth).type === nodes.table) return $from.before(depth)
+  }
+  return null
 }
 
 function commitFootnote(text: string): void {
   const editing = footnoteEditor.value
   footnoteEditor.value = null
   if (!view || !editing || editing.chapterId !== currentId) return
-  if (editing.pos === null) {
+  const { target } = editing
+  if (target.kind === 'table-caption') {
+    setTableCaption(target.pos, text === '' ? null : text)(view.state, view.dispatch)
+  } else if (target.pos === null) {
     if (text !== '') insertFootnote(text)(view.state, view.dispatch)
   } else if (text === '') {
     // 清空内容即删除这条脚注。
-    view.dispatch(view.state.tr.delete(editing.pos, editing.pos + 1))
+    view.dispatch(view.state.tr.delete(target.pos, target.pos + 1))
   } else {
-    setFootnoteText(editing.pos, text)(view.state, view.dispatch)
+    setFootnoteText(target.pos, text)(view.state, view.dispatch)
   }
   focus()
 }
@@ -566,6 +689,12 @@ function onFootnoteClick(event: MouseEvent): void {
   if (item && event.detail === 1) {
     event.preventDefault()
     editFootnote(Number(item.dataset.footnotePos))
+    return
+  }
+  const tableCaption = event.target.closest<HTMLElement>('[data-table-caption-pos]')
+  if (tableCaption && event.detail === 1) {
+    event.preventDefault()
+    editTableCaption(Number(tableCaption.dataset.tableCaptionPos))
     return
   }
   if (event.detail !== 2) return
@@ -714,6 +843,23 @@ function replaceAllIn(chapterId: ChapterId, text: string, query: string, replace
   return matches.length
 }
 
+/**
+ * 给一个章节中第 index 个有编号的图（或表）设置标识（第一次被引用时）。当前章节在编辑器中修改；
+ * 其他章节在它们缓存的编辑器状态上修改，新正文以 change 发出。已有标识或找不到时不改变。
+ */
+function assignElementId(chapterId: ChapterId, text: string, kind: 'figure' | 'table', index: number, id: string): void {
+  if (!view) return
+  if (chapterId === currentId) {
+    setElementId(kind, index, id)(view.state, view.dispatch)
+    return
+  }
+  const state = documents.stateFor(chapterId, text)
+  setElementId(kind, index, id)(state, (tr) => {
+    const next = documents.update(chapterId, state.apply(tr))
+    if (next !== null) emit('change', chapterId, next)
+  })
+}
+
 /** 选中的文字（只取一行），用于预先填入查找词。 */
 function selectedText(): string {
   if (!view) return ''
@@ -722,6 +868,7 @@ function selectedText(): string {
 }
 
 defineExpose({
+  assignElementId,
   selectMatch,
   replaceSelectedMatch,
   replaceAllIn,
@@ -763,10 +910,11 @@ defineExpose({
         ></div>
       </div>
     </div>
-    <FootnotePopover
+    <TextPopover
       v-if="footnoteEditor"
       :anchor="footnoteEditor.anchor"
-      :number="footnoteEditor.number"
+      :label="footnoteEditor.label"
+      :placeholder="footnoteEditor.placeholder"
       :text="footnoteEditor.text"
       @commit="commitFootnote"
       @cancel="cancelFootnote"
@@ -914,12 +1062,51 @@ defineExpose({
  * 图注（image_view.ts）是一个随内容增高的文本框：隐藏的同内容 ::after
  * 与文本框放在同一网格格中撑开高度。没有图注时只在选中图片或编辑时显示“添加图注”。
  */
-.chapter-editor__body :deep(.editor-figure__caption) {
-  display: grid;
+.chapter-editor__body :deep(.editor-figure__caption-row) {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
 }
 
-.chapter-editor__body :deep(.editor-figure:not(.has-caption, .ProseMirror-selectednode, .is-editing) .editor-figure__caption) {
+/* 图注随内容变宽，与前面的编号一起居中。 */
+.chapter-editor__body :deep(.editor-figure__caption) {
+  display: grid;
+  flex: 0 1 auto;
+  min-width: 6em;
+}
+
+/* 有编号时图注紧接在编号之后（不按最小宽度居中留出空隙）。 */
+.chapter-editor__body :deep(.editor-figure__caption-row.has-label .editor-figure__caption) {
+  min-width: 1em;
+}
+
+.chapter-editor__body :deep(.editor-figure__caption-row.has-label .editor-figure__caption::after),
+.chapter-editor__body :deep(.editor-figure__caption-row.has-label .editor-figure__caption-input) {
+  padding-left: 0;
+  text-align: left;
+}
+
+/* 图的编号（“图 2-1”）：与图注同字号，次级颜色，不可编辑。 */
+.chapter-editor__body :deep(.editor-figure__caption-label) {
+  flex: none;
+  padding: var(--space-1) 0;
+  color: var(--color-doc-muted);
+  white-space: nowrap;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.chapter-editor__body :deep(.editor-figure:not(.has-caption, .ProseMirror-selectednode, .is-editing) .editor-figure__caption-row) {
   display: none;
+}
+
+/* 表格标题（表格上方，单击编辑）。 */
+.chapter-editor__body :deep(.table-caption) {
+  cursor: pointer;
+}
+
+.chapter-editor__body :deep(.table-caption:hover) {
+  color: var(--color-doc-text);
 }
 
 .chapter-editor__body :deep(.editor-figure__caption::after),
@@ -941,6 +1128,9 @@ defineExpose({
 }
 
 .chapter-editor__body :deep(.editor-figure__caption-input) {
+  /* 宽度只由同内容的 ::after 决定（文本框自身的默认宽度不撑开图注）。 */
+  width: 0;
+  min-width: 100%;
   overflow: hidden;
   resize: none;
   border-radius: var(--radius-s);

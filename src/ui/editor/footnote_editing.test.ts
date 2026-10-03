@@ -28,7 +28,7 @@ function lastChange(wrapper: VueWrapper): string | undefined {
   return (wrapper.emitted('change') as Array<[string, string]> | undefined)?.at(-1)?.[1]
 }
 
-const popover = () => document.querySelector<HTMLTextAreaElement>('.footnote-popover__input')
+const popover = () => document.querySelector<HTMLTextAreaElement>('.text-popover__input')
 
 async function press(target: Element, key: string): Promise<void> {
   target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
@@ -50,7 +50,7 @@ test('插入脚注：先填写内容，Enter 完成后插入在光标处；Esc �
   ;(wrapper.vm as unknown as { runCommand(c: string): void }).runCommand('footnote')
   await flushPromises()
   expect(popover()).not.toBeNull()
-  expect(document.querySelector('.footnote-popover__label')?.textContent).toBe('脚注 1')
+  expect(document.querySelector('.text-popover__label')?.textContent).toBe('脚注 1')
   await press(popover()!, 'Escape')
   expect(popover()).toBeNull()
   expect(wrapper.emitted('change')).toBeUndefined()

@@ -61,3 +61,16 @@ export const Change: Story = {
 export const NearBottom: Story = {
   args: { tree, anchor: { x: 300, y: 640 } },
 }
+
+/** 章节之后列出有编号的图表；选中图表时显示格式不可用。 */
+export const WithFiguresAndTables: Story = {
+  args: {
+    tree,
+    anchor: { x: 300, y: 115 },
+    elements: [
+      { kind: 'figure', id: 'flow', label: '图 1-1', caption: '研究流程', chapterId: 'a', index: 0 },
+      { kind: 'table', id: null, label: '表 2-1', caption: '样本构成', chapterId: 'b', index: 0 },
+      { kind: 'figure', id: null, label: '图 2-1', caption: '三个城市社区公共空间的使用频率与满意度对比', chapterId: 'b', index: 0 },
+    ],
+  },
+}

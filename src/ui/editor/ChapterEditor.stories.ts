@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import { computed, ref } from 'vue'
 import ChapterEditor from './ChapterEditor.vue'
-import { chapterRefLabels } from './chapter_ref_view.ts'
+import { chapterRefLabels, elementRefLabels } from './chapter_ref_view.ts'
 
 const meta = {
   title: 'UI/Editor/ChapterEditor',
@@ -271,5 +271,27 @@ export const Footnotes: Story = {
       '本研究采用问卷与访谈相结合的方法[^1]，样本来自三个城市的社区[^2]。\n\n' +
       '| 城市 | 样本量 |\n| --- | --- |\n| 甲市 | 320[^3] |\n\n' +
       '[^1]: 方法设计参考了 *社会调查研究方法* 第三版。\n\n[^2]: 社区的选择标准见附录 A。\n\n[^3]: 剔除无效问卷后的数量。\n',
+  },
+}
+
+/** 图表编号：有图注的图在图注前显示“图 2-1”，有标题的表格上方显示“表 2-1　标题”（单击编辑，右键可添加）。 */
+export const FiguresAndTables: Story = {
+  args: {
+    chapterId: 'elements',
+    number: '2',
+    title: '研究方法',
+    elementStart: { chapter: 2, figures: 0, tables: 0 },
+    refLabel: elementRefLabels((kind, id) =>
+      kind === 'figure' && id === 'flow'
+        ? { label: '图 2-1', caption: '研究流程', chapterId: 'elements' }
+        : kind === 'table' && id === 'sample'
+          ? { label: '表 2-1', caption: '样本构成', chapterId: 'elements' }
+          : null,
+    ),
+    content:
+      '研究流程见[图 2-1](writer:figure/flow)，样本构成见[表 2-1](writer:table/sample)。\n\n' +
+      '![研究流程](missing-flow.png "fig:flow")\n\n' +
+      'Table: 样本构成 {#tbl:sample}\n\n| 组别 | 人数 |\n| --- | --- |\n| 对照 | 30 |\n| 实验 | 32 |\n\n' +
+      '| 没有标题的表格 |\n| --- |\n| 不编号 |\n',
   },
 }

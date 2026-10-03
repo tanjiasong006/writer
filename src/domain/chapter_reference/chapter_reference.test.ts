@@ -1,5 +1,13 @@
 import { expect, test } from 'vitest'
-import { chapterRefAddress, chapterRefText, parseChapterRefAddress } from './chapter_reference.ts'
+import {
+  chapterRefAddress,
+  chapterRefText,
+  elementLabel,
+  elementRefAddress,
+  isElementId,
+  newElementId,
+  parseChapterRefAddress,
+} from './chapter_reference.ts'
 
 test('普通链接不是引用', () => {
   expect(parseChapterRefAddress('https://example.com')).toEqual({ kind: 'link' })
@@ -27,7 +35,9 @@ test('id 按百分号解码', () => {
 test('不符合格式的 writer: 地址是失效引用', () => {
   for (const href of [
     'writer:',
-    'writer:figure/a',
+    'writer:figure/a b',
+    'writer:figure/',
+    'writer:table/a/b',
     'writer:chapter/',
     'writer:chapter/a/b',
     'writer:chapter/a#x',
@@ -61,4 +71,19 @@ test('引用文字：按显示格式；不显示编号时只有标题，标题�
   expect(chapterRefText(null, '方法', 'number')).toBe('方法')
   expect(chapterRefText('2.1', '', 'title')).toBe('2.1')
   expect(chapterRefText('2.1', '', 'number-title')).toBe('2.1')
+})
+
+test('图表引用：writer:figure/<id> 与 writer:table/<id>', () => {
+  expect(parseChapterRefAddress('writer:figure/a1')).toEqual({ kind: 'element', element: 'figure', id: 'a1' })
+  expect(parseChapterRefAddress('writer:table/x_y-2')).toEqual({ kind: 'element', element: 'table', id: 'x_y-2' })
+  expect(parseChapterRefAddress(elementRefAddress('table', 'k9'))).toEqual({ kind: 'element', element: 'table', id: 'k9' })
+})
+
+test('图表编号与标识', () => {
+  expect(elementLabel('figure', 2, 1)).toBe('图 2-1')
+  expect(elementLabel('table', null, 3)).toBe('表 3')
+  const id = newElementId(() => 0.5)
+  expect(id).toMatch(/^[a-z0-9]{8}$/)
+  expect(isElementId(id)).toBe(true)
+  expect(isElementId('图')).toBe(false)
 })

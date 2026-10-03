@@ -32,11 +32,12 @@ type SemInline =
   | { image: string; alt: string; marks?: string[] }
   | { ref: { id: string; show: string } | null; cached: string; marks?: string[] }
   | { footnote: string; marks?: string[] }
+  | { element: { kind: string; id: string }; cached: string; marks?: string[] }
   | { break: true }
 type SemItem = { task: boolean | null; blocks: SemBlock[] }
 type SemBlock =
   | { type: 'paragraph'; inlines: SemInline[] }
-  | { type: 'figure'; src: string; alt: string }
+  | { type: 'figure'; src: string; alt: string; id?: string }
   | { type: 'quote'; blocks: SemBlock[] }
   | { type: 'code'; language: string | null; text: string }
   | { type: 'rule' }
@@ -46,6 +47,7 @@ type SemBlock =
       align: string[]
       header: SemInline[][]
       rows: SemInline[][][]
+      caption?: { text: string; id?: string }
     }
 
 const MARK_NAMES: Record<string, string> = { strong: 'strong', em: 'emphasis', strike: 'strike' }
@@ -70,8 +72,12 @@ function inlines(node: Node): SemInline[] {
     if (child.type === nodes.hard_break) out.push({ break: true })
     else if (child.type === nodes.chapter_ref) {
       const address = parseChapterRefAddress(child.attrs.href as string)
-      const ref = address.kind === 'ref' ? { id: address.id, show: address.show } : null
-      out.push(withMarks({ ref, cached: child.attrs.cached as string }, marks))
+      if (address.kind === 'element') {
+        out.push(withMarks({ element: { kind: address.element, id: address.id }, cached: child.attrs.cached as string }, marks))
+      } else {
+        const ref = address.kind === 'ref' ? { id: address.id, show: address.show } : null
+        out.push(withMarks({ ref, cached: child.attrs.cached as string }, marks))
+      }
     } else if (child.type === nodes.footnote) {
       out.push(withMarks({ footnote: (child.attrs.text as string).split(/\s+/).filter(Boolean).join(' ') }, marks))
     } else if (child.type === nodes.image) {
@@ -100,8 +106,11 @@ function block(node: Node): SemBlock {
   switch (node.type) {
     case nodes.paragraph:
       return { type: 'paragraph', inlines: inlines(node) }
-    case nodes.figure:
-      return { type: 'figure', src: node.attrs.src as string, alt: node.attrs.alt as string }
+    case nodes.figure: {
+      const id = /^fig:([A-Za-z0-9_-]+)$/.exec((node.attrs.title as string | null) ?? '')?.[1]
+      const figure: SemBlock = { type: 'figure', src: node.attrs.src as string, alt: node.attrs.alt as string }
+      return id ? { ...figure, id } : figure
+    }
     case nodes.blockquote:
       return { type: 'quote', blocks: blocks(node) }
     case nodes.code_block:
@@ -124,7 +133,11 @@ function block(node: Node): SemBlock {
         if (index === 0) row.forEach((cell) => align.push((cell.attrs.align as string | null) ?? 'none'))
         rows.push(cells)
       })
-      return { type: 'table', align, header: rows[0] ?? [], rows: rows.slice(1) }
+      const table: SemBlock = { type: 'table', align, header: rows[0] ?? [], rows: rows.slice(1) }
+      const caption = node.attrs.caption as string | null
+      if (caption === null) return table
+      const id = node.attrs.captionId as string | null
+      return { ...table, caption: id ? { text: caption, id } : { text: caption } }
     }
     default:
       throw new Error(`没有语义投影的节点：${node.type.name}`)

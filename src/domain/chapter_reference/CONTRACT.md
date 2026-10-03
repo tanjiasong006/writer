@@ -14,8 +14,12 @@ parseChapterRefAddress(href: string):
   | { kind: 'link' }        // 不以 writer: 开头：普通链接
   | { kind: 'malformed' }   // 以 writer: 开头但不符合格式：失效引用
   | { kind: 'ref'; id: ChapterId; show: ChapterRefShow }
+  | { kind: 'element'; element: 'figure' | 'table'; id: string }   // writer:figure/<id>、writer:table/<id>
 
 chapterRefAddress(id, show): string   // 规范写法，默认格式省略 ?show
+elementRefAddress(element, id): string
+elementLabel(element, chapter, index): string  // "图 2-1"；chapter 为 null 时 "图 1"
+newElementId(): string                         // 8 位小写字母与数字
 
 // 引用显示的文字。number 是该输出中编号的写法（"2.1"、"第 2 章"），不显示编号时为 null。
 chapterRefText(number: string | null, title: string, show): string

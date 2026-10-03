@@ -16,8 +16,8 @@ import DocumentTitle from './DocumentTitle.vue'
 import ChapterEditor, { type ChapterRefRequest, type EditorStats } from '../editor/ChapterEditor.vue'
 import WordCountPopover from './WordCountPopover.vue'
 import { useDocumentCount } from './use_word_count.ts'
-import ChapterRefPicker from '../editor/ChapterRefPicker.vue'
-import { chapterRefAddress, type ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
+import ChapterRefPicker, { type RefPick } from '../editor/ChapterRefPicker.vue'
+import { chapterRefAddress, elementRefAddress, newElementId } from '../../domain/chapter_reference/chapter_reference.ts'
 import { useChapterJumps } from './use_chapter_jumps.ts'
 import ChapterRefReportDialog from './ChapterRefReportDialog.vue'
 import { countRefsTo, updateChapterRefs, type BrokenChapterRef, type ChapterRefUpdate } from '../editor/chapter_ref_update.ts'
@@ -34,7 +34,8 @@ import FindBar from './FindBar.vue'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
 import { embeddableImage } from './embeddable_image.ts'
-import { chapterRefLabels } from '../editor/chapter_ref_view.ts'
+import { chapterRefLabels, combineRefLabels, elementRefLabels } from '../editor/chapter_ref_view.ts'
+import { useElementIndex } from './use_elements.ts'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
 import Toast from '../common/Toast.vue'
@@ -283,8 +284,24 @@ function chapterHasContent(chapterId: ChapterId): boolean {
  */
 const tree = computed(() => document.value.tree)
 const numbers = computed(() => computeChapterNumbers(tree.value))
-/** 章节引用的文字：随章节树变化，编辑正文时不变。 */
-const refLabel = computed(() => chapterRefLabels(tree.value))
+/**
+ * 图表编号（docs/decisions.md 第 12 节）：全文按阅读顺序、一级章节分组。
+ * 引用的文字只在章节树或图表编号变化时更新（signature），输入文字时不变。
+ */
+const elements = useElementIndex({
+  chapters: () => readingOrder().map((id) => ({ id, top: numbers.value.get(id)?.[0] ?? null })),
+  contents: () => document.value.contents,
+})
+const elementLabels = computed(() => {
+  void elements.signature.value
+  return elementRefLabels((kind, id) => elements.index.value.find(kind, id))
+})
+/** 引用的文字（章节与图表）：随章节树与图表编号变化，编辑正文时不变。 */
+const refLabel = computed(() => combineRefLabels(chapterRefLabels(tree.value), elementLabels.value))
+/** 当前章节图表编号的起点。 */
+const elementStart = computed(() =>
+  selectedId.value === null ? undefined : elements.index.value.start(selectedId.value),
+)
 
 /** 选择章节引用的目标：发起请求的章节与位置（docs/decisions.md 第 9 节）。 */
 const refPicker = shallowRef<{ readonly chapterId: ChapterId; readonly request: ChapterRefRequest } | null>(null)
@@ -293,10 +310,28 @@ function requestChapterRef(chapterId: ChapterId, request: ChapterRefRequest): vo
   refPicker.value = { chapterId, request }
 }
 
-function pickChapterRef(id: ChapterId, show: ChapterRefShow): void {
+/**
+ * 选好引用目标后插入。引用的图表还没有标识时先给它一个（写进它所在章节的正文）；
+ * 链接文字是它当前的编号（图表编号此时还没有随新标识更新）。
+ */
+function pickChapterRef(target: RefPick): void {
   const picker = refPicker.value
   refPicker.value = null
-  if (picker && editor.value?.insertChapterRef(picker.chapterId, chapterRefAddress(id, show))) return
+  let href: string
+  let text: string | undefined
+  if (target.kind === 'chapter') href = chapterRefAddress(target.id, target.show)
+  else {
+    const { element } = target
+    let id = element.id
+    if (id === null) {
+      id = newElementId()
+      const content = document.value.contents.get(element.chapterId) ?? ''
+      editor.value?.assignElementId(element.chapterId, content, element.kind, element.index, id)
+    }
+    href = elementRefAddress(element.kind, id)
+    text = element.label
+  }
+  if (picker && editor.value?.insertChapterRef(picker.chapterId, href, text)) return
   editor.value?.focus()
 }
 
@@ -863,6 +898,7 @@ async function createFirstChapter(): Promise<void> {
           :resolve-image="resolveImage"
           :ref-label="refLabel"
           :find-query="find.open.value && !reading ? find.query.value : ''"
+          :element-start="elementStart"
           @find-status="find.setSelected"
           @stats="stats = $event"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
@@ -891,6 +927,8 @@ async function createFirstChapter(): Promise<void> {
           :active-chapter-id="selectedId"
           :resolve-image="resolveImage"
           :initial-position="readingStart"
+          :ref-label="refLabel"
+          :element-start="(id: ChapterId) => elements.index.value.start(id)"
           @select="selectedId = $event"
           @exit="closeReading"
         />
@@ -965,6 +1003,7 @@ async function createFirstChapter(): Promise<void> {
       :tree="tree"
       :anchor="refPicker.request.anchor"
       :current="refPicker.request.current"
+      :elements="elements.index.value.entries"
       @pick="pickChapterRef"
       @cancel="cancelChapterRef"
     />

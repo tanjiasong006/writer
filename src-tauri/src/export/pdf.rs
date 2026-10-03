@@ -30,6 +30,7 @@ use super::pdf_layout::{Binding, ChapterNumber, Header, PageNumber, PageSetup, P
 use super::theme::{HeadingStyle, Theme};
 use super::{ExportError, ExportReport};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
+use crate::render::elements::ElementTargets;
 use crate::render::markdown::{plain_text, Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
 
@@ -84,6 +85,7 @@ fn layout(
 
     let mut writer = Writer::new(project_root, pdf_layout);
     writer.targets = ChapterTargets::new(document);
+    writer.elements = ElementTargets::new(document);
     writer.report.broken_references = broken_references(document);
     writer.preamble(document, book);
     for section in &document.sections {
@@ -236,6 +238,8 @@ struct Writer<'a> {
     title_block_before_body: bool,
     /// 章节引用的目标；默认不含任何章节。
     targets: ChapterTargets,
+    /// 图表的编号与引用目标（docs/decisions.md 第 12 节）。
+    elements: ElementTargets,
 }
 
 impl<'a> Writer<'a> {
@@ -252,6 +256,7 @@ impl<'a> Writer<'a> {
             quote_font: String::new(),
             title_block_before_body: false,
             targets: ChapterTargets::default(),
+            elements: ElementTargets::default(),
         }
     }
 
@@ -482,7 +487,17 @@ impl<'a> Writer<'a> {
     }
 
     fn block(&mut self, block: &Block, section: &Section) -> String {
+        let element = self.elements.of(block).cloned();
         if let Some((src, alt)) = block.as_figure() {
+            // 有编号的图：图注前是编号（“图 2-1　图注”），并带标签供图表引用跳转。
+            let caption = match &element {
+                Some(target) => format!("{}{ELEMENT_SEPARATOR}{alt}", target.label),
+                None => alt.to_owned(),
+            };
+            let label = element.as_ref().map(|t| format!(" {}", element_label(t.anchor))).unwrap_or_default();
+            // 图片无法显示时的占位文字仍用原来的图注。
+            let image_alt = alt;
+            let alt = caption.as_str();
             // 尺寸上限是完整正文区扣除图注及其间距，与图片落在页上的位置无关；
             // 图注高度在排版时按实际字体、宽度与折行测量，不做估算。
             // figure 不跨页拆分，当前页放不下时连同图注整体移到下一页。
@@ -496,11 +511,11 @@ impl<'a> Writer<'a> {
                     caption = string(alt),
                 );
             }
-            let image = self.image(src, alt, text_width, &max_height);
+            let image = self.image(src, image_alt, text_width, &max_height);
             return if alt.is_empty() {
-                format!("#figure({image})")
+                format!("#figure({image}){label}")
             } else {
-                format!("#figure({image}, caption: [#{}])", string(alt))
+                format!("#figure({image}, caption: [#{}]){label}", string(alt))
             };
         }
         match block {
@@ -525,7 +540,29 @@ impl<'a> Writer<'a> {
                 Some(language) => format!("#raw(block: true, lang: {}, {})", string(language), string(&breakable(text))),
                 None => format!("#raw(block: true, {})", string(&breakable(text))),
             },
-            Block::Table { alignments, header, rows } => {
+            Block::Table { alignments, header, rows, caption } => {
+                // 表格标题在表格上方，与表格留在同一页；有编号时前面是编号并带标签。
+                let title = match (caption, &element) {
+                    (Some(caption), Some(target)) => {
+                        format!(
+                            "#block(sticky: true, width: 100%, below: 0.6em)[#align(center, text(..writer-caption)[#{}])] {}\n",
+                            string(&format!("{}{ELEMENT_SEPARATOR}{}", target.label, caption.text)),
+                            element_label(target.anchor),
+                        )
+                    }
+                    _ => String::new(),
+                };
+                let table = self.table(alignments, header, rows);
+                format!("{title}{table}")
+            }
+            Block::Rule => "#align(center, line(length: 30%, stroke: 0.5pt + luma(160)))".to_owned(),
+        }
+    }
+
+    fn table(&mut self, alignments: &[Align], header: &Vec<Vec<Inline>>, rows: &[Vec<Vec<Inline>>]) -> String {
+        {
+            {
+                // 三线表 / 网格表（无图片时列宽随内容；含图片时各列等宽，见下）。
                 let columns = header.len().max(rows.iter().map(Vec::len).max().unwrap_or(0)).max(1);
                 let align: Vec<&str> = (0..columns)
                     .map(|i| match alignments.get(i) {
@@ -579,7 +616,6 @@ impl<'a> Writer<'a> {
                      table(columns: columns, align: ({align},){stroke}, table.header({head}), {cells})\n}})"
                 )
             }
-            Block::Rule => "#align(center, line(length: 30%, stroke: 0.5pt + luma(160)))".to_owned(),
         }
     }
 
@@ -617,6 +653,18 @@ impl<'a> Writer<'a> {
                         out.push_str(&string(&breakable(cached)));
                     }
                 },
+                // 图表引用：编号文字，链接到图表；失效引用输出链接文字（列入导出报告）。
+                Inline::ElementRef { kind, id, cached } => match self.elements.get(*kind, id) {
+                    Some(target) => out.push_str(&format!(
+                        "#link({})[#{}]",
+                        element_label(target.anchor),
+                        string(&target.label)
+                    )),
+                    None => {
+                        out.push('#');
+                        out.push_str(&string(&breakable(cached)));
+                    }
+                },
                 Inline::Strong(children) => {
                     out.push_str(&format!("#strong[{}]", self.inlines(children, container)))
                 }
@@ -635,7 +683,7 @@ impl<'a> Writer<'a> {
                         out.push_str(&content);
                     }
                 }
-                Inline::Image { src, alt } => {
+                Inline::Image { src, alt, .. } => {
                     // 与文字同段的图片（含表格单元格中的）：不超过所在容器的宽度与高度上限。
                     let image = self.image(src, alt, container.width, &container.max_height);
                     out.push_str(&format!("#box({image})"));
@@ -825,6 +873,14 @@ fn breakable(text: &str) -> String {
 }
 
 /// Typst 字符串字面量：转义反斜杠、引号与换行，去掉其余控制字符。
+/// 图表编号与图注 / 标题之间的分隔（全角空格）。
+const ELEMENT_SEPARATOR: &str = "\u{3000}";
+
+/// 有编号的图表的标签（图表引用的跳转目标）。
+fn element_label(anchor: usize) -> String {
+    format!("<writer-element-{anchor}>")
+}
+
 /// 章节标题的标签（章节引用的跳转目标）。
 fn chapter_label(index: usize) -> String {
     format!("<writer-chapter-{index}>")
@@ -1711,6 +1767,27 @@ mod tests {
         assert!(first.contains("第一处1正文") && first.contains("1脚注甲"), "{first}");
         let second = texts.iter().find(|t| t.contains("第二处")).unwrap();
         assert!(second.contains("第二处2") && second.contains("2脚注乙"), "{second}");
+    }
+
+    #[test]
+    fn figures_and_tables_are_numbered_and_referenced() {
+        let dir = project();
+        let png = dir.path().join("assets/图.png");
+        std::fs::create_dir_all(png.parent().unwrap()).unwrap();
+        image::RgbImage::new(20, 10).save(&png).unwrap();
+        let document = build(&request(
+            "",
+            &[
+                ("a", vec![1], "绪论", "见[旧](writer:figure/f1)与[旧](writer:table/t1)，失效：[原图](writer:figure/gone)。"),
+                ("b", vec![2], "方法", "![流程](../assets/图.png \"fig:f1\")\n\nTable: 样本 {#tbl:t1}\n\n| 组 |\n| - |\n| 甲 |"),
+            ],
+        ));
+        let (paged, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        let text = page_texts(&paged).concat();
+        assert!(text.contains("见图 2-1与表 2-1，失效：原图。"), "{text}");
+        assert!(text.contains("图 2-1\u{3000}流程") && text.contains("表 2-1\u{3000}样本"), "{text}");
+        assert_eq!(internal_links(&paged), 2);
+        assert_eq!(report.broken_references, vec!["原图"]);
     }
 
     fn three_chapters(title: &str) -> Document {

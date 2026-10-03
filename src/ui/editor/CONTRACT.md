@@ -19,6 +19,7 @@
 | `caret.ts` | 自绘文字光标：WebKit 原生光标在段落第二行起高度不对，改为按文字高度绘制（输入法组字期间用原生光标）。 |
 | `selection.ts` | 自绘选区底色：WebKit 原生底色从段落中间开始选择时第一行偏高，改为每行一整行行高、行与行首尾相接。 |
 | `figure_editing.ts` | 独立成段的图片（figure 节点）的编辑：Enter、Backspace / Delete，以及把只剩一张图片的段落转成 figure。 |
+| `element_numbering.ts` | 图表编号（与 Rust `render::elements` 同一规则）：章节中有编号的图表、全文索引、本章标注。 |
 | `footnote_view.ts` | 脚注的显示：上标编号（decoration）与章节末尾的脚注列表；编辑浮层是 `FootnotePopover.vue`。 |
 | `find.ts` | 查找与替换：文字块内（可跨格式边界）不区分拉丁大小写的匹配、上一个 / 下一个、替换事务与高亮 decoration。查找栏与跨章节由工作区 `use_find.ts` 组织。 |
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |
@@ -73,6 +74,9 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
   `insertChapterRef(chapterId, href)`；⌘ + 单击与右键菜单“前往”发出 `open-chapter`，跳转由上层完成，`revealStart` 把光标放在正文开头。
 - 脚注（docs/decisions.md 第 11 节）是行内原子节点 `footnote`（text 为内容文字，source 为载入时定义的原文）。
   Markdown 中写成 `[^n]` 加章节末尾的定义；写出时按顺序重新编号，内容未修改时写回原文。编号与章末列表只是显示。
+- 图表（docs/decisions.md 第 12 节）：图的标识在 figure 的 title（`fig:<id>`），表格标题与标识是 table 的 caption / captionId。
+  编号由上层给出的 `elementStart` 计算，只以 decoration 显示（图注前的编号、表格上方的标题），不进入文档；
+  图表引用与章节引用共用 `chapter_ref` 节点，`refLabel` 给出文字。
 - 查找（`findQuery`）只以 decoration 高亮匹配，不改变文档；当前匹配就是选区。替换是普通正文事务（进入撤销历史）；
   全文替换时其他章节在各自缓存的 EditorState 上修改（进入该章节自己的撤销历史），新正文以 change 发出。
 - 编辑环境主题来自应用级偏好，以展示参数作用在组件上：不改变文档、不产生 change、不进入正文撤销历史、不重建视图。

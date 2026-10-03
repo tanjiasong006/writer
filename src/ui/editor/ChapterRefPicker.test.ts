@@ -51,7 +51,7 @@ test('↑ / ↓ 选择，Enter 确定（带当前显示格式）；Esc 取消', 
   await input.trigger('keydown', { key: 'ArrowDown' })
   await wrapper.findAll('[role="radio"]')[1]!.trigger('click') // 仅编号
   await input.trigger('keydown', { key: 'Enter' })
-  expect(wrapper.emitted('pick')).toEqual([['a1', 'number']])
+  expect(wrapper.emitted('pick')).toEqual([[{ kind: 'chapter', id: 'a1', show: 'number' }]])
 
   await input.trigger('keydown', { key: 'Escape' })
   expect(wrapper.emitted('cancel')).toHaveLength(1)
@@ -61,7 +61,7 @@ test('点击章节确定；点击浮层以外取消', async () => {
   const wrapper = mountPicker()
   await wrapper.findAll('[role="radio"]')[2]!.trigger('click') // 仅标题
   await wrapper.findAll('[role="option"]')[3]!.trigger('click')
-  expect(wrapper.emitted('pick')).toEqual([['b', 'title']])
+  expect(wrapper.emitted('pick')).toEqual([[{ kind: 'chapter', id: 'b', show: 'title' }]])
   await wrapper.find('.chapter-ref-picker__backdrop').trigger('click')
   expect(wrapper.emitted('cancel')).toHaveLength(1)
 })

@@ -248,6 +248,26 @@ tokenizer.core.ruler.push('writer_nested_marks', (state) => {
   }
 })
 
+/**
+ * 表格标题（docs/decisions.md 第 12 节）：原文以 `Table: ` 开头、紧接着是表格（之间没有其他块）的段落成为表格的标题，
+ * 结尾的 `{#tbl:<id>}` 是标识。与 Rust 渲染器相同，按原文判断：转义的 `Table\:` 是普通段落。
+ */
+const CAPTION_PREFIX = 'Table: '
+const CAPTION_ID = /\s*\{#tbl:([A-Za-z0-9_-]+)\}$/
+
+tokenizer.core.ruler.push('writer_table_caption', (state) => {
+  const tokens = state.tokens
+  for (let i = 0; i + 3 < tokens.length; i++) {
+    const [open, inline, close, table] = tokens.slice(i, i + 4)
+    if (open.type !== 'paragraph_open' || close.type !== 'paragraph_close' || table.type !== 'table_open') continue
+    if (!inline.content.startsWith(CAPTION_PREFIX)) continue
+    const text = inlinePlainText(inline.children ?? []).trim().replace(/^Table:\s*/, '')
+    const id = CAPTION_ID.exec(text)
+    table.meta = { caption: id ? text.slice(0, id.index).trimEnd() : text, captionId: id ? id[1] : null }
+    tokens.splice(i, 3)
+  }
+})
+
 tokenizer.core.ruler.push('writer_task_list', (state) => {
   const tokens = state.tokens
   for (let i = 0; i + 2 < tokens.length; i++) {
@@ -356,7 +376,10 @@ const parser = new MarkdownParser(schema, tokenizer, {
   code_block: { block: 'code_block', noCloseToken: true },
   fence: { block: 'code_block', getAttrs: (token) => ({ params: token.info.trim() }), noCloseToken: true },
   hr: { node: 'horizontal_rule' },
-  table: { block: 'table' },
+  table: {
+    block: 'table',
+    getAttrs: (token) => (token.meta as { caption: string; captionId: string | null } | null) ?? {},
+  },
   thead: { ignore: true },
   tbody: { ignore: true },
   tr: { block: 'table_row' },
@@ -408,6 +431,8 @@ function titlePart(title: string | null): string {
  */
 function escapeLineStart(escaped: string): string {
   return escaped
+    // 段首的 `Table: ` 会让紧随其后的表格把这一段当作标题。
+    .replace(/^Table:/, 'Table\\:')
     .replace(/^(\d+)([.)])(?=\s|$)/, '$1\\$2')
     .replace(/^\+(?=\s|$)/, '\\+')
     .replace(/^=/, '\\=')
@@ -457,6 +482,15 @@ function alternateMarker(node: Node, parent: Node, index: number): boolean {
 }
 
 function serializeTable(state: MarkdownSerializerState, node: Node): void {
+  // 没有文字的标题不写出（Markdown 中写不出空标题）。
+  const caption = node.attrs.caption as string | null
+  if (caption !== null && caption.trim() !== '') {
+    const id = node.attrs.captionId as string | null
+    // 标题文字结尾恰好像标识时转义花括号，读回时不会被当成标识。
+    const text = state.esc(caption.trim()).replace(/\{(#tbl:[A-Za-z0-9_-]+\})$/, '\\{$1')
+    state.write(`${CAPTION_PREFIX}${text}${id ? ` {#tbl:${id}}` : ''}`)
+    state.closeBlock(node)
+  }
   const rows: string[][] = []
   const aligns: Array<string | null> = []
   node.forEach((row, _, rowIndex) => {

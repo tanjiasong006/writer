@@ -868,7 +868,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 ### P1：长文档写作核心能力
 
 1. ~~脚注：Markdown 解析未开启脚注，导出为字面 `[^1]`（`render/markdown.rs`）。~~（完成，见下方“P1-1 脚注”）
-2. 图表自动编号与引用（"见图 3""见表 2"）：已有图注，未发现自动编号，也不能像章节一样被交叉引用。
+2. ~~图表自动编号与引用（"见图 3""见表 2"）：已有图注，未发现自动编号，也不能像章节一样被交叉引用。~~（完成，见下方“P1-2 图表编号与引用”）
 3. 参考文献 / 文献引用（未发现）。
 4. 数学公式（未发现）：Typst 原生支持，PDF 成本低；Word 需要转换为 OMML。
 5. Word 导出目录：PDF 已有目录选项，Word 未发现。
@@ -887,6 +887,19 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   Word 脚注（`footnoteRef` 由占位替换、FootnoteText / FootnoteReference 样式），PDF `#footnote[…]`。
 - 验证：编辑器解析 / 写出、编辑交互、全文阅读测试；共享 fixture `footnotes`（两侧契约）；Word（脚注部件、编号标记、样式）
   与 PDF（页底、全文连续编号）测试；Story `ChapterEditor/Footnotes`、`FootnotePopover`（Storybook 中目视检查了编号、章末列表与编辑浮层）。
+
+#### P1-2 图表编号与引用（完成，2026-10-03）
+
+- 规则见 decisions 第 12 节、格式见 project-format 4.2。Domain：地址解析增加 `element`，`elementRefAddress`、`elementLabel`、`newElementId`。
+- 编辑器：表格的 caption / captionId（`writer_table_caption` 规则读、`serializeTable` 写，段首 `Table:` 转义）；
+  `element_numbering.ts`；图注前的编号（图片节点视图读取 decoration）与表格上方的标题（widget，单击 / 右键编辑，`TextPopover`）；
+  `setTableCaption`、`setElementId`。工作区 `use_elements.ts` 全文索引（只在编号或标识变化时更新引用文字），
+  ⌘K 浮层列出图表，第一次引用时为图表写入标识（其他章节在缓存的编辑器状态上修改）。全文阅读显示同样的编号。
+- Rust：`Block::Table.caption`、`Inline::Image.id`、`Inline::ElementRef`、`Address::Element`；`render::elements` 编号；
+  Word（图注 / 标题前编号、书签、内部超链接）、PDF（编号、标签、链接）；失效图表引用列入导出报告。
+- 验证：Domain、编号（TS / Rust 相同用例）、解析与写出、工作区端到端（显示、⌘K、标识写入、编号变化后的文字、前往、表格标题编辑、全文阅读）、
+  Word / PDF 输出测试；共享 fixture `element-refs`；Story `ChapterEditor/FiguresAndTables`、`ChapterRefPicker/WithFiguresAndTables`、
+  `TextPopover`。Storybook 中目视检查了编号与表格标题。
 
 ### P2：体验提升
 

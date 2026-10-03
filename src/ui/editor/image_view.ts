@@ -1,6 +1,6 @@
 import type { Node } from 'prosemirror-model'
 import { NodeSelection } from 'prosemirror-state'
-import type { EditorView, NodeView, NodeViewConstructor } from 'prosemirror-view'
+import type { Decoration, EditorView, NodeView, NodeViewConstructor } from 'prosemirror-view'
 import { nodes } from './schema.ts'
 
 /** 把正文中的图片引用（如 ../assets/图.png）转换成可显示的地址；不能显示（项目外、远程地址等）返回 null。 */
@@ -79,7 +79,7 @@ function showMissing(picture: HTMLElement, src: string, alt: string): void {
  * 只读展示的图片（全文阅读）：与编辑器中的 DOM 结构和类名相同，样式因此一致（editor/document_body.css）；
  * 独立成段的图片下方是图注文字（没有图注时不显示）。
  */
-export function staticImageDOM(node: Node, resolve: ImageResolver): HTMLElement {
+export function staticImageDOM(node: Node, resolve: ImageResolver, label: string | null = null): HTMLElement {
   const { src, alt } = node.attrs as { src: string; alt: string }
   const block = node.type === nodes.figure
   const dom = document.createElement(block ? 'div' : 'span')
@@ -93,7 +93,13 @@ export function staticImageDOM(node: Node, resolve: ImageResolver): HTMLElement 
   if (block && alt !== '') {
     const caption = document.createElement('div')
     caption.className = 'editor-figure__caption'
-    caption.textContent = alt
+    if (label) {
+      const number = document.createElement('span')
+      number.className = 'editor-figure__caption-label'
+      number.textContent = label
+      caption.append(number)
+    }
+    caption.append(alt)
     dom.append(caption)
   }
   return dom
@@ -108,6 +114,8 @@ export function staticImageDOM(node: Node, resolve: ImageResolver): HTMLElement 
  */
 class FigureView extends ImageView {
   private readonly caption: HTMLTextAreaElement
+  /** 有编号的图在图注前显示“图 2-1”（编号来自 decoration，见 ChapterEditor 的 elementDecorations）。 */
+  private readonly label: HTMLElement
   /** 文本框的自动高度：隐藏的同内容元素撑开外层网格，文本框铺满同一格。 */
   private readonly sizer: HTMLElement
   private readonly view: EditorView
@@ -115,10 +123,20 @@ class FigureView extends ImageView {
   /** 结束编辑时返回正文（Enter / Tab / Esc）；焦点被点击等方式带走时为 false。 */
   private returning = false
 
-  constructor(node: Node, view: EditorView, getPos: () => number | undefined, resolve: ImageResolver) {
+  constructor(
+    node: Node,
+    view: EditorView,
+    getPos: () => number | undefined,
+    resolve: ImageResolver,
+    decorations: readonly Decoration[],
+  ) {
     super(node, resolve, true)
     this.view = view
     this.getPos = getPos
+    const row = document.createElement('div')
+    row.className = 'editor-figure__caption-row'
+    this.label = document.createElement('span')
+    this.label.className = 'editor-figure__caption-label'
     this.sizer = document.createElement('div')
     this.sizer.className = 'editor-figure__caption'
     this.caption = document.createElement('textarea')
@@ -128,8 +146,10 @@ class FigureView extends ImageView {
     this.caption.setAttribute('aria-label', '图注')
     this.caption.spellcheck = false
     this.sizer.append(this.caption)
-    this.dom.append(this.sizer)
+    row.append(this.label, this.sizer)
+    this.dom.append(row)
     this.showCaption(node.attrs.alt as string)
+    this.showLabel(decorations)
 
     this.caption.addEventListener('input', () => {
       // 图注只有一行：粘贴进来的换行替换为空格。
@@ -151,8 +171,9 @@ class FigureView extends ImageView {
     this.caption.addEventListener('blur', () => this.finish())
   }
 
-  override update(node: Node): boolean {
+  override update(node: Node, decorations: readonly Decoration[] = []): boolean {
     if (!super.update(node)) return false
+    this.showLabel(decorations)
     // 编辑中不覆盖文本框（撤销等外部变化在编辑结束后才可能发生）。
     if (document.activeElement !== this.caption) this.showCaption(node.attrs.alt as string)
     return true
@@ -160,6 +181,13 @@ class FigureView extends ImageView {
 
   stopEvent(event: Event): boolean {
     return event.target === this.caption
+  }
+
+  private showLabel(decorations: readonly Decoration[]): void {
+    const label = decorations.map((decoration) => (decoration.spec as { elementLabel?: string }).elementLabel).find(Boolean)
+    this.label.textContent = label ?? ''
+    this.label.hidden = !label
+    this.label.parentElement?.classList.toggle('has-label', !!label)
   }
 
   private showCaption(alt: string): void {
@@ -208,7 +236,7 @@ export function imageNodeView(resolve: ImageResolver): NodeViewConstructor {
 }
 
 export function figureNodeView(resolve: ImageResolver): NodeViewConstructor {
-  return (node, view, getPos) => new FigureView(node, view, getPos, resolve)
+  return (node, view, getPos, decorations) => new FigureView(node, view, getPos, resolve, decorations)
 }
 
 /** 编辑选中图片的图注，光标放在末尾；没有选中独立成段的图片时返回 false。 */

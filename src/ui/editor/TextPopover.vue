@@ -2,16 +2,17 @@
 import { nextTick, onMounted, ref } from 'vue'
 
 /**
- * 编辑脚注内容的浮层：在脚注（或插入处）下方弹出，下方放不下时在上方。
+ * 编辑一段短文字的浮层（脚注内容、表格标题）：在对象（或插入处）下方弹出，下方放不下时在上方。
  *
- * - 标题“脚注 n”，一个随内容增高的文本框；脚注只有一段文字，换行替换为空格。
+ * - 标题（如“脚注 2”“表格标题”）与一个随内容增高的文本框；内容只有一段文字，换行替换为空格。
  * - Enter 完成，Esc 放弃；点击浮层以外也完成（与图注相同，不丢失已输入的内容）。
  * - 只发出 commit / cancel，正文由编辑器修改；焦点由编辑器放回正文。
  */
 const props = defineProps<{
   anchor: { readonly x: number; readonly y: number }
-  number: number
+  label: string
   text: string
+  placeholder: string
 }>()
 
 const emit = defineEmits<{
@@ -62,12 +63,12 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="footnote-popover__backdrop" @mousedown.prevent="commit"></div>
+  <div class="text-popover__backdrop" @mousedown.prevent="commit"></div>
   <div
     ref="panel"
-    class="footnote-popover"
+    class="text-popover"
     role="dialog"
-    :aria-label="`脚注 ${number}`"
+    :aria-label="label"
     :style="
       position
         ? {
@@ -78,30 +79,30 @@ onMounted(async () => {
         : { visibility: 'hidden' }
     "
   >
-    <div class="footnote-popover__label">脚注 {{ number }}</div>
-    <div class="footnote-popover__field" :data-value="value">
+    <div class="text-popover__label">{{ label }}</div>
+    <div class="text-popover__field" :data-value="value">
       <textarea
         ref="input"
         v-model="value"
-        class="footnote-popover__input"
+        class="text-popover__input"
         rows="1"
-        placeholder="脚注内容"
-        aria-label="脚注内容"
+        :placeholder="placeholder"
+        :aria-label="placeholder"
         @keydown="onKeydown"
       ></textarea>
     </div>
-    <div class="footnote-popover__hint">↩ 完成　⎋ 取消</div>
+    <div class="text-popover__hint">↩ 完成　⎋ 取消</div>
   </div>
 </template>
 
 <style scoped>
-.footnote-popover__backdrop {
+.text-popover__backdrop {
   position: fixed;
   inset: 0;
   z-index: var(--z-popover);
 }
 
-.footnote-popover {
+.text-popover {
   position: fixed;
   z-index: calc(var(--z-popover) + 1);
   width: 360px;
@@ -114,16 +115,16 @@ onMounted(async () => {
   color: var(--color-text);
   font-size: var(--text-m);
   line-height: var(--leading-normal);
-  animation: footnote-popover-in var(--duration-fast) var(--ease-out);
+  animation: text-popover-in var(--duration-fast) var(--ease-out);
 }
 
-@keyframes footnote-popover-in {
+@keyframes text-popover-in {
   from {
     opacity: 0;
   }
 }
 
-.footnote-popover__label {
+.text-popover__label {
   margin-bottom: var(--space-2);
   color: var(--color-text-tertiary);
   font-size: var(--text-s);
@@ -132,14 +133,14 @@ onMounted(async () => {
 }
 
 /* 随内容增高的文本框：隐藏的同内容 ::after 与文本框放在同一网格格中撑开高度（与图注相同）。 */
-.footnote-popover__field {
+.text-popover__field {
   display: grid;
   max-height: 240px;
   overflow-y: auto;
 }
 
-.footnote-popover__field::after,
-.footnote-popover__input {
+.text-popover__field::after,
+.text-popover__input {
   grid-area: 1 / 1;
   box-sizing: border-box;
   margin: 0;
@@ -150,12 +151,12 @@ onMounted(async () => {
   overflow-wrap: anywhere;
 }
 
-.footnote-popover__field::after {
+.text-popover__field::after {
   content: attr(data-value) ' ';
   visibility: hidden;
 }
 
-.footnote-popover__input {
+.text-popover__input {
   overflow: hidden;
   resize: none;
   background: transparent;
@@ -163,11 +164,11 @@ onMounted(async () => {
   outline: none;
 }
 
-.footnote-popover__input::placeholder {
+.text-popover__input::placeholder {
   color: var(--color-text-tertiary);
 }
 
-.footnote-popover__hint {
+.text-popover__hint {
   margin-top: var(--space-2);
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-separator);

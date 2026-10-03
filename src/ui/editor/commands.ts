@@ -18,6 +18,7 @@ import {
   type TableRect,
 } from 'prosemirror-tables'
 import { marks, nodes } from './schema.ts'
+import { elementsOf } from './element_numbering.ts'
 import {
   chapterRefAddress,
   parseChapterRefAddress,
@@ -322,6 +323,33 @@ export function setFootnoteText(pos: number, text: string): Command {
     if (node?.type !== nodes.footnote) return false
     if (node.attrs.text === text) return true
     if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, text }))
+    return true
+  }
+}
+
+/** 设置 pos 处表格的标题（null 去掉标题，标识保留）。 */
+export function setTableCaption(pos: number, caption: string | null): Command {
+  return (state, dispatch) => {
+    const node = state.doc.nodeAt(pos)
+    if (node?.type !== nodes.table) return false
+    if (node.attrs.caption === caption) return true
+    if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, caption }))
+    return true
+  }
+}
+
+/**
+ * 给章节中第 index 个有编号的图（或表）设置被引用时的标识（docs/decisions.md 第 12 节）：
+ * 图写在图片的 title（`fig:<id>`），表写在表格标题的标识。已有标识时不改变。
+ */
+export function setElementId(kind: 'figure' | 'table', index: number, id: string): Command {
+  return (state, dispatch) => {
+    const element = elementsOf(state.doc).filter((candidate) => candidate.kind === kind)[index]
+    if (!element) return false
+    if (element.id !== null) return true
+    const node = state.doc.nodeAt(element.pos)!
+    const attrs = kind === 'figure' ? { ...node.attrs, title: `fig:${id}` } : { ...node.attrs, captionId: id }
+    if (dispatch) dispatch(state.tr.setNodeMarkup(element.pos, undefined, attrs))
     return true
   }
 }

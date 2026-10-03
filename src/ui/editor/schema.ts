@@ -192,6 +192,17 @@ export const schema = new Schema({
     },
 
     ...table,
+    /**
+     * 表格标题（docs/decisions.md 第 12 节）：Markdown 中是紧接在表格之前、以 `Table: ` 开头的段落，
+     * captionId 是被引用时的标识（`{#tbl:<id>}`）。caption 为 null 表示没有标题。
+     */
+    table: {
+      ...table.table,
+      attrs: {
+        caption: { default: null, validate: 'string|null' },
+        captionId: { default: null, validate: 'string|null' },
+      },
+    },
     // 单元格只有一行行内内容（是文本块），gapcursor 会把"两个单元格之间"当成可放光标的位置，
     // 导致方向键无法离开首尾的表格。行内不允许 gapcursor，光标才能移到表格之前 / 之后。
     table_row: { ...table.table_row, allowGapCursor: false },

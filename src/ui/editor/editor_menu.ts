@@ -137,6 +137,8 @@ export function editorContextMenu(
   codeLanguage: string | null = null,
   chapterRef: ChapterRefMenu | null = null,
   footnote = false,
+  /** 光标在表格中时表格是否有标题；不在表格中时为 null。 */
+  tableCaption: boolean | null = null,
 ): MenuEntry[] {
   if (chapterRef !== null) return chapterRefMenu(state, chapterRef)
   if (footnote) {
@@ -163,6 +165,8 @@ export function editorContextMenu(
       commandEntry('delete-row', state),
       commandEntry('delete-column', state),
       commandEntry('delete-table', state),
+      { separator: true },
+      { id: 'table:caption', label: tableCaption ? '编辑表格标题…' : '添加表格标题…' },
       { separator: true },
     )
   }

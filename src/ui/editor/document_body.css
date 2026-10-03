@@ -230,6 +230,18 @@
   text-underline-offset: 0.2em;
 }
 
+/* 表格标题：在表格上方居中，与图注相同的字号与颜色；编号是次级颜色。 */
+.document-body .table-caption {
+  margin: 1em 0 0.4em;
+  color: var(--color-doc-muted);
+  font-family: var(--doc-caption-font);
+  font-size: var(--doc-caption-size);
+  line-height: 1.5;
+  text-align: center;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /*
  * 脚注：正文中是链接色的上标编号（编号由 decoration / 全文阅读给出 data-number）；
  * 章节末尾在一条短线下列出全部脚注，字号小一号、次级颜色，与页底脚注的阅读习惯相同。
@@ -330,13 +342,25 @@
   text-align: center;
 }
 
-.document-body .editor-figure__caption {
+.document-body .editor-figure__caption,
+.document-body .editor-figure__caption-row {
   max-width: 36em;
   margin: var(--space-3) auto 0;
   font-family: var(--doc-caption-font);
   font-size: var(--doc-caption-size);
   line-height: 1.6;
   color: var(--color-doc-muted);
+}
+
+/* 编辑器中图注文本框与编号同在一行（ChapterEditor.vue）。 */
+.document-body .editor-figure__caption-row .editor-figure__caption {
+  margin: 0;
+}
+
+/* 图表的编号与后面的图注 / 标题之间留一个全角空格的距离。 */
+.document-body .editor-figure__caption-label,
+.document-body .table-caption__label {
+  margin-right: 1em;
 }
 
 .document-body .editor-image img {

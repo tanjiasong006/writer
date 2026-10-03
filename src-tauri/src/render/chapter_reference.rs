@@ -27,6 +27,15 @@ pub enum Address {
     /// 以 `writer:` 开头但不符合格式：失效引用。
     Malformed,
     Ref(RefTarget),
+    /// 图表引用（docs/decisions.md 第 12 节）。
+    Element(ElementKind, String),
+}
+
+/// 可以被引用的元素。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ElementKind {
+    Figure,
+    Table,
 }
 
 const SCHEME: &str = "writer:";
@@ -35,6 +44,21 @@ const PREFIX: &str = "writer:chapter/";
 pub fn parse_address(href: &str) -> Address {
     if !href.starts_with(SCHEME) {
         return Address::Link;
+    }
+    for (kind, prefix) in [(ElementKind::Figure, "writer:figure/"), (ElementKind::Table, "writer:table/")] {
+        let Some(encoded) = href.strip_prefix(prefix) else {
+            continue;
+        };
+        return match decode(encoded) {
+            Some(id)
+                if !encoded.contains(['/', '?', '#'])
+                    && !id.is_empty()
+                    && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') =>
+            {
+                Address::Element(kind, id)
+            }
+            _ => Address::Malformed,
+        };
     }
     let Some(rest) = href.strip_prefix(PREFIX) else {
         return Address::Malformed;
@@ -146,7 +170,10 @@ impl ChapterTargets {
 
 /// 文档中全部失效引用的链接文字，按阅读顺序（导出报告）。
 pub fn broken_references(document: &Document) -> Vec<String> {
-    let targets = ChapterTargets::new(document);
+    let targets = Targets {
+        chapters: ChapterTargets::new(document),
+        elements: super::elements::ElementTargets::new(document),
+    };
     let mut out = Vec::new();
     for section in &document.sections {
         broken_in_blocks(&section.blocks, &targets, &mut out);
@@ -154,7 +181,12 @@ pub fn broken_references(document: &Document) -> Vec<String> {
     out
 }
 
-fn broken_in_blocks(blocks: &[Block], targets: &ChapterTargets, out: &mut Vec<String>) {
+struct Targets {
+    chapters: ChapterTargets,
+    elements: super::elements::ElementTargets,
+}
+
+fn broken_in_blocks(blocks: &[Block], targets: &Targets, out: &mut Vec<String>) {
     for block in blocks {
         match block {
             Block::Paragraph(inlines) => broken_in_inlines(inlines, targets, out),
@@ -174,10 +206,13 @@ fn broken_in_blocks(blocks: &[Block], targets: &ChapterTargets, out: &mut Vec<St
     }
 }
 
-fn broken_in_inlines(inlines: &[Inline], targets: &ChapterTargets, out: &mut Vec<String>) {
+fn broken_in_inlines(inlines: &[Inline], targets: &Targets, out: &mut Vec<String>) {
     for inline in inlines {
         match inline {
-            Inline::ChapterRef { target, cached } if targets.get(target).is_none() => {
+            Inline::ChapterRef { target, cached } if targets.chapters.get(target).is_none() => {
+                out.push(cached.clone())
+            }
+            Inline::ElementRef { kind, id, cached } if targets.elements.get(*kind, id).is_none() => {
                 out.push(cached.clone())
             }
             Inline::Strong(children)
@@ -235,6 +270,12 @@ mod tests {
     }
 
     #[test]
+    fn element_references() {
+        assert_eq!(parse_address("writer:figure/a1"), Address::Element(ElementKind::Figure, "a1".into()));
+        assert_eq!(parse_address("writer:table/x_y-2"), Address::Element(ElementKind::Table, "x_y-2".into()));
+    }
+
+    #[test]
     fn reference_text() {
         assert_eq!(
             ref_text(Some("2.1"), "方法", RefShow::NumberTitle),
@@ -279,7 +320,9 @@ mod tests {
     fn malformed_addresses() {
         for href in [
             "writer:",
-            "writer:figure/a",
+            "writer:figure/a b",
+            "writer:figure/",
+            "writer:table/a/b",
             "writer:chapter/",
             "writer:chapter/a/b",
             "writer:chapter/a#x",

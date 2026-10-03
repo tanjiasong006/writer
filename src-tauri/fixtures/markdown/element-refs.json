@@ -1,0 +1,45 @@
+{
+  "说明": "图表的身份与引用（docs/decisions.md 第 12 节）：独立图片的 title 为 fig:<id>；紧接在表格之前、原文以 Table: 开头的段落是表格标题，结尾 {#tbl:<id>} 是标识。转义的 Table\\: 与后面不是表格的段落是普通段落。引用地址 writer:figure/<id>、writer:table/<id>，id 只能是字母、数字、- 与 _。",
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "如" },
+        { "element": { "kind": "figure", "id": "f1" }, "cached": "图 1-1" },
+        { "text": "所示，数据见" },
+        { "element": { "kind": "table", "id": "t1" }, "cached": "旧编号" },
+        { "text": "。" }
+      ]
+    },
+    { "type": "figure", "src": "../assets/流程.png", "alt": "研究流程", "id": "f1" },
+    { "type": "figure", "src": "../assets/b.png", "alt": "没有标识的图" },
+    {
+      "type": "table",
+      "align": ["none", "none"],
+      "header": [[{ "text": "组别" }], [{ "text": "人数" }]],
+      "rows": [[[{ "text": "对照" }], [{ "text": "30" }]]],
+      "caption": { "text": "样本构成", "id": "t1" }
+    },
+    {
+      "type": "table",
+      "align": ["none"],
+      "header": [[{ "text": "甲" }]],
+      "rows": [[[{ "text": "乙" }]]],
+      "caption": { "text": "没有标识的表" }
+    },
+    { "type": "paragraph", "inlines": [{ "text": "Table: 转义后是普通段落" }] },
+    { "type": "table", "align": ["none"], "header": [[{ "text": "丙" }]], "rows": [] },
+    { "type": "paragraph", "inlines": [{ "text": "Table: 后面不是表格的段落是文字" }] },
+    { "type": "paragraph", "inlines": [{ "text": "普通段落。" }] },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "失效：" },
+        { "element": { "kind": "figure", "id": "gone" }, "cached": "图 9-9" },
+        { "text": "，格式错误：" },
+        { "ref": null, "cached": "坏" },
+        { "text": "。" }
+      ]
+    }
+  ]
+}

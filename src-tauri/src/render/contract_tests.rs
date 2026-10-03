@@ -42,7 +42,7 @@ fn runs(inlines: &[Inline], marks: &[String], out: &mut Vec<Value>) {
             Inline::SoftBreak => out.push(with_marks(object(json!({ "text": " " })))),
             Inline::HardBreak => out.push(json!({ "break": true })),
             Inline::Code(code) => out.push(with_marks(object(json!({ "code": code })))),
-            Inline::Image { src, alt } => {
+            Inline::Image { src, alt, .. } => {
                 out.push(with_marks(object(json!({ "image": src, "alt": alt }))))
             }
             Inline::Strong(children) => nested("strong".into(), children, out),
@@ -56,6 +56,13 @@ fn runs(inlines: &[Inline], marks: &[String], out: &mut Vec<Value>) {
                     .collect::<Vec<_>>()
                     .join(" ");
                 out.push(with_marks(object(json!({ "footnote": text }))))
+            }
+            Inline::ElementRef { kind, id, cached } => {
+                let kind = match kind {
+                    crate::render::chapter_reference::ElementKind::Figure => "figure",
+                    crate::render::chapter_reference::ElementKind::Table => "table",
+                };
+                out.push(with_marks(object(json!({ "element": { "kind": kind, "id": id }, "cached": cached }))))
             }
             Inline::ChapterRef { target, cached } => {
                 let target = target.as_ref().map(|target| {
@@ -105,8 +112,12 @@ fn blocks(blocks: &[Block]) -> Value {
 }
 
 fn block(block: &Block) -> Value {
-    if let Some((src, alt)) = block.as_figure() {
-        return json!({ "type": "figure", "src": src, "alt": alt });
+    if let Some((src, alt, id)) = block.figure() {
+        let mut figure = json!({ "type": "figure", "src": src, "alt": alt });
+        if let Some(id) = id {
+            figure["id"] = json!(id);
+        }
+        return figure;
     }
     match block {
         Block::Paragraph(content) => json!({ "type": "paragraph", "inlines": inlines(content) }),
@@ -121,7 +132,8 @@ fn block(block: &Block) -> Value {
             "start": start,
             "items": items.iter().map(|item| list_item(item)).collect::<Vec<_>>(),
         }),
-        Block::Table { alignments, header, rows } => json!({
+        Block::Table { alignments, header, rows, caption } => {
+            let mut table = json!({
             "type": "table",
             "align": alignments.iter().map(|a| match a {
                 Align::None => "none",
@@ -131,7 +143,15 @@ fn block(block: &Block) -> Value {
             }).collect::<Vec<_>>(),
             "header": header.iter().map(|cell| inlines(cell)).collect::<Vec<_>>(),
             "rows": rows.iter().map(|row| row.iter().map(|cell| inlines(cell)).collect::<Vec<_>>()).collect::<Vec<_>>(),
-        }),
+            });
+            if let Some(caption) = caption {
+                table["caption"] = match &caption.id {
+                    Some(id) => json!({ "text": caption.text, "id": id }),
+                    None => json!({ "text": caption.text }),
+                };
+            }
+            table
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 {
-  "说明": "章节交叉引用（docs/decisions.md 第 9 节）：地址以 writer: 开头的链接。链接文字是缓存（cached），只保留纯文字。** 前是中文、后是 [ 时不能开始强调，第三段句中的星号保留为文字。",
+  "说明": "交叉引用（writer:figure/1 是图表引用，见 element-refs）。章节交叉引用（docs/decisions.md 第 9 节）：地址以 writer: 开头的链接。链接文字是缓存（cached），只保留纯文字。** 前是中文、后是 [ 时不能开始强调，第三段句中的星号保留为文字。",
   "blocks": [
     {
       "type": "paragraph",
@@ -48,7 +48,7 @@
         { "text": "格式错误：" },
         { "ref": null, "cached": "失效" },
         { "text": "、" },
-        { "ref": null, "cached": "也失效" },
+        { "element": { "kind": "figure", "id": "1" }, "cached": "也失效" },
         { "text": "、" },
         { "ref": null, "cached": "编码错误" },
         { "text": "。" }

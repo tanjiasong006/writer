@@ -29,6 +29,7 @@ use super::fonts::{docx_fonts, FontFamily};
 use super::images::{display_size_pt, load_for_export, text_height_pt, Bounds};
 use super::theme::Theme;
 use super::{ExportError, ExportReport};
+use crate::render::elements::{ElementTarget, ElementTargets};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::markdown::{Align, Block, Inline};
 use crate::render::{resolve_image, Document, Section};
@@ -99,6 +100,7 @@ pub fn export(
             ..ExportReport::default()
         },
         targets: ChapterTargets::new(document),
+        elements: ElementTargets::new(document),
         next_numbering: FIRST_LIST_NUMBERING,
         numberings: Vec::new(),
         items: Vec::new(),
@@ -256,6 +258,8 @@ struct Writer<'a> {
     report: ExportReport,
     /// 章节引用的目标。
     targets: ChapterTargets,
+    /// 图表的编号与引用目标（docs/decisions.md 第 12 节）。
+    elements: ElementTargets,
     next_numbering: usize,
     numberings: Vec<Numbering>,
     items: Vec<Item>,
@@ -303,8 +307,9 @@ impl Writer<'_> {
     }
 
     fn block(&mut self, block: &Block, section: &Section, context: BlockContext) {
+        let element = self.elements.of(block).cloned();
         if let Some((src, alt)) = block.as_figure() {
-            self.figure(src, alt, context);
+            self.figure(src, alt, element.as_ref(), context);
             return;
         }
         match block {
@@ -350,7 +355,16 @@ impl Writer<'_> {
                 alignments,
                 header,
                 rows,
-            } => self.table(alignments, header, rows),
+                caption,
+            } => {
+                // 表格标题在表格上方（Caption 样式），与表格留在同一页；有编号时前面是编号并带书签。
+                if let (Some(caption), Some(target)) = (caption, &element) {
+                    let text = format!("{}{ELEMENT_SEPARATOR}{}", target.label, caption.text);
+                    let p = self.caption_paragraph(&text, target, context).keep_next(true);
+                    self.items.push(Item::Paragraph(p));
+                }
+                self.table(alignments, header, rows)
+            }
             Block::Rule => self
                 .items
                 .push(Item::Paragraph(short_rule(0.3, 4, RULE_COLOR))),
@@ -543,7 +557,23 @@ impl Writer<'_> {
 
     /// 独立成段的图片：居中；有图注时图注紧随其后，两者保持在同一页。
     /// 尺寸上限是完整正文区（不是当前页剩余空间）扣除图片前后间距与图注占用的高度。
-    fn figure(&mut self, src: &str, alt: &str, context: BlockContext) {
+    /// 图注 / 表格标题段落：Caption 样式；有编号的图表带书签（图表引用的跳转目标）。
+    fn caption_paragraph(&self, text: &str, target: &ElementTarget, context: BlockContext) -> Paragraph {
+        let id = ELEMENT_BOOKMARK_BASE + target.anchor;
+        self.indent(Paragraph::new().style("Caption"), context)
+            .add_bookmark_start(id, element_bookmark(target.anchor))
+            .add_run(Run::new().add_text(xml_safe(text)))
+            .add_bookmark_end(id)
+    }
+
+    fn figure(&mut self, src: &str, alt: &str, element: Option<&ElementTarget>, context: BlockContext) {
+        let caption = match element {
+            Some(target) => format!("{}{ELEMENT_SEPARATOR}{alt}", target.label),
+            None => alt.to_owned(),
+        };
+        // 图片无法显示时的占位文字仍用原来的图注。
+        let image_alt = alt;
+        let alt = caption.as_str();
         let theme = &self.theme;
         let spacing_pt = theme.image_spacing * theme.body.size;
         let spacing = twips(spacing_pt);
@@ -567,14 +597,16 @@ impl Writer<'_> {
         // 图片与下面的图注留在同一页。
         let p = p
             .keep_next(!alt.is_empty())
-            .add_run(self.image_run(src, alt, bounds));
+            .add_run(self.image_run(src, image_alt, bounds));
         self.items.push(Item::Paragraph(p));
         if !alt.is_empty() {
-            let caption = self
-                .indent(Paragraph::new().style("Caption"), context)
-                .line_spacing(LineSpacing::new().after(spacing))
-                .add_run(Run::new().add_text(xml_safe(alt)));
-            self.items.push(Item::Paragraph(caption));
+            let caption = match element {
+                Some(target) => self.caption_paragraph(alt, target, context),
+                None => self
+                    .indent(Paragraph::new().style("Caption"), context)
+                    .add_run(Run::new().add_text(xml_safe(alt))),
+            };
+            self.items.push(Item::Paragraph(caption.line_spacing(LineSpacing::new().after(spacing))));
         }
     }
 
@@ -614,6 +646,16 @@ impl Writer<'_> {
                         p.add_hyperlink(
                             Hyperlink::new(chapter_bookmark(chapter.index), HyperlinkType::Anchor)
                                 .add_run(run),
+                        )
+                    }
+                    None => p.add_run(styled(Run::new().add_text(xml_safe(cached)), style)),
+                },
+                // 图表引用：编号文字，链接到图注 / 表格标题上的书签；失效引用输出链接文字（列入导出报告）。
+                Inline::ElementRef { kind, id, cached } => match self.elements.get(*kind, id) {
+                    Some(target) => {
+                        let run = styled(Run::new().add_text(xml_safe(&target.label)), style).color(LINK_COLOR);
+                        p.add_hyperlink(
+                            Hyperlink::new(element_bookmark(target.anchor), HyperlinkType::Anchor).add_run(run),
                         )
                     }
                     None => p.add_run(styled(Run::new().add_text(xml_safe(cached)), style)),
@@ -663,7 +705,7 @@ impl Writer<'_> {
                         p.add_run(run)
                     }
                 }
-                Inline::Image { src, alt } => {
+                Inline::Image { src, alt, .. } => {
                     // 与文字同段的图片：不超过所在容器的宽度与高度上限。
                     let run = self.image_run(src, alt, bounds);
                     p.add_run(run)
@@ -1006,6 +1048,15 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
 }
 
 /// 章节标题的书签名（章节引用的跳转目标）。下划线开头是 Word 的隐藏书签，不出现在书签列表中。
+/// 图表编号与图注 / 标题之间的分隔（全角空格，与 PDF 相同）。
+const ELEMENT_SEPARATOR: &str = "\u{3000}";
+/// 图表书签的 id 从这里开始，不与章节书签（按章节序号）重复。
+const ELEMENT_BOOKMARK_BASE: usize = 1_000_000;
+
+fn element_bookmark(anchor: usize) -> String {
+    format!("_WriterElement{anchor}")
+}
+
 fn chapter_bookmark(index: usize) -> String {
     format!("_WriterChapter{index}")
 }
@@ -1201,6 +1252,25 @@ mod tests {
         assert!(!xml.contains(r#"<w:pStyle w:val="Subtitle" />"#));
         assert!(!xml.contains(r#"<w:pStyle w:val="Author" />"#));
         assert!(!part(&bytes, "docProps/core.xml").contains("dc:creator"));
+    }
+
+    #[test]
+    fn figures_and_tables_are_numbered_with_bookmarks_and_references_link_to_them() {
+        let dir = project();
+        let (bytes, report) = export_ok(
+            &dir,
+            &[
+                ("a", vec![1], "绪论", "见[旧](writer:figure/f1)与[旧](writer:table/t1)；[原表](writer:table/gone)。"),
+                ("b", vec![2], "方法", "![流程](missing.png \"fig:f1\")\n\nTable: 样本 {#tbl:t1}\n\n| 组 |\n| - |\n| 甲 |"),
+            ],
+        );
+        let xml = part(&bytes, "word/document.xml");
+        assert!(xml.contains("图 2-1\u{3000}流程") && xml.contains("表 2-1\u{3000}样本"), "{xml}");
+        assert!(xml.contains(r#"w:name="_WriterElement0""#) && xml.contains(r#"w:name="_WriterElement1""#));
+        assert!(xml.contains(r#"w:anchor="_WriterElement0""#) && xml.contains(r#"w:anchor="_WriterElement1""#));
+        // 表格标题在表格之前。
+        assert!(xml.find("表 2-1").unwrap() < xml.find("<w:tbl>").unwrap());
+        assert_eq!(report.broken_references, vec!["原表"]);
     }
 
     #[test]

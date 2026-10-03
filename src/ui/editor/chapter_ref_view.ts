@@ -45,6 +45,32 @@ export function chapterRefLabels(tree: ChapterTree): ChapterRefLabel {
   }
 }
 
+/**
+ * 图表引用的文字（docs/decisions.md 第 12 节）：“图 2-1”；前往时到图表所在的章节。
+ * find 按种类与标识查找全文中有编号的图表（element_numbering.ts 的 ElementIndex.find）。
+ */
+export function elementRefLabels(
+  find: (kind: 'figure' | 'table', id: string) => { readonly label: string; readonly caption: string; readonly chapterId: ChapterId } | null,
+): ChapterRefLabel {
+  return (href) => {
+    const address = parseChapterRefAddress(href)
+    if (address.kind !== 'element') return null
+    const target = find(address.element, address.id)
+    return target ? { text: target.label, id: target.chapterId, name: `${target.label} ${target.caption}` } : null
+  }
+}
+
+/** 依次尝试多个解析（章节引用、图表引用）。 */
+export function combineRefLabels(...labels: readonly ChapterRefLabel[]): ChapterRefLabel {
+  return (href) => {
+    for (const label of labels) {
+      const resolved = label(href)
+      if (resolved) return resolved
+    }
+    return null
+  }
+}
+
 /** 没有章节树时（如单独使用编辑器）：所有引用都无法解析，显示为失效。 */
 export const NO_CHAPTER_REFS: ChapterRefLabel = () => null
 

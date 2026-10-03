@@ -1,5 +1,21 @@
 <script lang="ts">
-import type { ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
+import type { ChapterRefShow, ElementKind } from '../../domain/chapter_reference/chapter_reference.ts'
+import type { ChapterId as Id } from '../../domain/chapter_tree/chapter_tree.ts'
+
+/** 选择的引用目标：章节（带显示格式）或图表。 */
+export type RefPick =
+  | { readonly kind: 'chapter'; readonly id: Id; readonly show: ChapterRefShow }
+  | { readonly kind: 'element'; readonly element: PickerElement }
+
+/** 可以引用的图表（element_numbering.ts 的 ElementEntry）。 */
+export interface PickerElement {
+  readonly kind: ElementKind
+  readonly id: string | null
+  readonly label: string
+  readonly caption: string
+  readonly chapterId: Id
+  readonly index: number
+}
 
 /** 本次运行中上次选择的显示格式（不持久化，docs/decisions.md 第 9 节）。 */
 let lastShow: ChapterRefShow = 'number-title'
@@ -23,12 +39,18 @@ import SegmentedControl from '../common/SegmentedControl.vue'
 const props = defineProps<{
   tree: ChapterTree
   anchor: { readonly x: number; readonly y: number }
-  /** 更改已有引用时：它当前的目标（失效时为 null）与格式。 */
-  current?: { readonly id: ChapterId | null; readonly show: ChapterRefShow } | null
+  /** 更改已有引用时：它当前的目标（失效时为 null）与格式；引用图表时是图表的种类与标识。 */
+  current?: {
+    readonly id: ChapterId | null
+    readonly show: ChapterRefShow
+    readonly element?: { readonly kind: ElementKind; readonly id: string } | null
+  } | null
+  /** 有编号的图表（docs/decisions.md 第 12 节），列在章节之后。 */
+  elements?: readonly PickerElement[]
 }>()
 
 const emit = defineEmits<{
-  pick: [id: ChapterId, show: ChapterRefShow]
+  pick: [target: RefPick]
   cancel: []
 }>()
 
@@ -39,10 +61,13 @@ const SHOW_OPTIONS = [
 ] as const satisfies ReadonlyArray<{ value: ChapterRefShow; label: string }>
 
 interface Row {
-  readonly id: ChapterId
+  readonly key: string
+  /** 章节 id；图表行为 null。 */
+  readonly id: ChapterId | null
   readonly number: string
   readonly title: string
   readonly depth: number
+  readonly element: PickerElement | null
 }
 
 const rows = computed<Row[]>(() => {
@@ -50,13 +75,19 @@ const rows = computed<Row[]>(() => {
   const out: Row[] = []
   const visit = (nodes: ChapterTree, depth: number): void => {
     for (const node of nodes) {
-      out.push({ id: node.id, number: (numbers.get(node.id) ?? []).join('.'), title: node.title, depth })
+      out.push({ key: `chapter:${node.id}`, id: node.id, number: (numbers.get(node.id) ?? []).join('.'), title: node.title, depth, element: null })
       visit(node.children, depth + 1)
     }
   }
   visit(props.tree, 0)
+  ;(props.elements ?? []).forEach((element, index) =>
+    out.push({ key: `element:${index}`, id: null, number: element.label, title: element.caption, depth: 0, element }),
+  )
   return out
 })
+
+/** 第一个图表行在 visible 中的位置（之前显示“图表”分组标题）；没有时为 -1。 */
+const firstElement = computed(() => visible.value.findIndex((row) => row.element !== null))
 
 const query = ref('')
 const show = ref<ChapterRefShow>(props.current?.show ?? lastShow)
@@ -64,10 +95,25 @@ const show = ref<ChapterRefShow>(props.current?.show ?? lastShow)
 const visible = computed(() => {
   const text = query.value.trim().toLowerCase()
   if (text === '') return rows.value
-  return rows.value.filter((row) => row.title.toLowerCase().includes(text) || row.number.startsWith(text))
+  return rows.value.filter((row) =>
+    row.element
+      ? row.title.toLowerCase().includes(text) || row.number.toLowerCase().includes(text)
+      : row.title.toLowerCase().includes(text) || row.number.startsWith(text),
+  )
 })
 
-const active = ref(Math.max(0, rows.value.findIndex((row) => row.id === props.current?.id)))
+const active = ref(
+  Math.max(
+    0,
+    rows.value.findIndex((row) => {
+      const element = props.current?.element
+      if (element) return row.element?.kind === element.kind && row.element.id === element.id
+      return row.id !== null && row.id === props.current?.id
+    }),
+  ),
+)
+/** 选中的是图表时没有显示格式。 */
+const activeIsElement = computed(() => visible.value[active.value]?.element != null)
 watch(query, () => (active.value = 0))
 
 const id = useId()
@@ -117,8 +163,12 @@ watch(active, () => void nextTick(reveal))
 function pick(index: number): void {
   const row = visible.value[index]
   if (!row) return
+  if (row.element) {
+    emit('pick', { kind: 'element', element: row.element })
+    return
+  }
   lastShow = show.value
-  emit('pick', row.id, show.value)
+  emit('pick', { kind: 'chapter', id: row.id!, show: show.value })
 }
 
 function onInputKeydown(event: KeyboardEvent): void {
@@ -159,7 +209,7 @@ function onKeydown(event: KeyboardEvent): void {
     ref="panel"
     class="chapter-ref-picker"
     role="dialog"
-    aria-label="插入章节引用"
+    aria-label="插入引用"
     :style="
       position
         ? {
@@ -176,7 +226,7 @@ function onKeydown(event: KeyboardEvent): void {
       v-model="query"
       class="chapter-ref-picker__search"
       type="text"
-      placeholder="搜索章节"
+      placeholder="搜索章节或图表"
       role="combobox"
       aria-label="搜索章节"
       aria-autocomplete="list"
@@ -188,10 +238,10 @@ function onKeydown(event: KeyboardEvent): void {
       @keydown="onInputKeydown"
     />
     <div :id="`${id}-list`" ref="list" class="chapter-ref-picker__list" role="listbox" aria-label="章节">
+      <template v-for="(row, index) in visible" :key="row.key">
+      <div v-if="index === firstElement" class="chapter-ref-picker__group" role="presentation">图表</div>
       <div
-        v-for="(row, index) in visible"
         :id="optionId(index)"
-        :key="row.id"
         class="chapter-ref-picker__option"
         :class="{ 'chapter-ref-picker__option--active': index === active }"
         role="option"
@@ -206,10 +256,11 @@ function onKeydown(event: KeyboardEvent): void {
           {{ row.title || '未命名章节' }}
         </span>
       </div>
-      <p v-if="visible.length === 0" class="chapter-ref-picker__empty">没有匹配的章节</p>
+      </template>
+      <p v-if="visible.length === 0" class="chapter-ref-picker__empty">没有匹配的章节或图表</p>
     </div>
     <div class="chapter-ref-picker__footer">
-      <SegmentedControl v-model="show" :options="SHOW_OPTIONS" label="显示格式" />
+      <SegmentedControl v-model="show" :options="SHOW_OPTIONS" label="显示格式" :disabled="activeIsElement" />
     </div>
   </div>
 </template>
@@ -304,6 +355,16 @@ function onKeydown(event: KeyboardEvent): void {
 .chapter-ref-picker__option--active .chapter-ref-picker__title--untitled {
   color: inherit;
   opacity: 0.75;
+}
+
+.chapter-ref-picker__group {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-1);
+  border-top: 1px solid var(--color-separator);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-s);
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .chapter-ref-picker__empty {
