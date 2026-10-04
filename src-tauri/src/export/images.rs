@@ -12,9 +12,10 @@ const MAX_EMBED_PX: u32 = 2400;
 const MAX_DECODE_PX: u32 = 20_000;
 const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;
 
-/// 图片固有尺寸按 96 DPI 换算：1 像素 = 0.75 磅（Word 与 PDF 一致）。
-/// 图像元数据中的 DPI 如何解释尚未确定（docs/decisions.md 第 8 节"图片自动尺寸约束"），确定前不读取它。
-const PT_PER_PX: f64 = 0.75;
+/// 图片固有尺寸的 DPI 规则（docs/decisions.md 第 8 节"图片自动尺寸约束"）：PNG（pHYs，单位为米）与
+/// JPEG（JFIF）元数据中的 DPI 在此范围内且横纵相同时按其换算，缺失或异常时按 96 DPI。
+const DPI_RANGE: std::ops::RangeInclusive<f64> = 72.0..=600.0;
+const DEFAULT_DPI: f64 = 96.0;
 
 /// 图片可以占用的区域（磅）。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -23,11 +24,10 @@ pub struct Bounds {
     pub height: f64,
 }
 
-/// 图片的显示尺寸（磅）：保持比例，不放大；宽不超过 bounds.width，高不超过 bounds.height。
+/// 图片的显示尺寸（磅）：从固有尺寸（`ExportImage::size_pt`）出发，保持比例，不放大；
+/// 宽不超过 bounds.width，高不超过 bounds.height。
 /// 输出统一规则（docs/decisions.md 第 8 节），不存在单张图片的尺寸设置。
-pub fn display_size_pt(width_px: u32, height_px: u32, bounds: Bounds) -> (f64, f64) {
-    let width = f64::from(width_px) * PT_PER_PX;
-    let height = f64::from(height_px) * PT_PER_PX;
+pub fn display_size_pt((width, height): (f64, f64), bounds: Bounds) -> (f64, f64) {
     let scale = 1.0_f64
         .min(bounds.width.max(1.0) / width)
         .min(bounds.height.max(1.0) / height);
@@ -75,6 +75,81 @@ pub struct ExportImage {
     pub bytes: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// 固有尺寸（磅）：按原图像素与 DPI 换算，缩小嵌入不改变它；比例与嵌入的像素一致。
+    pub size_pt: (f64, f64),
+}
+
+/// 原图元数据中的 DPI；缺失、超出范围或横纵不同时按 96。
+fn image_dpi(bytes: &[u8]) -> f64 {
+    let dpi = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        png_dpi(bytes)
+    } else if bytes.starts_with(&[0xff, 0xd8]) {
+        jfif_dpi(bytes)
+    } else {
+        None
+    };
+    match dpi {
+        Some((x, y)) if x == y && DPI_RANGE.contains(&x) => x,
+        _ => DEFAULT_DPI,
+    }
+}
+
+/// PNG 的 pHYs：在 IDAT 之前；单位不是米（只表示像素比例）时没有 DPI。
+fn png_dpi(bytes: &[u8]) -> Option<(f64, f64)> {
+    let mut at = 8;
+    while at + 8 <= bytes.len() {
+        let len = u32::from_be_bytes(bytes[at..at + 4].try_into().ok()?) as usize;
+        let kind = &bytes[at + 4..at + 8];
+        let data = bytes.get(at + 8..(at + 8).checked_add(len)?)?;
+        match kind {
+            b"pHYs" if len == 9 => {
+                if data[8] != 1 {
+                    return None;
+                }
+                let per_meter = |b: &[u8]| f64::from(u32::from_be_bytes(b.try_into().unwrap())) * 0.0254;
+                return Some((per_meter(&data[0..4]), per_meter(&data[4..8])));
+            }
+            b"IDAT" | b"IEND" => return None,
+            _ => at += 12 + len,
+        }
+    }
+    None
+}
+
+/// JPEG 的 JFIF（APP0）密度：单位 1 为每英寸、2 为每厘米，0 只表示像素比例。不读取 Exif 中的分辨率。
+fn jfif_dpi(bytes: &[u8]) -> Option<(f64, f64)> {
+    let mut at = 2;
+    while at + 4 <= bytes.len() && bytes[at] == 0xff {
+        let marker = bytes[at + 1];
+        if marker == 0xda || marker == 0xd9 {
+            return None;
+        }
+        let len = usize::from(u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]));
+        let data = bytes.get(at + 4..(at + 2).checked_add(len)?)?;
+        if marker == 0xe0 && data.len() >= 12 && data.starts_with(b"JFIF\0") {
+            let x = f64::from(u16::from_be_bytes([data[8], data[9]]));
+            let y = f64::from(u16::from_be_bytes([data[10], data[11]]));
+            return match data[7] {
+                1 => Some((x, y)),
+                2 => Some((x * 2.54, y * 2.54)),
+                _ => None,
+            };
+        }
+        at += 2 + len;
+    }
+    None
+}
+
+fn size_pt(width: u32, height: u32, dpi: f64) -> (f64, f64) {
+    let pt_per_px = 72.0 / dpi;
+    (f64::from(width) * pt_per_px, f64::from(height) * pt_per_px)
+}
+
+/// 缩小后的图片：长边保持原图的物理长度，比例按缩小后的像素（取整可能改变极窄图的比例，
+/// 输出按嵌入的像素计算高度）。
+fn scaled_size_pt(original: (u32, u32), scaled: (u32, u32), dpi: f64) -> (f64, f64) {
+    let long = |(w, h): (u32, u32)| f64::from(w.max(h));
+    size_pt(scaled.0, scaled.1, dpi * long(scaled) / long(original))
 }
 
 fn limits() -> Limits {
@@ -89,6 +164,7 @@ fn limits() -> Limits {
 /// 带旋转元数据的 JPEG 沿用原 PNG 路径，保持现有显示方向与尺寸。
 pub fn load_for_export(path: &Path) -> Option<ExportImage> {
     let bytes = std::fs::read(path).ok()?;
+    let dpi = image_dpi(&bytes);
     let mut reader = ImageReader::new(Cursor::new(&bytes))
         .with_guessed_format()
         .ok()?;
@@ -115,19 +191,21 @@ pub fn load_for_export(path: &Path) -> Option<ExportImage> {
                     bytes: encoded,
                     width: image.width(),
                     height: image.height(),
+                    size_pt: scaled_size_pt((width, height), (image.width(), image.height()), dpi),
                 });
             };
             return Some(ExportImage {
                 bytes,
                 width,
                 height,
+                size_pt: size_pt(width, height, dpi),
             });
         }
     }
-    prepare_png(bytes)
+    prepare_png(bytes, dpi)
 }
 
-fn prepare_png(bytes: Vec<u8>) -> Option<ExportImage> {
+fn prepare_png(bytes: Vec<u8>, dpi: f64) -> Option<ExportImage> {
     let mut reader = ImageReader::new(Cursor::new(&bytes))
         .with_guessed_format()
         .ok()?;
@@ -144,6 +222,7 @@ fn prepare_png(bytes: Vec<u8>) -> Option<ExportImage> {
             bytes,
             width,
             height,
+            size_pt: size_pt(width, height, dpi),
         });
     }
     let mut image = decode(&bytes)?;
@@ -156,6 +235,7 @@ fn prepare_png(bytes: Vec<u8>) -> Option<ExportImage> {
         bytes: png.into_inner(),
         width: image.width(),
         height: image.height(),
+        size_pt: scaled_size_pt((width, height), (image.width(), image.height()), dpi),
     })
 }
 
@@ -189,29 +269,29 @@ pub mod tests {
 
     #[test]
     fn small_images_are_not_enlarged() {
-        assert_eq!(display_size_pt(100, 50, PAGE), (75.0, 37.5));
+        assert_eq!(display_size_pt(size_pt(100, 50, 96.0), PAGE), (75.0, 37.5));
     }
 
     #[test]
     fn wide_images_shrink_to_the_available_width() {
-        let (w, h) = display_size_pt(3000, 300, PAGE);
+        let (w, h) = display_size_pt(size_pt(3000, 300, 96.0), PAGE);
         assert!((w - 453.5).abs() < 1e-6 && (h - 45.35).abs() < 1e-6);
     }
 
     #[test]
     fn tall_images_are_limited_by_the_available_height_keeping_ratio() {
-        let (w, h) = display_size_pt(400, 1600, PAGE);
+        let (w, h) = display_size_pt(size_pt(400, 1600, 96.0), PAGE);
         assert!((h - 700.0).abs() < 1e-6);
         assert!((w / h - 0.25).abs() < 1e-9);
         // 为图注预留空间后高度相应减少，比例不变。
-        let (w, h) = display_size_pt(400, 1600, Bounds { height: 650.0, ..PAGE });
+        let (w, h) = display_size_pt(size_pt(400, 1600, 96.0), Bounds { height: 650.0, ..PAGE });
         assert!((h - 650.0).abs() < 1e-6 && (w / h - 0.25).abs() < 1e-9);
     }
 
     #[test]
     fn narrow_containers_limit_the_width() {
         // 表格单元格等较窄的容器：按容器宽度缩小，保持比例，不按文字行高压成小图。
-        let (w, h) = display_size_pt(800, 400, Bounds { width: 100.0, ..PAGE });
+        let (w, h) = display_size_pt(size_pt(800, 400, 96.0), Bounds { width: 100.0, ..PAGE });
         assert!((w - 100.0).abs() < 1e-6 && (h - 50.0).abs() < 1e-6);
     }
 
@@ -314,6 +394,103 @@ pub mod tests {
         fs::write(&text, "这不是图片").unwrap();
         assert!(load_for_export(&text).is_none());
         assert!(load_for_export(&dir.path().join("无.png")).is_none());
+    }
+
+    /// 写一张带 pHYs 的 PNG（每米像素数与单位）。
+    fn write_png_with_phys(path: &Path, width: u32, height: u32, x: u32, y: u32, unit: png::Unit) {
+        let mut encoder = png::Encoder::new(fs::File::create(path).unwrap(), width, height);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_pixel_dims(Some(png::PixelDimensions { xppu: x, yppu: y, unit }));
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&vec![128; (width * height) as usize]).unwrap();
+    }
+
+    /// 改写 JPEG 的 JFIF 密度（单位、横纵密度）。
+    fn write_jpeg_with_jfif(path: &Path, width: u32, height: u32, unit: u8, x: u16, y: u16) {
+        write_image(path, width, height, ImageFormat::Jpeg);
+        let mut bytes = fs::read(path).unwrap();
+        assert_eq!(&bytes[2..4], &[0xff, 0xe0]);
+        assert_eq!(&bytes[6..11], b"JFIF\0");
+        bytes[13] = unit;
+        bytes[14..16].copy_from_slice(&x.to_be_bytes());
+        bytes[16..18].copy_from_slice(&y.to_be_bytes());
+        fs::write(path, bytes).unwrap();
+    }
+
+    fn natural_size(path: &Path) -> (f64, f64) {
+        let (w, h) = load_for_export(path).unwrap().size_pt;
+        ((w * 1000.0).round() / 1000.0, (h * 1000.0).round() / 1000.0)
+    }
+
+    #[test]
+    fn png_dpi_from_phys_scales_the_natural_size() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("a.png");
+        // Retina 截图：144 DPI（5669 像素 / 米），固有尺寸是 96 DPI 时的 2/3。
+        write_png_with_phys(&path, 288, 144, 5669, 5669, png::Unit::Meter);
+        let (w, h) = natural_size(&path);
+        assert!((w - 144.0).abs() < 0.05 && (h - 72.0).abs() < 0.05, "{w} {h}");
+        // 300 DPI：300 像素 = 1 英寸 = 72 磅。
+        write_png_with_phys(&path, 300, 150, 11811, 11811, png::Unit::Meter);
+        let (w, _) = natural_size(&path);
+        assert!((w - 72.0).abs() < 0.05, "{w}");
+    }
+
+    #[test]
+    fn missing_or_abnormal_png_dpi_falls_back_to_96() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("a.png");
+        write_image(&path, 100, 50, ImageFormat::Png);
+        assert_eq!(natural_size(&path), (75.0, 37.5));
+        for (x, y, unit) in [
+            (5669, 5669, png::Unit::Unspecified), // 只表示像素比例
+            (39, 39, png::Unit::Meter),           // 约 1 DPI
+            (2756, 2756, png::Unit::Meter),       // 70 DPI
+            (5669, 11811, png::Unit::Meter),      // 横纵不同
+            (47244, 47244, png::Unit::Meter),     // 1200 DPI
+        ] {
+            write_png_with_phys(&path, 100, 50, x, y, unit);
+            assert_eq!(natural_size(&path), (75.0, 37.5), "{x} {y} {unit:?}");
+        }
+    }
+
+    #[test]
+    fn jpeg_dpi_from_jfif() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("a.jpg");
+        write_jpeg_with_jfif(&path, 300, 150, 1, 300, 300);
+        assert_eq!(natural_size(&path), (72.0, 36.0));
+        // 每厘米：118 × 2.54 ≈ 299.7 DPI。
+        write_jpeg_with_jfif(&path, 300, 150, 2, 118, 118);
+        let (w, _) = natural_size(&path);
+        assert!((w - 300.0 * 72.0 / (118.0 * 2.54)).abs() < 0.001, "{w}");
+        // 单位 0 只表示比例；超出范围；横纵不同：按 96。
+        for (unit, x, y) in [(0, 300, 300), (1, 1, 1), (1, 2400, 2400), (1, 300, 150)] {
+            write_jpeg_with_jfif(&path, 300, 150, unit, x, y);
+            assert_eq!(natural_size(&path), (225.0, 112.5), "{unit} {x} {y}");
+        }
+    }
+
+    #[test]
+    fn scaled_down_images_keep_the_original_natural_size() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("large.png");
+        write_png_with_phys(&path, 4800, 600, 11811, 11811, png::Unit::Meter);
+        let image = load_for_export(&path).unwrap();
+        assert_eq!((image.width, image.height), (2400, 300));
+        assert!((image.size_pt.0 - 4800.0 * 72.0 / 300.0).abs() < 0.5, "{:?}", image.size_pt);
+        let path = dir.path().join("large.jpg");
+        write_jpeg_with_jfif(&path, 4800, 600, 1, 300, 300);
+        let image = load_for_export(&path).unwrap();
+        assert_eq!((image.width, image.size_pt), (2400, (1152.0, 144.0)));
+    }
+
+    #[test]
+    fn gif_uses_96_dpi() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("a.gif");
+        write_image(&path, 40, 20, ImageFormat::Gif);
+        assert_eq!(natural_size(&path), (30.0, 15.0));
     }
 
     #[test]

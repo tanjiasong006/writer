@@ -255,8 +255,8 @@ impl Container {
 #[derive(Clone, Copy)]
 struct PreparedImage {
     index: usize,
-    width: u32,
-    height: u32,
+    /// 固有尺寸（磅）。
+    size_pt: (f64, f64),
     format: &'static str,
 }
 
@@ -818,8 +818,7 @@ impl<'a> Writer<'a> {
             let image = load_for_export(&path)?;
             let prepared = PreparedImage {
                 index: self.images.len(),
-                width: image.width,
-                height: image.height,
+                size_pt: image.size_pt,
                 format: if image.bytes.starts_with(&[0xff, 0xd8]) {
                     "jpg"
                 } else {
@@ -845,7 +844,7 @@ impl<'a> Writer<'a> {
             width: max_width,
             height: f64::INFINITY,
         };
-        let (width, height) = display_size_pt(image.width, image.height, bounds);
+        let (width, height) = display_size_pt(image.size_pt, bounds);
         format!(
             // 不设最小宽度：极窄的长图宽度可以小于 1pt，高度上限优先（宽度由高度上限按比例反推）。
             "layout(size => image(\"/img/{index}.png\", format: \"{format}\", width: calc.max(0pt, calc.min({width:.2}pt, size.width, ({max_height}) * {ratio}))))",

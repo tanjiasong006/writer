@@ -505,7 +505,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   - 导出：`RenderRequest` 只有标题与章节；`render::theme` 移为 `export::theme`（只有输出参数，不反序列化），
     Word / PDF 各自取 `Theme::default()`。图片按统一规则计算尺寸：保持比例、不放大，不超过所在容器宽度
     （正文、列表 / 引用缩进后、表格单元格）与完整正文区高度；独立图片居中，为图注及间距预留高度，
-    Word 以 keepNext 与图注保持同页，PDF figure 不拆分、放不下时整体移到下一页。DPI 仍按固定 96 换算（待定）。
+    Word 以 keepNext 与图注保持同页，PDF figure 不拆分、放不下时整体移到下一页。DPI 当时按固定 96 换算，后改为读取元数据（2026-10-04，decisions 第 8 节）。
   - Word 仍使用内置样式：正文 Normal（文档默认），标题 Heading 1–9（带大纲级别），图注 Caption；测试覆盖。
 - 编辑与输出的内容契约测试完成：`src-tauri/fixtures/markdown/` 下 9 个共享用例（图片 / 图注、表格、列表、
   标题、强调、中文标点边界、原始 HTML、换行、引用 / 代码 / 分隔线），前端 `markdown_contract.test.ts` 验证

@@ -686,7 +686,7 @@ impl Writer<'_> {
                 .color("B91C1C")
                 .add_text(xml_safe(&format!("[图片无法显示：{label}]")));
         };
-        let (width, height) = display_size_pt(image.width, image.height, bounds);
+        let (width, height) = display_size_pt(image.size_pt, bounds);
         let pic = Pic::new_with_dimensions(image.bytes, image.width, image.height)
             .size(pt_to_emu(width), pt_to_emu(height));
         Run::new().add_image(pic)
