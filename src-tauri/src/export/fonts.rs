@@ -3,8 +3,7 @@
 //! 字体按"字体族"配置：衬线（宋体类）、无衬线（黑体类）、楷体、等宽。输出参数（`export::theme`）为每类元素
 //! 选择衬线或无衬线；楷体只用于引用，等宽只用于代码。每个字体族是一条有序的候选字体列表：拉丁字体在前、中文字体在后，
 //! 覆盖 macOS / Windows / Linux 的常见字体。排版引擎按顺序逐字形回退。
-//! 打包字体目录（`bundled_font_dirs`）始终参与查找：随应用打包 Noto Serif / Sans CJK SC（`fonts/README.md`），
-//! 它们排在中文候选的最前面，各平台的 PDF 中文排版一致；开发环境没有下载时按本机字体回退。
+//! 打包字体目录（`bundled_font_dirs`）始终参与查找，未来放入开源中文字体即可保证各平台一致。
 //! 编辑环境的字体栈独立配置，不以与这里一致为约束。
 
 use super::theme::FontId;
@@ -38,15 +37,14 @@ pub fn families(family: FontFamily) -> &'static [&'static str] {
             "Liberation Serif",
             "DejaVu Serif",
             "Libertinus Serif",
-            // 中文：随应用打包的开源字体在前，各平台一致（fonts/README.md）
-            "Noto Serif CJK SC",
-            // macOS
+            // 中文：macOS
             "Songti SC",
             "STSong",
             // Windows
             "SimSun",
             "NSimSun",
             // Linux / 开源
+            "Noto Serif CJK SC",
             "Source Han Serif SC",
             "Noto Serif SC",
             // 没有宋体时退回黑体类
@@ -61,13 +59,12 @@ pub fn families(family: FontFamily) -> &'static [&'static str] {
             "Helvetica",
             "Liberation Sans",
             "DejaVu Sans",
-            // 随应用打包的开源字体
-            "Noto Sans CJK SC",
             "Heiti SC",
             "STHeiti",
             "PingFang SC",
             "SimHei",
             "Microsoft YaHei",
+            "Noto Sans CJK SC",
             "Source Han Sans SC",
             "Noto Sans SC",
             "WenQuanYi Micro Hei",
@@ -153,40 +150,4 @@ pub fn bundled_font_dirs(resource_dir: Option<&std::path::Path>) -> Vec<std::pat
     resource_dir
         .map(|dir| vec![dir.join("fonts")])
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod bundled_tests {
-    use super::*;
-
-    #[test]
-    fn bundled_fonts_lead_the_chinese_candidates() {
-        let serif = families(FontFamily::Serif);
-        let first_cjk = serif.iter().position(|name| name.contains("CJK") || name.contains("Song")).unwrap();
-        assert_eq!(serif[first_cjk], "Noto Serif CJK SC");
-        let sans = families(FontFamily::Sans);
-        let first_cjk = sans.iter().position(|name| name.contains("CJK") || name.contains("Hei")).unwrap();
-        assert_eq!(sans[first_cjk], "Noto Sans CJK SC");
-        for family in [FontFamily::Serif, FontFamily::Sans, FontFamily::Kai, FontFamily::Mono] {
-            let list = families(family);
-            let unique: std::collections::HashSet<_> = list.iter().collect();
-            assert_eq!(unique.len(), list.len(), "{family:?} has duplicates");
-        }
-    }
-
-    /// 下载了打包字体（scripts/fetch-fonts.mjs）时，打包目录中的字体能被找到。
-    #[test]
-    fn bundled_directory_provides_noto_cjk_when_fetched() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        if !dir.join("fonts/NotoSerifCJKsc-Regular.otf").exists() {
-            return;
-        }
-        let mut found = std::collections::HashSet::new();
-        for path in bundled_font_dirs(Some(dir)) {
-            for (_, info) in typst_kit::fonts::scan(&path) {
-                found.insert(info.family.clone());
-            }
-        }
-        assert!(found.contains("Noto Serif CJK SC") && found.contains("Noto Sans CJK SC"), "{found:?}");
-    }
 }
