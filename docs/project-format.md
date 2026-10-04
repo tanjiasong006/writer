@@ -274,7 +274,7 @@ Table: 样本构成 {#tbl:p0q8m4c2}
 | `.writer/snapshots/<毫秒时间戳>.json` | 版本快照（7.1） |
 | `.writer/snapshot.tmp` | 写入快照时的临时文件 |
 
-### 7.1 版本快照（2026-10-03 实施，待产品负责人确认）
+### 7.1 版本快照（2026-10-03 实施，2026-10-04 产品负责人确认）
 
 ```json
 { "format": "writer-snapshot", "version": 1, "createdAt": 1790000000000, "label": "初稿", "kind": "manual",
