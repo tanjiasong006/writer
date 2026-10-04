@@ -961,7 +961,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 ### P2：体验提升
 
 1. ~~专注模式 / 全屏写作。~~（完成，见下方“P2-1 专注模式”）
-2. 章节状态或标签（草稿 / 待修改 / 完成）与章节备注。
+2. ~~章节状态或标签（草稿 / 待修改 / 完成）与章节备注。~~（完成，见下方“P2-2 章节状态与备注”）
 3. 写作目标（字数目标、进度）。
 4. 更多导出格式：合并的 Markdown、HTML、EPUB。
 5. 文档模板（论文、报告、书稿）。
@@ -974,6 +974,14 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   工作区 `focusMode`（`workspace--focus`：侧栏隐藏、工具栏悬浮显现），编辑器 `focusMode`（`is-focus-block` decoration 与淡化样式）。
 - 验证：菜单进入、全屏、侧栏、淡化随光标、退出按钮、全文阅读时退出测试；Story `ChapterEditor/FocusMode`（Storybook 中目视检查了淡化）。
   Tauri 中的全屏与工具栏悬浮显现未目视检查。
+
+#### P2-2 章节状态与备注（完成，2026-10-03）
+
+- 规则见 decisions 第 16 节。Domain `ChapterNode.status / note`、`validateTree` 校验、`setChapterMeta`；Application `chapter_meta.ts`。
+- 章节树行尾标记与节点菜单（ui-spec §23.1），`ChapterManager.setStatus / setNote`；菜单栏“章节 → 状态 / 备注…”；
+  `TextPopover` 支持多行；编辑器标题下方显示备注。
+- 验证：Domain（设置、去掉、校验）、章节树菜单、工作区（状态圆点、保存、菜单打勾、备注多行、编辑器显示与编辑、清空）测试；
+  Story `ChapterTree/StatusAndNotes`（Storybook 中目视检查了标记）。
 
 ### 发布准备（非功能）
 

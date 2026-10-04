@@ -59,7 +59,8 @@
 ```
 
 - `format` 固定为 `writer-project`；`version` 为整数，当前为 1。读到更高版本时拒绝打开，不做猜测。
-- `chapters` 就是 Domain 的 `ChapterTree`，加载时必须通过 `validateTree`。
+- `chapters` 就是 Domain 的 `ChapterTree`，加载时必须通过 `validateTree`。节点可以有可选的 `status`
+  （`draft` / `revise` / `done`）与 `note`（字符串），没有时省略（docs/decisions.md 第 16 节）；取值非法时拒绝打开。
 - `files` 的 key 集合必须与章节树的 id 集合完全一致；value 必须符合第 2 节格式且互不重复。
 - 章节深度上限为 32 级（信任边界上的限制，防止异常数据导致递归过深）。
 - 章节标题只存在于 manifest 中，正文 Markdown **不重复保存章节标题，也不保存章节编号**。

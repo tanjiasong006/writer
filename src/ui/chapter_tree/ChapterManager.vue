@@ -14,6 +14,7 @@ import {
   type MoveIntent,
 } from '../../application/move_chapter.ts'
 import { renameChapter } from '../../application/rename_chapter.ts'
+import { setChapterMeta } from '../../application/chapter_meta.ts'
 import { describeRemoval, removeChapter, selectionAfterRemove, type RemovedChapter } from '../../application/remove_chapter.ts'
 import {
   countDescendants,
@@ -24,6 +25,7 @@ import {
   type MoveReason,
   type RemoveReason,
   type RenameReason,
+  type ChapterStatus,
 } from '../../domain/chapter_tree/chapter_tree.ts'
 
 /**
@@ -53,6 +55,8 @@ const emit = defineEmits<{
   open: [chapterId: ChapterId]
   /** 即将删除章节（在发出新树之前）：上层据此记下章节与正文，以便撤销删除。 */
   removed: [removed: RemovedChapter]
+  /** 编辑章节备注（由上层显示浮层，完成后调用 setNote）。rect 是该行的位置。 */
+  'edit-note': [chapterId: ChapterId, rect: DOMRect]
 }>()
 
 const props = defineProps<{
@@ -148,6 +152,17 @@ function commitRename(chapterId: ChapterId, title: string): void {
   }
   tree.value = result.tree
   errorMessage.value = null
+}
+
+/** 写作状态与备注（docs/decisions.md 第 16 节）。 */
+function setStatus(chapterId: ChapterId, status: ChapterStatus | null): void {
+  const result = setChapterMeta(tree.value, chapterId, { status })
+  if (result.ok) tree.value = result.tree
+}
+
+function setNote(chapterId: ChapterId, note: string): void {
+  const result = setChapterMeta(tree.value, chapterId, { note })
+  if (result.ok) tree.value = result.tree
 }
 
 function cancelRename(): void {
@@ -276,6 +291,11 @@ defineExpose({
   createChildChapter: () => selectedId.value !== null && createChild(selectedId.value),
   renameChapter: () => selectedId.value !== null && startRename(selectedId.value),
   deleteChapter: () => selectedId.value !== null && requestDelete(selectedId.value),
+  setStatus: (status: ChapterStatus | null) => selectedId.value !== null && setStatus(selectedId.value, status),
+  setNote,
+  /** 选中章节所在行的位置（菜单栏“备注…”时浮层的位置）。 */
+  rowRect: (chapterId: ChapterId): DOMRect | null =>
+    root.value?.querySelector<HTMLElement>(`.chapter-tree__label[data-chapter-id="${CSS.escape(chapterId)}"]`)?.getBoundingClientRect() ?? null,
   moveChapter: (direction: KeyboardMoveDirection) =>
     selectedId.value !== null && treeView.value?.moveChapter(selectedId.value, direction),
   canMove: (direction: KeyboardMoveDirection) =>
@@ -353,6 +373,8 @@ function messageForMove(reason: MoveReason): string {
       @rename="commitRename"
       @cancel-rename="cancelRename"
       @delete="requestDelete"
+      @set-status="setStatus"
+      @edit-note="(id, rect) => emit('edit-note', id, rect)"
       @open="emit('open', $event)"
     />
 

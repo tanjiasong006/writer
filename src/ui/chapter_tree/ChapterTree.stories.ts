@@ -239,3 +239,24 @@ export const KeyboardNavigation: Story = {
     canvasElement.querySelector<HTMLElement>('.chapter-tree__label[data-chapter-id="sec-1-1"]')?.focus()
   },
 }
+
+/** 写作状态（草稿空心圆、待修改橙色、完成绿色）与备注标记；选中行中同样可辨。 */
+export const StatusAndNotes: Story = {
+  args: {
+    selectedId: 'b',
+    tree: [
+      { id: 'a', title: '绪论', status: 'done', children: [] },
+      {
+        id: 'b',
+        title: '研究方法',
+        status: 'revise',
+        note: '补充抽样过程',
+        children: [
+          { id: 'b1', title: '问卷设计', status: 'draft', children: [] },
+          { id: 'b2', title: '访谈对象与过程的说明非常长的标题会被截断', note: '等导师意见', children: [] },
+        ],
+      },
+      { id: 'c', title: '结果', children: [] },
+    ],
+  },
+}

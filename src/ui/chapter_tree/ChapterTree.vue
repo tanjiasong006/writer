@@ -6,6 +6,8 @@ import { ancestorPath, numberWidths, visibleRows, type ChapterRow } from './tree
 import { useTreeDrag } from './use_tree_drag.ts'
 import { useInlineRename } from './use_inline_rename.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
+import { CHAPTER_STATUSES, type ChapterStatus } from '../../domain/chapter_tree/chapter_tree.ts'
+import { STATUS_LABELS } from './status_labels.ts'
 import Icon from '../common/Icon.vue'
 import { useMenu } from '../common/use_menu.ts'
 import { SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
@@ -57,6 +59,10 @@ const emit = defineEmits<{
   delete: [chapterId: ChapterId]
   /** Enter：进入当前章节的正文编辑（包括为新章节确认标题后）。 */
   open: [chapterId: ChapterId]
+  /** 设置写作状态（null 去掉）。 */
+  'set-status': [chapterId: ChapterId, status: ChapterStatus | null]
+  /** 编辑章节备注；rect 是该行的位置（浮层在它下方）。 */
+  'edit-note': [chapterId: ChapterId, rect: DOMRect]
 }>()
 
 /**
@@ -244,9 +250,28 @@ function menuItems(chapterId: ChapterId): MenuEntry[] {
       disabled: !canMoveBy(chapterId, item.direction),
     })),
     { separator: true },
+    {
+      id: 'status',
+      label: '状态',
+      submenu: [
+        { id: 'status:none', label: '无', checked: !statusOf(chapterId) },
+        { separator: true },
+        ...CHAPTER_STATUSES.map((status) => ({
+          id: `status:${status}`,
+          label: STATUS_LABELS[status],
+          checked: statusOf(chapterId) === status,
+        })),
+      ],
+    },
+    { id: 'note', label: findChapter(props.tree, chapterId)?.note ? '编辑备注…' : '添加备注…' },
+    { separator: true },
     { id: 'rename', label: '重命名', shortcut: SHORTCUTS.renameChapter },
     { id: 'delete', label: '删除', shortcut: SHORTCUTS.deleteChapter },
   ]
+}
+
+function statusOf(chapterId: ChapterId): ChapterStatus | undefined {
+  return findChapter(props.tree, chapterId)?.status
 }
 
 function onMenuSelect(chapterId: ChapterId, action: string): void {
@@ -254,7 +279,15 @@ function onMenuSelect(chapterId: ChapterId, action: string): void {
   else if (action === 'create-child') requestCreateChild(chapterId)
   else if (action === 'rename') requestStartRename(chapterId)
   else if (action === 'delete') requestDelete(chapterId)
-  else {
+  else if (action.startsWith('status:')) {
+    closeMenu()
+    const status = action.slice('status:'.length)
+    emit('set-status', chapterId, status === 'none' ? null : (status as ChapterStatus))
+  } else if (action === 'note') {
+    closeMenu()
+    const label = listElement.value?.querySelector<HTMLElement>(`.chapter-tree__label[data-chapter-id="${CSS.escape(chapterId)}"]`)
+    if (label) emit('edit-note', chapterId, label.getBoundingClientRect())
+  } else {
     const move = MOVE_LABELS.find((item) => action === `move-${item.direction}`)
     if (move) requestMove(chapterId, move.direction)
   }
@@ -575,6 +608,21 @@ defineExpose({
             >
               <span class="chapter-tree__number" :style="numberStyle(row)">{{ row.number }}</span>
               <span class="chapter-tree__title" :title="row.title">{{ row.title }}</span>
+              <span
+                v-if="row.note"
+                class="chapter-tree__note"
+                :title="row.note"
+                role="img"
+                aria-label="有备注"
+              ><Icon name="note" /></span>
+              <span
+                v-if="row.status"
+                class="chapter-tree__status"
+                :class="`chapter-tree__status--${row.status}`"
+                role="img"
+                :aria-label="STATUS_LABELS[row.status]"
+                :title="STATUS_LABELS[row.status]"
+              ></span>
             </button>
 
             <button
@@ -927,6 +975,44 @@ defineExpose({
 }
 
 /* ···：默认隐藏；hover、选中、菜单打开、获得键盘焦点时显示（§7、§8、§24）。 */
+/* 写作状态：标题后的小圆点（草稿空心、待修改橙色、完成绿色）；备注：小图标。都不抢标题的视线。 */
+.chapter-tree__status {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-left: var(--space-1);
+  box-sizing: border-box;
+  border-radius: 50%;
+}
+
+.chapter-tree__status--draft {
+  border: 1.5px solid var(--color-text-tertiary);
+}
+
+.chapter-tree__status--revise {
+  background: var(--color-status-revise);
+}
+
+.chapter-tree__status--done {
+  background: var(--color-status-done);
+}
+
+.chapter-tree__note {
+  display: flex;
+  flex: none;
+  color: var(--color-text-tertiary);
+}
+
+.chapter-tree__note .icon {
+  width: var(--icon-s);
+  height: var(--icon-s);
+}
+
+.chapter-tree__row--selected .chapter-tree__note {
+  color: inherit;
+  opacity: 0.7;
+}
+
 .chapter-tree__more {
   display: flex;
   flex: none;

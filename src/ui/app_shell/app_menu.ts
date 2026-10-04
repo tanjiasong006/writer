@@ -4,6 +4,7 @@ import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import { COMMAND_LABELS, LIST_COMMANDS, commandEntry } from '../editor/editor_menu.ts'
 import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 import { projectName } from '../../application/recent_projects.ts'
+import type { ChapterStatus } from '../../domain/chapter_tree/chapter_tree.ts'
 
 /**
  * 应用菜单栏（文件、编辑、格式、插入、表格、章节、显示）。快捷键的定义在 common/shortcuts.ts；
@@ -39,12 +40,15 @@ export interface AppMenuContext {
   readonly canUndoDelete?: boolean
   /** 最近打开的项目（文件 → 打开最近）。 */
   readonly recent?: readonly string[]
+  /** 选中章节的写作状态与是否有备注（章节 → 状态 / 备注…）。 */
+  readonly chapterStatus?: ChapterStatus | null
+  readonly chapterHasNote?: boolean
   readonly appearance: Appearance
 }
 
 const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout', 'history'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find-replace'] as const
-const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete'] as const
+const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete', 'note', 'status-none', 'status-draft', 'status-revise', 'status-done'] as const
 const INSERT_ACTIONS = ['update-chapter-refs', 'references'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back', 'forward', 'focus-mode'] as const
 const APP_ACTIONS = ['check-update'] as const
@@ -68,6 +72,7 @@ export type MenuItemId =
   | `editor:${EditorCommand}`
   | `chapter:${ChapterAction}`
   | `chapter:move-${KeyboardMoveDirection}`
+  | 'chapter:status'
   | `view:${ViewAction}`
   | `insert:${InsertAction}`
   | `appearance:${Appearance}`
@@ -353,6 +358,24 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
           id: 'chapter:rename',
           label: '重命名章节',
           shortcut: inTree ? SHORTCUTS.renameChapter : undefined,
+          disabled: !context.hasSelectedChapter,
+        },
+        // 写作状态与备注（docs/decisions.md 第 16 节），作用于选中章节。
+        {
+          id: 'chapter:status',
+          label: '状态',
+          disabled: !context.hasSelectedChapter,
+          submenu: [
+            { id: 'chapter:status-none', label: '无', checked: !context.chapterStatus },
+            { separator: true },
+            { id: 'chapter:status-draft', label: '草稿', checked: context.chapterStatus === 'draft' },
+            { id: 'chapter:status-revise', label: '待修改', checked: context.chapterStatus === 'revise' },
+            { id: 'chapter:status-done', label: '完成', checked: context.chapterStatus === 'done' },
+          ],
+        },
+        {
+          id: 'chapter:note',
+          label: context.chapterHasNote ? '编辑备注…' : '添加备注…',
           disabled: !context.hasSelectedChapter,
         },
         { separator: true },

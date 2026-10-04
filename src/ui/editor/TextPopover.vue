@@ -13,6 +13,8 @@ const props = defineProps<{
   label: string
   text: string
   placeholder: string
+  /** 多行内容（章节备注）：⇧Enter 换行，保留换行。 */
+  multiline?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -39,12 +41,12 @@ function place(): void {
 }
 
 function commit(): void {
-  emit('commit', value.value.replace(/\s*\n\s*/g, ' ').trim())
+  emit('commit', props.multiline ? value.value.trim() : value.value.replace(/\s*\n\s*/g, ' ').trim())
 }
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.isComposing) return
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' && !(props.multiline && event.shiftKey)) {
     event.preventDefault()
     commit()
   } else if (event.key === 'Escape') {
@@ -91,7 +93,7 @@ onMounted(async () => {
         @keydown="onKeydown"
       ></textarea>
     </div>
-    <div class="text-popover__hint">↩ 完成　⎋ 取消</div>
+    <div class="text-popover__hint">{{ multiline ? '↩ 完成　⇧↩ 换行　⎋ 取消' : '↩ 完成　⎋ 取消' }}</div>
   </div>
 </template>
 

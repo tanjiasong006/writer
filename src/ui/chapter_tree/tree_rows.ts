@@ -1,4 +1,4 @@
-import type { ChapterId, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
+import type { ChapterId, ChapterStatus, ChapterTree } from '../../domain/chapter_tree/chapter_tree.ts'
 import { computeChapterNumbers } from '../../domain/chapter_numbering/chapter_numbering.ts'
 
 /** 章节树中的一行显示。 */
@@ -10,6 +10,9 @@ export interface ChapterRow {
   /** 层级，根章节为 0。 */
   readonly depth: number
   readonly hasChildren: boolean
+  /** 写作状态与是否有备注（行尾的标记）。 */
+  readonly status?: ChapterStatus
+  readonly note?: string
 }
 
 /** 把树摊平成带层级的显示行；折叠节点不展开其后代。 */
@@ -26,6 +29,8 @@ export function visibleRows(tree: ChapterTree, collapsedIds: ReadonlySet<Chapter
         number: (numbers.get(node.id) ?? []).join('.'),
         depth,
         hasChildren,
+        ...(node.status ? { status: node.status } : {}),
+        ...(node.note ? { note: node.note } : {}),
       })
       if (hasChildren && !collapsedIds.has(node.id)) visit(node.children, depth + 1)
     }

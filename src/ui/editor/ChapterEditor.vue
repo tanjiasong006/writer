@@ -83,6 +83,8 @@ const props = defineProps<{
   refLabel?: ChapterRefLabel
   /** 查找中的文字：正文中高亮全部匹配（不进入文档）；空串表示没有在查找。 */
   findQuery?: string
+  /** 章节备注（docs/decisions.md 第 16 节）：显示在章节标题下方，单击编辑；不属于正文。 */
+  note?: string
   /** 专注模式：淡化当前段落（光标所在的顶层块）以外的正文。只是显示。 */
   focusMode?: boolean
   /** 本章图表编号的起点（所在一级章节与之前的图、表数量，element_numbering.ts）；只影响显示。 */
@@ -110,6 +112,8 @@ const emit = defineEmits<{
   'open-chapter': [chapterId: ChapterId]
   /** 查找中：选区恰好是第几个匹配（-1 表示不是匹配），选区或正文变化时发出。 */
   'find-status': [chapterId: ChapterId, selected: number]
+  /** 单击章节标题下方的备注：编辑它（rect 是备注的位置）。 */
+  'edit-note': [rect: DOMRect]
   /** 当前章节与选区的字数（text_stats.ts），正文、选区或章节变化时发出。 */
   stats: [stats: EditorStats]
 }>()
@@ -1050,6 +1054,15 @@ defineExpose({
           {{ title || '未命名章节' }}
         </span>
       </h1>
+      <button
+        v-if="note"
+        type="button"
+        class="chapter-editor__note"
+        title="编辑章节备注"
+        @click="emit('edit-note', ($event.currentTarget as HTMLElement).getBoundingClientRect())"
+      >
+        {{ note }}
+      </button>
       <div class="chapter-editor__body" @mousedown.capture="onMousedownCapture">
         <div
           ref="mountPoint"
@@ -1119,6 +1132,36 @@ defineExpose({
   /* 标题只能在章节树中修改，这里不可选中编辑，避免被误认为正文的一部分。 */
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* 章节备注：标题下方一段次级文字（作者自己看的，不属于正文），左侧细线与正文区分；单击编辑。 */
+.chapter-editor__note {
+  display: block;
+  max-width: calc(var(--doc-column) - 2 * var(--doc-gutter));
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: var(--space-2) var(--space-5);
+  border: none;
+  border-left: 2px solid var(--color-separator-strong);
+  background: none;
+  color: var(--color-text-tertiary);
+  font: inherit;
+  font-size: var(--text-m);
+  line-height: var(--leading-normal);
+  text-align: left;
+  white-space: pre-wrap;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.chapter-editor__note:hover {
+  color: var(--color-text-secondary);
+}
+
+.chapter-editor__note:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
 }
 
 /*

@@ -32,6 +32,8 @@ import { useFind } from './use_find.ts'
 import { useRemovedChapters } from './use_removed_chapters.ts'
 import FindBar from './FindBar.vue'
 import HistoryDialog from './HistoryDialog.vue'
+import TextPopover from '../editor/TextPopover.vue'
+import type { ChapterStatus } from '../../domain/chapter_tree/chapter_tree.ts'
 import ExternalChangeDialog from './ExternalChangeDialog.vue'
 import { useExternalChanges } from './use_external_changes.ts'
 import { useHistory } from './use_history.ts'
@@ -564,6 +566,20 @@ function snapshotName(snapshot: { readonly label: string; readonly createdAt: nu
 /** 其他程序对项目文件的修改（known-risks #4）。 */
 const external = useExternalChanges({ session: props.session, name: (id) => chapterName(id) })
 
+/** 编辑章节备注（docs/decisions.md 第 16 节）：在章节行（或章节标题）下方的浮层中。 */
+const noteEditor = shallowRef<{ readonly chapterId: ChapterId; readonly anchor: { readonly x: number; readonly y: number } } | null>(null)
+
+function editNote(chapterId: ChapterId, rect: DOMRect | null): void {
+  const anchor = rect ? { x: rect.left + 24, y: rect.bottom } : { x: window.innerWidth / 2 - 180, y: 120 }
+  noteEditor.value = { chapterId, anchor }
+}
+
+function commitNote(note: string): void {
+  const editing = noteEditor.value
+  noteEditor.value = null
+  if (editing) chapters.value?.setNote(editing.chapterId, note)
+}
+
 /** 撤销删除章节（ui-spec §23）。 */
 const removedChapters = useRemovedChapters({
   tree: () => tree.value,
@@ -683,6 +699,8 @@ const menus = computed(() =>
     canGoForward: jumps.canGoForward.value,
     canUndoDelete: removedChapters.canUndo.value,
     recent: props.recent,
+    chapterStatus: selectedChapter.value?.status ?? null,
+    chapterHasNote: !!selectedChapter.value?.note,
     appearance: props.appearance,
   }),
 )
@@ -785,6 +803,16 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
         void undoDelete()
         return
       }
+      if (command.action === 'note') {
+        await nextTick()
+        if (selectedId.value !== null) editNote(selectedId.value, manager.rowRect(selectedId.value))
+        return
+      }
+      if (command.action.startsWith('status-')) {
+        const status = command.action.slice('status-'.length)
+        manager.setStatus(status === 'none' ? null : (status as ChapterStatus))
+        return
+      }
       switch (command.action) {
         case 'new':
           manager.createChapter()
@@ -870,6 +898,7 @@ async function createFirstChapter(): Promise<void> {
         :reference-count="chapterRefCount"
         @update:tree="session.applyTree($event)"
         @removed="removedChapters.record"
+        @edit-note="editNote"
         @open="openChapter"
       />
 
@@ -1034,6 +1063,8 @@ async function createFirstChapter(): Promise<void> {
           :find-query="find.open.value && !reading ? find.query.value : ''"
           :element-start="elementStart"
           :focus-mode="focusMode"
+          :note="selectedChapter.note ?? ''"
+          @edit-note="(rect: DOMRect) => selectedId !== null && editNote(selectedId, rect)"
           @find-status="find.setSelected"
           @stats="stats = $event"
           @change="(chapterId, text) => session.setContent(chapterId, text)"
@@ -1124,6 +1155,17 @@ async function createFirstChapter(): Promise<void> {
       :structure="external.conflict.value.structure"
       @keep="external.keepWriter"
       @disk="external.useDisk"
+    />
+
+    <TextPopover
+      v-if="noteEditor"
+      :anchor="noteEditor.anchor"
+      label="章节备注"
+      placeholder="写给自己的备注（不会导出）"
+      :text="findChapter(tree, noteEditor.chapterId)?.note ?? ''"
+      multiline
+      @commit="commitNote"
+      @cancel="noteEditor = null"
     />
 
     <HistoryDialog

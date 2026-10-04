@@ -46,7 +46,7 @@ test('节点菜单包含新建、移动、重命名、删除，点击后关闭',
   const labels = wrapper
     .findAll('.chapter-tree__menu button')
     .map((b) => b.find('.popup-menu__label').text())
-  expect(labels).toEqual(['新建同级章节', '新建子章节', '上移', '下移', '升级', '降级', '重命名', '删除'])
+  expect(labels).toEqual(['新建同级章节', '新建子章节', '上移', '下移', '升级', '降级', '无', '草稿', '待修改', '完成', '添加备注…', '重命名', '删除'])
 
   await clickMenu(wrapper, '新建同级章节')
   expect(wrapper.find('.chapter-tree__menu').exists()).toBe(false)

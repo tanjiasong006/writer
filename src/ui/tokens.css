@@ -60,6 +60,9 @@
   --color-danger-text: #b3261e;
   --color-danger-fill: #fdf1f0;
   --color-success-text: #2c6e3f;
+  /* 章节写作状态的圆点（章节树）：待修改、完成。 */
+  --color-status-revise: #d98a1c;
+  --color-status-done: #3d9a5c;
 
   /* 正文中与展示参数无关的中性色（引用线、代码底色、表格线、选区）。 */
   --color-doc-text: #1f1f21;
@@ -176,6 +179,8 @@
     --color-danger-text: #ff8078;
     --color-danger-fill: rgba(229, 83, 75, 0.14);
     --color-success-text: #72c48d;
+    --color-status-revise: #e3a347;
+    --color-status-done: #5cb87a;
 
     --color-doc-text: #e2e2e4;
     --color-doc-muted: #a2a2a7;

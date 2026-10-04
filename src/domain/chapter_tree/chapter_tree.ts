@@ -3,8 +3,17 @@ export type ChapterId = string
 export interface ChapterNode {
   readonly id: ChapterId
   readonly title: string
+  /** 写作状态（docs/decisions.md 第 16 节）；没有时省略。 */
+  readonly status?: ChapterStatus
+  /** 章节备注（作者自己看的，不进入导出）；没有时省略。 */
+  readonly note?: string
   readonly children: readonly ChapterNode[]
 }
+
+/** 章节的写作状态：草稿、待修改、完成。 */
+export type ChapterStatus = 'draft' | 'revise' | 'done'
+
+export const CHAPTER_STATUSES: readonly ChapterStatus[] = ['draft', 'revise', 'done']
 
 export type ChapterTree = readonly ChapterNode[]
 
@@ -25,6 +34,8 @@ export type TreeIssueCode =
   | 'id-duplicate'
   | 'title-invalid'
   | 'children-invalid'
+  | 'status-invalid'
+  | 'note-invalid'
   | 'depth-exceeded'
 
 /** 一条校验问题。path 指向出问题的位置，code 说明原因。 */
@@ -84,6 +95,14 @@ export function validateTree(tree: unknown): ValidateTreeResult {
 
     if (typeof n.title !== 'string') {
       issues.push({ path, code: 'title-invalid' })
+    }
+
+    if (n.status !== undefined && !CHAPTER_STATUSES.includes(n.status as ChapterStatus)) {
+      issues.push({ path, code: 'status-invalid' })
+    }
+
+    if (n.note !== undefined && typeof n.note !== 'string') {
+      issues.push({ path, code: 'note-invalid' })
     }
 
     if (!Array.isArray(n.children)) {
@@ -301,6 +320,33 @@ export function removeChapter(tree: ChapterTree, chapterId: ChapterId): RemoveRe
   const [next, removed] = removeNode(tree, chapterId)
   if (!removed) return { ok: false, reason: 'chapter-not-found' }
   return { ok: true, tree: next }
+}
+
+/**
+ * 修改章节的写作状态与备注（docs/decisions.md 第 16 节）：status 为 null、备注为空白时去掉该字段。
+ * 只改这两项，不动 id、标题、子节点与位置。纯函数。
+ *
+ * 前置条件：tree 是一棵已通过 validateTree 的可信树。
+ */
+export function setChapterMeta(
+  tree: ChapterTree,
+  chapterId: ChapterId,
+  meta: { readonly status?: ChapterStatus | null; readonly note?: string },
+): RenameResult {
+  if (!findNode(tree, chapterId)) return { ok: false, reason: 'chapter-not-found' }
+  const update = (node: ChapterNode): ChapterNode => {
+    const { status, note, ...rest } = node
+    const nextStatus = meta.status === undefined ? status : (meta.status ?? undefined)
+    const nextNote = meta.note === undefined ? note : meta.note.trim() === '' ? undefined : meta.note.trim()
+    return {
+      ...rest,
+      ...(nextStatus === undefined ? {} : { status: nextStatus }),
+      ...(nextNote === undefined ? {} : { note: nextNote }),
+    }
+  }
+  const visit = (list: readonly ChapterNode[]): ChapterNode[] =>
+    list.map((node) => (node.id === chapterId ? update(node) : { ...node, children: visit(node.children) }))
+  return { ok: true, tree: visit(tree) }
 }
 
 export type RenameReason = 'chapter-not-found'
