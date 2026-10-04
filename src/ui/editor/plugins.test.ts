@@ -383,6 +383,15 @@ test('粘贴：去掉网页、Word、WPS 用来制造段间距的空段落', () 
   expect(markdown(view)).toBe('第一段\n\n第二段\n')
 })
 
+test('粘贴：Word / WPS 的列表段落成为列表（保留层级与编号类型）', () => {
+  const item = (level: number, marker: string, text: string) =>
+    `<p class=MsoListParagraph style='mso-list:l0 level${level} lfo1'><![if !supportLists]>` +
+    `<span style='mso-list:Ignore'>${marker}<span>&nbsp;&nbsp;</span></span><![endif]>${text}<o:p></o:p></p>`
+  const view = viewOf('')
+  view.pasteHTML(`<p>要点：</p>${item(1, '1.', '准备')}${item(2, '·', '材料')}${item(1, '2.', '写作')}`)
+  expect(markdown(view)).toBe('要点：\n\n1. 准备\n   - 材料\n2. 写作\n')
+})
+
 const FIGURE = '![图](../assets/图.png)'
 
 /** 文档中第一张独立成段的图片（figure）的位置。 */

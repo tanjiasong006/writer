@@ -1,4 +1,5 @@
 import { Fragment, Slice, type Node, type NodeType, type ResolvedPos } from 'prosemirror-model'
+import { officeListsToHtml } from './office_lists.ts'
 import { EditorState, Plugin, Selection, TextSelection, type Command, type Transaction } from 'prosemirror-state'
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view'
 import {
@@ -402,6 +403,8 @@ function markdownClipboard(): Plugin {
         const doc = parseMarkdown(text)
         return Slice.maxOpen(doc.content)
       },
+      // Word、WPS 的列表是带 mso-list 样式的段落，先换成 HTML 列表（office_lists.ts）。
+      transformPastedHTML: officeListsToHtml,
       transformPasted: withoutBlankParagraphs,
     },
   })

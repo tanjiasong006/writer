@@ -14,6 +14,7 @@
 | `commands.ts` | 编辑命令（格式、结构、插入、表格行列、撤销）与它们的可用 / 激活状态（`commandState` 只从 EditorState 推导）。 |
 | `editor_menu.ts` | 编辑命令在菜单中的名称与快捷键，正文右键菜单的内容（按点击处：图片、表格、文字）。 |
 | `plugins.ts` | 快捷键、输入规则、撤销历史、表格编辑、占位提示、剪贴板；`createEditorState`。 |
+| `office_lists.ts` | 粘贴前把 Word / WPS 的列表段落（`mso-list` 样式）换成嵌套的 HTML 列表：项目符号与编号去掉，按层级嵌套、按标记区分有序与无序。 |
 | `task_list.ts` | 任务列表复选框 decoration；勾选 / 取消通过正文事务修改，支持撤销与重做。 |
 | `code_highlight.ts` | 代码块语法高亮（decoration）：按围栏语言，没有语言时自动识别，识别不可靠时不着色；不改变文档与输出。声明了语言的代码块右上角显示语言名；语言在右键菜单“代码语言”中选择（`setCodeLanguage`）。全文阅读用 `highlightedCodeDOM` 得到相同的高亮与角标。 |
 | `caret.ts` | 自绘文字光标：WebKit 原生光标在段落第二行起高度不对，改为按文字高度绘制（输入法组字期间用原生光标）。 |

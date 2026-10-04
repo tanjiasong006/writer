@@ -965,7 +965,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 3. ~~写作目标（字数目标、进度）。~~（完成，见下方“P2-3 写作目标”）
 4. ~~更多导出格式：合并的 Markdown、HTML、EPUB。~~（完成，见下方“P2-4 其他导出格式”）
 5. ~~文档模板（论文、报告、书稿）。~~（完成，见下方“P2-5 文档模板”）
-6. 富文本粘贴识别 Word / WPS 的列表段落（目前是带 · 的普通段落）。
+6. ~~富文本粘贴识别 Word / WPS 的列表段落（目前是带 · 的普通段落）。~~（完成，见下方“P2-6 粘贴 Word / WPS 列表”）
 7. 大量章节虚拟滚动（ui-spec P1；1050 章节实测暂不需要；拖入折叠节点自动展开、拖拽自动滚动已完成）。
 
 #### P2-1 专注模式（完成，2026-10-03）
@@ -1003,6 +1003,12 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 规则见 decisions 第 19 节。Application `createProject(…, outline)` 与 `outlineTree`（新 id、备注、空正文）；
   `ui/app_shell/document_templates.ts`（三个模板）；欢迎页模板按钮、菜单 `file:templates` / `file:template-*`。
 - 验证：按大纲建树并写入磁盘、菜单解析、欢迎页与菜单栏从模板新建测试；Storybook 中目视检查了欢迎页。
+
+#### P2-6 粘贴 Word / WPS 列表（完成，2026-10-04）
+
+- 规则见 decisions 第 20 节。`ui/editor/office_lists.ts`（`officeListsToHtml`），剪贴板插件的 `transformPastedHTML`。
+- 验证：无序 / 有序、层级嵌套、起始编号、条件注释两种形式与中文编号，以及在编辑器中粘贴得到的 Markdown 测试。
+  使用按 Word / WPS 剪贴板格式构造的 HTML，未从真实 Word / WPS 复制验证。
 
 ### 发布准备（非功能）
 
