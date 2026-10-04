@@ -7,6 +7,10 @@ import { findChapter, type ChapterId, type ChapterTree } from '../../domain/chap
 export interface UiState {
   readonly selectedId: ChapterId | null
   readonly collapsedIds: ReadonlySet<ChapterId>
+  /** 全文字数目标（docs/decisions.md 第 17 节）；没有时为 null。 */
+  readonly goal: number | null
+  /** 今天开始写作时的全文字数（计算今日新增）；date 是本地日期 YYYY-MM-DD。 */
+  readonly today: { readonly date: string; readonly startWords: number } | null
 }
 
 const VERSION = 1
@@ -16,6 +20,8 @@ export function serializeUiState(state: UiState): string {
     version: VERSION,
     selectedId: state.selectedId,
     collapsedIds: [...state.collapsedIds],
+    ...(state.goal === null ? {} : { goal: state.goal }),
+    ...(state.today === null ? {} : { today: state.today }),
   })
 }
 
@@ -42,5 +48,11 @@ export function restoreUiState(text: string | null, tree: ChapterTree): UiState 
   const collapsedIds = new Set(
     Array.isArray(record.collapsedIds) ? record.collapsedIds.filter(exists) : [],
   )
-  return { selectedId, collapsedIds }
+  const goal = typeof record.goal === 'number' && Number.isInteger(record.goal) && record.goal > 0 ? record.goal : null
+  const rawToday = record.today as { date?: unknown; startWords?: unknown } | undefined
+  const today =
+    rawToday && typeof rawToday.date === 'string' && typeof rawToday.startWords === 'number'
+      ? { date: rawToday.date, startWords: rawToday.startWords }
+      : null
+  return { selectedId, collapsedIds, goal, today }
 }

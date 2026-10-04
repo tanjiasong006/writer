@@ -8,10 +8,21 @@ const tree: ChapterTree = [
 ]
 
 test('往返：选中章节与折叠状态', () => {
-  const text = serializeUiState({ selectedId: 'a1', collapsedIds: new Set(['a']) })
+  const text = serializeUiState({ selectedId: 'a1', collapsedIds: new Set(['a']), goal: null, today: null })
   const state = restoreUiState(text, tree)
   expect(state.selectedId).toBe('a1')
   expect([...state.collapsedIds]).toEqual(['a'])
+  expect(state.goal).toBeNull()
+})
+
+test('往返：写作目标与今天开始时的字数；非法值忽略', () => {
+  const text = serializeUiState({ selectedId: 'a', collapsedIds: new Set(), goal: 80000, today: { date: '2026-10-04', startWords: 1200 } })
+  const state = restoreUiState(text, tree)
+  expect(state.goal).toBe(80000)
+  expect(state.today).toEqual({ date: '2026-10-04', startWords: 1200 })
+  const bad = restoreUiState(JSON.stringify({ version: 1, goal: -5, today: { date: 3 } }), tree)
+  expect(bad.goal).toBeNull()
+  expect(bad.today).toBeNull()
 })
 
 test('没有状态或状态损坏：默认选中第一个章节', () => {

@@ -24,3 +24,9 @@ export const WithSelection: Story = { args: { selection: { words: 56, characters
 
 /** 空章节。 */
 export const EmptyChapter: Story = { args: { chapter: { words: 0, characters: 0 }, document: { words: 0, characters: 0 } } }
+
+/** 有全文目标：进度条与今天新增的字数。 */
+export const WithGoal: Story = { args: { goal: 150000, today: 2316 } }
+
+/** 没有目标：今天新增的字数与“设置全文目标…”。 */
+export const WithoutGoal: Story = { args: { goal: null, today: 480 } }

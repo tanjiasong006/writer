@@ -112,7 +112,7 @@ const layoutPreview = computed(() =>
 )
 const reader = ref<InstanceType<typeof DocumentReader> | null>(null)
 
-const { selectedId, collapsedIds } = useUiState(shell, props.session.path, () => document.value.tree)
+const { selectedId, collapsedIds, goal, today, ready: uiReady } = useUiState(shell, props.session.path, () => document.value.tree)
 
 const {
   element: sidebarElement,
@@ -541,6 +541,26 @@ const countLabel = computed(() => {
   return current.selection ? `已选 ${format(current.selection.words)} 字` : `${format(current.chapter.words)} 字`
 })
 const countPopover = shallowRef<{ readonly right: number; readonly bottom: number } | null>(null)
+
+/** 本地日期 YYYY-MM-DD。 */
+function localDate(): string {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * 写作目标与今日进度（docs/decisions.md 第 17 节）：每天第一次打开字数统计时记下当时的全文字数，
+ * 之后显示与它的差（今天新增的字数）。
+ */
+const todayWords = computed<number | null>(() => {
+  const start = today.value
+  return start && start.date === localDate() ? documentCount.value.words - start.startWords : null
+})
+
+watch(countPopover, (open) => {
+  if (!open || !uiReady.value) return
+  if (today.value?.date !== localDate()) today.value = { date: localDate(), startWords: documentCount.value.words }
+})
 
 function openCountPopover(event: MouseEvent): void {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
@@ -1184,6 +1204,9 @@ async function createFirstChapter(): Promise<void> {
       :selection="stats.selection"
       :chapter="stats.chapter"
       :document="documentCount"
+      :goal="goal"
+      :today="todayWords"
+      @set-goal="goal = $event"
       @close="closeCountPopover"
     />
 

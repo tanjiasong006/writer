@@ -268,7 +268,7 @@ Table: 样本构成 {#tbl:p0q8m4c2}
 | `.writer/journal.json` | 已提交但未整理完的保存事务 |
 | `.writer/staging/` | 保存事务的临时区 |
 | `.writer/recovered/` | 被移走的孤儿文件，从不自动删除 |
-| `.writer/ui-state.json` | 选中章节、折叠状态等界面状态；损坏时忽略，不影响文档 |
+| `.writer/ui-state.json` | 选中章节、折叠状态、写作目标与今天的起点字数等界面状态；损坏时忽略，不影响文档 |
 | `.writer/lock` | 打开期间持有的操作系统独占锁：同一项目同一时间只能被一个 Writer 进程打开；进程退出时自动释放 |
 | `.writer/asset.tmp` | 资源导入时的临时文件 |
 | `.writer/snapshots/<毫秒时间戳>.json` | 版本快照（7.1） |

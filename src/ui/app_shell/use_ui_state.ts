@@ -8,6 +8,12 @@ const UI_STATE_DELAY_MS = 500
 export interface ProjectUiState {
   readonly selectedId: Ref<ChapterId | null>
   readonly collapsedIds: Ref<ReadonlySet<ChapterId>>
+  /** 全文字数目标；null 表示没有。 */
+  readonly goal: Ref<number | null>
+  /** 今天开始时的全文字数。 */
+  readonly today: Ref<{ readonly date: string; readonly startWords: number } | null>
+  /** 已从磁盘恢复（之前的值是默认值）。 */
+  readonly ready: Ref<boolean>
 }
 
 /**
@@ -21,14 +27,18 @@ export function useUiState(
 ): ProjectUiState {
   const selectedId = ref<ChapterId | null>(null)
   const collapsedIds = shallowRef<ReadonlySet<ChapterId>>(new Set())
-  let ready = false
+  const goal = ref<number | null>(null)
+  const today = shallowRef<{ readonly date: string; readonly startWords: number } | null>(null)
+  const ready = ref(false)
   let timer: ReturnType<typeof setTimeout> | null = null
 
   onMounted(async () => {
     const restored = restoreUiState(await shell.loadUiState(projectPath), tree())
     selectedId.value = restored.selectedId
     collapsedIds.value = restored.collapsedIds
-    ready = true
+    goal.value = restored.goal
+    today.value = restored.today
+    ready.value = true
   })
 
   function persist(): void {
@@ -36,12 +46,17 @@ export function useUiState(
     timer = null
     void shell.saveUiState(
       projectPath,
-      serializeUiState({ selectedId: selectedId.value, collapsedIds: collapsedIds.value }),
+      serializeUiState({
+        selectedId: selectedId.value,
+        collapsedIds: collapsedIds.value,
+        goal: goal.value,
+        today: today.value,
+      }),
     )
   }
 
-  watch([selectedId, collapsedIds], () => {
-    if (!ready) return
+  watch([selectedId, collapsedIds, goal, today], () => {
+    if (!ready.value) return
     if (timer !== null) clearTimeout(timer)
     timer = setTimeout(persist, UI_STATE_DELAY_MS)
   })
@@ -50,5 +65,5 @@ export function useUiState(
     if (timer !== null) persist()
   })
 
-  return { selectedId, collapsedIds }
+  return { selectedId, collapsedIds, goal, today, ready }
 }
