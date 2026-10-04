@@ -13,12 +13,13 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'new-project': []
+  'new-project': [template?: TemplateId]
   'open-project': []
   'open-recent': [path: string]
 }>()
 
 import { projectName } from '../../application/recent_projects.ts'
+import { DOCUMENT_TEMPLATES, type TemplateId } from './document_templates.ts'
 
 import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
 </script>
@@ -38,6 +39,15 @@ import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
           <kbd class="welcome__shortcut">{{ formatShortcut(SHORTCUTS.openDocument) }}</kbd>
         </button>
       </div>
+      <p class="welcome__templates">
+        <span>从模板开始：</span>
+        <template v-for="(template, index) in DOCUMENT_TEMPLATES" :key="template.id">
+          <span v-if="index > 0" class="welcome__templates-separator" aria-hidden="true">·</span>
+          <button type="button" class="welcome__template" tabindex="0" :disabled="busy" @click="emit('new-project', template.id)">
+            {{ template.label }}
+          </button>
+        </template>
+      </p>
       <p class="welcome__hint">每个文档保存为一个文件夹，打开时选择该文件夹即可。</p>
       <section v-if="recent && recent.length > 0" class="welcome__recent" aria-label="最近打开">
         <h2 class="welcome__recent-title">最近打开</h2>
@@ -148,8 +158,44 @@ import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
   opacity: 0.6;
 }
 
+.welcome__templates {
+  display: flex;
+  align-items: center;
+  margin: var(--space-5) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-s);
+  line-height: var(--leading-tight);
+}
+
+.welcome__templates-separator {
+  color: var(--color-text-tertiary);
+}
+
+/* 模板名是文字按钮：安静，hover 时下划线。 */
+.welcome__template {
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--color-accent-text);
+  font: inherit;
+}
+
+.welcome__template:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.welcome__template:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 0;
+}
+
+.welcome__template:disabled {
+  opacity: 0.55;
+}
+
 .welcome__hint {
-  margin: var(--space-6) 0 0;
+  margin: var(--space-4) 0 0;
   color: var(--color-text-tertiary);
   font-size: var(--text-s);
   line-height: var(--leading-tight);

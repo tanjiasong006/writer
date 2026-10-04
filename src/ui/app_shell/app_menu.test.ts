@@ -327,3 +327,16 @@ test('更新交叉引用：有章节、不在全文阅读中时可用', () => {
   expect(item({ reading: true })).toMatchObject({ disabled: true })
   expect(parseMenuItemId('insert:update-chapter-refs')).toEqual({ group: 'insert', action: 'update-chapter-refs' })
 })
+
+test('从模板新建：欢迎页与工作区的文件菜单都有模板子菜单，id 还原为模板命令', () => {
+  for (const menus of [welcomeMenus('system'), workspaceMenus(context())]) {
+    const templates = menus[0]!.items.find((item) => 'id' in item && item.id === 'file:templates')
+    expect(templates && 'submenu' in templates && templates.submenu!.map((item) => ('label' in item ? item.label : ''))).toEqual([
+      '论文…',
+      '报告…',
+      '书稿…',
+    ])
+  }
+  expect(parseMenuItemId('file:template-book')).toEqual({ group: 'template', template: 'book' })
+  expect(parseMenuItemId('file:template-novel')).toBeNull()
+})
