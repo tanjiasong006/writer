@@ -5,6 +5,7 @@ import { keyboardMoveIntent, type KeyboardMoveDirection, type MoveIntent } from 
 import { ancestorPath, numberWidths, visibleRows, type ChapterRow } from './tree_rows.ts'
 import { useTreeDrag } from './use_tree_drag.ts'
 import { useInlineRename } from './use_inline_rename.ts'
+import { useRowWindow } from './use_row_window.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
 import { CHAPTER_STATUSES, type ChapterStatus } from '../../domain/chapter_tree/chapter_tree.ts'
 import { STATUS_LABELS } from './status_labels.ts'
@@ -472,6 +473,19 @@ const {
 const rows = computed<ChapterRow[]>(() => visibleRows(props.tree, collapsedIds.value))
 const numberWidth = computed(() => numberWidths(rows.value))
 
+const scrollElement = ref<HTMLElement | null>(null)
+
+/** 章节很多时只渲染滚动区域附近的行（use_row_window.ts）；焦点、选中、重命名、拖拽与菜单的行始终保留。 */
+const { virtual, rendered, rowHeight } = useRowWindow({
+  rows: () => rows.value,
+  scroller: scrollElement,
+  pinned: () => [props.selectedId, tabbableId.value, props.editingId, draggingId.value, menuTarget.value?.id],
+})
+
+function nodeStyle(index: number): Record<string, string> | undefined {
+  return virtual.value ? { position: 'absolute', top: `${index * rowHeight.value}px`, left: '0', right: '0' } : undefined
+}
+
 function numberStyle(row: ChapterRow): { minWidth: string } {
   return { minWidth: numberWidth.value.get(row.id) ?? '0' }
 }
@@ -520,12 +534,19 @@ defineExpose({
       </button>
     </div>
 
-    <div class="chapter-tree__scroll">
-      <ul ref="listElement" class="chapter-tree__list" role="tree" aria-label="章节树">
+    <div ref="scrollElement" class="chapter-tree__scroll">
+      <ul
+        ref="listElement"
+        class="chapter-tree__list"
+        role="tree"
+        aria-label="章节树"
+        :style="virtual ? { position: 'relative', height: `${rows.length * rowHeight}px` } : undefined"
+      >
         <li
-          v-for="row in rows"
+          v-for="{ row, index } in rendered"
           :key="row.id"
           class="chapter-tree__node"
+          :style="nodeStyle(index)"
           role="treeitem"
           :aria-level="row.depth + 1"
           :aria-selected="row.id === selectedId"
