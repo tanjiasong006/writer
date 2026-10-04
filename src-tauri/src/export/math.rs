@@ -80,6 +80,22 @@ pub fn render_png(tex: &str, display: bool, size_pt: f64, fonts: &'static FontSt
     })
 }
 
+/// 用 Typst 排版一个公式并输出 SVG（HTML / EPUB 中使用），返回 SVG 与尺寸（磅）。失败时为 None。
+pub fn render_svg(tex: &str, display: bool, size_pt: f64, fonts: &'static FontStore) -> Option<(String, f64, f64)> {
+    let typst = to_typst(tex)?;
+    let source = format!(
+        "{SCOPE_IMPORT}#set page(width: auto, height: auto, margin: (x: 0.5pt, y: 1pt), fill: none)\n\
+         #set text(size: {size_pt}pt)\n\
+         #math.equation(block: {display}, {})\n",
+        eval_expression(&typst)
+    );
+    let world = super::pdf::PdfWorld::new(source, Vec::new(), fonts);
+    let document = typst::compile::<PagedDocument>(&world).output.ok()?;
+    let page = document.pages().first()?;
+    let size = page.frame.size();
+    Some((typst_svg::svg(page, &typst_svg::SvgOptions::default()), size.x.to_pt(), size.y.to_pt()))
+}
+
 /// 主源码中的公式定义：`#let writer-math-<n> = …`，每个公式一行，返回源码与各行的字节范围（相对开头）。
 /// invalid 中的公式使用替代（转换失败或排版时出错的）。
 pub fn definitions(formulas: &[(String, Option<String>)], invalid: &std::collections::HashSet<usize>) -> (String, Vec<std::ops::Range<usize>>) {

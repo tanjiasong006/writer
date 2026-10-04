@@ -46,7 +46,7 @@ export interface AppMenuContext {
   readonly appearance: Appearance
 }
 
-const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'pdf-layout', 'history'] as const
+const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'export-markdown', 'export-html', 'export-epub', 'pdf-layout', 'history'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find-replace'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete', 'note', 'status-none', 'status-draft', 'status-revise', 'status-done'] as const
 const INSERT_ACTIONS = ['update-chapter-refs', 'references'] as const
@@ -81,6 +81,7 @@ export type MenuItemId =
   | `file:recent-${number}`
   | 'file:recent-clear'
   | 'file:recent'
+  | 'file:export-other'
   /** 子菜单本身（不对应命令）。 */
   | 'appearance'
   | 'list'
@@ -265,6 +266,17 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         { separator: true },
         { id: 'file:export-docx', label: '导出为 Word…', disabled: context.exporting },
         { id: 'file:export-pdf', label: '导出为 PDF…', disabled: context.exporting },
+        // 其他格式（docs/decisions.md 第 18 节）：与 Word / PDF 相同的内容规则。
+        {
+          id: 'file:export-other',
+          label: '导出为其他格式',
+          disabled: context.exporting,
+          submenu: [
+            { id: 'file:export-markdown', label: 'Markdown（合并为一个文件）…' },
+            { id: 'file:export-html', label: 'HTML 网页…' },
+            { id: 'file:export-epub', label: 'EPUB 电子书…' },
+          ],
+        },
         { id: 'file:pdf-layout', label: 'PDF 排版设置…' },
       ],
     },

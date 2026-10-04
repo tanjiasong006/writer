@@ -3,6 +3,7 @@ import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ask, open, save } from '@tauri-apps/plugin-dialog'
 import type { AppServices, DesktopShell, UpdateCheckResult } from '../application/desktop_shell.ts'
+import type { ExportFormat } from '../application/document_output.ts'
 import { createTauriProjectStorage } from './tauri_project_storage.ts'
 import { createTauriDocumentOutput } from './tauri_document_output.ts'
 import { createTauriMenus } from './tauri_menu.ts'
@@ -48,11 +49,11 @@ function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): D
     },
 
     async pickExportPath(format, defaultName) {
-      const extension = format === 'docx' ? 'docx' : 'pdf'
+      const { extension, title, kind } = EXPORT_FILES[format]
       const picked = await save({
-        title: format === 'docx' ? '导出 Word' : '导出 PDF',
+        title,
         defaultPath: `${defaultName}.${extension}`,
-        filters: [{ name: format === 'docx' ? 'Word 文档' : 'PDF 文档', extensions: [extension] }],
+        filters: [{ name: kind, extensions: [extension] }],
       })
       if (picked === null) return null
       return picked.toLowerCase().endsWith(`.${extension}`) ? picked : `${picked}.${extension}`
@@ -162,6 +163,15 @@ function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): D
       await invoke('app_restart')
     },
   }
+}
+
+/** 各导出格式的扩展名与保存对话框中的文字。 */
+const EXPORT_FILES: Readonly<Record<ExportFormat, { extension: string; title: string; kind: string }>> = {
+  docx: { extension: 'docx', title: '导出 Word', kind: 'Word 文档' },
+  pdf: { extension: 'pdf', title: '导出 PDF', kind: 'PDF 文档' },
+  markdown: { extension: 'md', title: '导出 Markdown', kind: 'Markdown 文档' },
+  html: { extension: 'html', title: '导出 HTML', kind: 'HTML 网页' },
+  epub: { extension: 'epub', title: '导出 EPUB', kind: 'EPUB 电子书' },
 }
 
 /** Rust 返回的错误（{ message }）或其他异常的说明文字。 */

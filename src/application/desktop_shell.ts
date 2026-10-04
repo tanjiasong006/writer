@@ -1,5 +1,5 @@
 import type { ProjectStorage } from './project_storage.ts'
-import type { DocumentOutput } from './document_output.ts'
+import type { DocumentOutput, ExportFormat } from './document_output.ts'
 
 /**
  * 菜单项。shortcut 是加速键描述（如 `CmdOrCtrl+B`、`F2`），界面自行换算成显示文字；
@@ -67,7 +67,7 @@ export interface DesktopShell {
    * 让用户选择导出文件的保存位置；取消返回 null。
    * defaultName 不含扩展名，扩展名由 format 决定。
    */
-  pickExportPath(format: 'docx' | 'pdf', defaultName: string): Promise<string | null>
+  pickExportPath(format: ExportFormat, defaultName: string): Promise<string | null>
   /** 在系统文件管理器中显示文件。失败静默忽略。 */
   revealFile(filePath: string): Promise<void>
   /** 需要用户明确决定的确认框。 */

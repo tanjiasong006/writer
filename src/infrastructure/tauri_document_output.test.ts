@@ -64,3 +64,12 @@ test('PDF 样张：携带排版配置，返回各页 SVG', async () => {
   invokeMock.mockRejectedValue({ code: 'no-cjk-font' })
   expect(await output.previewPdf('/p', request, layout)).toEqual({ ok: false, error: { code: 'no-cjk-font' } })
 })
+
+test('Markdown、HTML、EPUB 调用各自的命令，不携带排版配置', async () => {
+  invokeMock.mockResolvedValue({ missingImages: [], brokenReferences: [] })
+  const output = createTauriDocumentOutput()
+  for (const format of ['markdown', 'html', 'epub'] as const) {
+    await output.exportDocument('/p', request, format, `/out/论文.${format}`, layout)
+    expect(invokeMock).toHaveBeenLastCalledWith(`export_${format}`, { path: '/p', document: request, target: `/out/论文.${format}` })
+  }
+})

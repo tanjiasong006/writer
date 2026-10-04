@@ -11,9 +11,7 @@ export function createTauriDocumentOutput(): DocumentOutput {
     async exportDocument(projectPath, request, format, targetPath, pdfLayout) {
       const args = { path: projectPath, document: request, target: targetPath }
       const result = await call(() =>
-        format === 'docx'
-          ? invoke<unknown>('export_docx', args)
-          : invoke<unknown>('export_pdf', { ...args, layout: pdfLayout }),
+        format === 'pdf' ? invoke<unknown>('export_pdf', { ...args, layout: pdfLayout }) : invoke<unknown>(`export_${format}`, args),
       )
       if (!result.ok) return result
       const raw = result.value as { missingImages?: unknown; brokenReferences?: unknown; invalidFormulas?: unknown } | null

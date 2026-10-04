@@ -234,6 +234,76 @@ pub async fn export_docx(
     })?
 }
 
+/// 导出 HTML：一个独立的文件（图片与样式内嵌，公式为 SVG）。
+#[tauri::command]
+pub async fn export_html(path: PathBuf, document: RenderRequest, target: PathBuf) -> Result<ExportReport, ExportError> {
+    run_export(move || {
+        let (bytes, report) = export::html::export(&render::build(&document), &path);
+        export::write_output(&target, &bytes)?;
+        Ok(report)
+    })
+    .await
+}
+
+/// 导出 EPUB 3。
+#[tauri::command]
+pub async fn export_epub(path: PathBuf, document: RenderRequest, target: PathBuf) -> Result<ExportReport, ExportError> {
+    run_export(move || {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let identifier = format!("urn:writer:{now}");
+        let (bytes, report) = export::epub::export(&render::build(&document), &path, &iso_utc(now), &identifier)?;
+        export::write_output(&target, &bytes)?;
+        Ok(report)
+    })
+    .await
+}
+
+/// 导出合并的 Markdown：图片复制到同名加 `_assets` 的文件夹（已有的同名文件被覆盖）。
+#[tauri::command]
+pub async fn export_markdown(path: PathBuf, document: RenderRequest, target: PathBuf) -> Result<ExportReport, ExportError> {
+    run_export(move || {
+        let stem = target.file_stem().and_then(|s| s.to_str()).unwrap_or("document").to_owned();
+        let assets = format!("{stem}_assets");
+        let output = export::markdown::export(&render::build(&document), &path, &assets);
+        let dir = target.parent().map(Path::to_path_buf).unwrap_or_default();
+        for (relative, bytes) in &output.images {
+            let file = dir.join(relative);
+            if let Some(parent) = file.parent() {
+                std::fs::create_dir_all(parent).map_err(export::io_failure)?;
+            }
+            export::write_output(&file, bytes)?;
+        }
+        export::write_output(&target, output.text.as_bytes())?;
+        Ok(output.report)
+    })
+    .await
+}
+
+async fn run_export(
+    work: impl FnOnce() -> Result<ExportReport, ExportError> + Send + 'static,
+) -> Result<ExportReport, ExportError> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .map_err(|error| ExportError::RenderFailed { message: error.to_string() })?
+}
+
+/// Unix 秒 → `YYYY-MM-DDThh:mm:ssZ`（EPUB 的修改时间）。
+fn iso_utc(seconds: u64) -> String {
+    let days = seconds / 86_400;
+    let rest = seconds % 86_400;
+    // 公历日期（Howard Hinnant 的 civil_from_days）。
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z", rest / 3600, rest % 3600 / 60, rest % 60)
+}
+
 /// 在系统文件管理器中显示文件（导出完成后使用）。
 #[tauri::command]
 pub fn reveal_in_file_manager(path: PathBuf) -> Result<(), String> {
@@ -295,6 +365,12 @@ pub async fn preview_pdf(
 #[cfg(test)]
 mod tests {
     use super::percent_decode;
+
+    #[test]
+    fn iso_utc_formats_dates() {
+        assert_eq!(super::iso_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(super::iso_utc(1_790_000_000), "2026-09-21T14:13:20Z");
+    }
 
     #[test]
     fn percent_decode_reverses_encode_uri_component() {

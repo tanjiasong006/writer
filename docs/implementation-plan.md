@@ -963,7 +963,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 1. ~~专注模式 / 全屏写作。~~（完成，见下方“P2-1 专注模式”）
 2. ~~章节状态或标签（草稿 / 待修改 / 完成）与章节备注。~~（完成，见下方“P2-2 章节状态与备注”）
 3. ~~写作目标（字数目标、进度）。~~（完成，见下方“P2-3 写作目标”）
-4. 更多导出格式：合并的 Markdown、HTML、EPUB。
+4. ~~更多导出格式：合并的 Markdown、HTML、EPUB。~~（完成，见下方“P2-4 其他导出格式”）
 5. 文档模板（论文、报告、书稿）。
 6. 富文本粘贴识别 Word / WPS 的列表段落（目前是带 · 的普通段落）。
 7. 大量章节虚拟滚动（ui-spec P1；1050 章节实测暂不需要；拖入折叠节点自动展开、拖拽自动滚动已完成）。
@@ -988,6 +988,15 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 规则见 decisions 第 17 节。`ui_state.ts` / `use_ui_state.ts` 增加 `goal`、`today`；`WordCountPopover` 增加目标区（设置、进度条、今日新增、取消）；
   工作区在打开字数统计时记下当天的起点。
 - 验证：界面状态往返与非法值、工作区（设置目标、百分比、今日新增、保存、取消）测试；Story `WordCountPopover/WithGoal`、`WithoutGoal`。
+
+#### P2-4 其他导出格式（完成，2026-10-03）
+
+- 规则见 decisions 第 18 节。Rust `export::html`（XHTML 渲染，HTML 与 EPUB 共用；无依赖的 base64）、`export::epub`（zip 打包、nav、opf）、
+  `export::markdown`（从中间模型写 Markdown，复制图片）、`export::math::render_svg`；命令 `export_html` / `export_epub` / `export_markdown`。
+- 前端：`ExportFormat` 增加三种格式，保存对话框的扩展名与说明，工具栏导出菜单与“文件 → 导出为其他格式”。
+- 验证：Rust（HTML 标题 / 引用 / 脚注 / 文献 / 转义 / 公式 SVG / 缺失图片；EPUB 包结构、按一级章节分文件、跨文件链接、nav 嵌套、opf；
+  Markdown 引用文字、图注编号、转义、脚注连续编号、参考文献、图片复制；base64；日期）、前端命令路由与工作区导出测试。
+  未在电子书阅读器与其他 Markdown 工具中目视检查。
 
 ### 发布准备（非功能）
 

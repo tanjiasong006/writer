@@ -47,7 +47,8 @@ export type OutputResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: OutputFailure }
 
-export type ExportFormat = 'docx' | 'pdf'
+/** 导出格式：Word、PDF，以及合并的 Markdown、HTML、EPUB（docs/decisions.md 第 18 节）。 */
+export type ExportFormat = 'docx' | 'pdf' | 'markdown' | 'html' | 'epub'
 
 /** 导出完成后的报告：可恢复的问题，需要告知用户。 */
 export interface ExportReport {

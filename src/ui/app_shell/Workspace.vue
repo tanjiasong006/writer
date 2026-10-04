@@ -168,12 +168,16 @@ async function showButtonMenu(
 const EXPORT_ITEMS: readonly MenuEntry[] = [
   { id: 'docx', label: '导出为 Word（.docx）…' },
   { id: 'pdf', label: '导出为 PDF…' },
+  { separator: true },
+  { id: 'markdown', label: '导出为 Markdown…' },
+  { id: 'html', label: '导出为 HTML…' },
+  { id: 'epub', label: '导出为 EPUB…' },
 ]
 
 async function openExportMenu(event: MouseEvent): Promise<void> {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   const chosen = await showButtonMenu('export', EXPORT_ITEMS, { rect, align: 'end' }, event.detail === 0)
-  if (chosen === 'docx') void exportAs('docx')
+  if (chosen === 'docx' || chosen === 'markdown' || chosen === 'html' || chosen === 'epub') void exportAs(chosen)
   else if (chosen === 'pdf') {
     // 等菜单关闭、焦点回到导出按钮后再打开：对话框关闭时把焦点还到这里。
     await nextTick()
@@ -760,6 +764,15 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
           return
         case 'export-docx':
           void exportAs('docx')
+          return
+        case 'export-markdown':
+          void exportAs('markdown')
+          return
+        case 'export-html':
+          void exportAs('html')
+          return
+        case 'export-epub':
+          void exportAs('epub')
           return
         case 'export-pdf':
           layoutDialog.value = 'export'

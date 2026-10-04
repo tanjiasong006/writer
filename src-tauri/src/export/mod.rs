@@ -6,8 +6,11 @@
 //! - 用户数据（图片等）中的任何问题都不能让导出崩溃：图片无法读取时输出占位文字并计入报告。
 
 pub mod docx;
+pub mod epub;
 pub mod fonts;
+pub mod html;
 pub mod images;
+pub mod markdown;
 pub mod math;
 pub mod pdf;
 pub mod pdf_layout;
@@ -45,6 +48,11 @@ pub struct ExportReport {
     pub broken_references: Vec<String>,
     /// 无法排版的公式（LaTeX 原文），已按原文输出。
     pub invalid_formulas: Vec<String>,
+}
+
+/// 文件系统错误 → 导出错误。
+pub fn io_failure(error: std::io::Error) -> ExportError {
+    ExportError::Io { kind: classify(&error), message: error.to_string() }
 }
 
 /// 原子写出导出文件：临时文件 → fsync → rename。
