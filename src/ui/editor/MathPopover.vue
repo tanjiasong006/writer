@@ -8,6 +8,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import katex from 'katex'
 import { MathfieldElement } from 'mathlive'
 import { renderMath } from './math_view.ts'
+import { chemContent, chemTex } from './chem.ts'
 
 /**
  * 编辑公式（docs/decisions.md 第 14 节）：在公式（或插入处）下方弹出。
@@ -15,6 +16,8 @@ import { renderMath } from './math_view.ts'
  * - 默认是可视编辑（MathLive）：直接编辑排好版的公式，上方是常用结构与符号；输入 / 生成分数、^ 上标、_ 下标，
  *   方向键在各部分之间移动。
  * - “LaTeX”切换到源码：文本框加实时预览；⇧Enter 换行（公式块可以多行）。
+ * - 化学式（chem，docs/decisions.md 第 22 节）：直接写 \ce{…} 的内容（如 2H2 + O2 -> 2H2O），上方是箭头、气体、沉淀等常用写法，
+ *   下方是实时预览；没有可视编辑与 LaTeX 切换。
  * - Enter 或“完成”按钮完成，Esc 或“取消”按钮放弃；点击浮层以外也完成。没有修改时完成得到原文（可视编辑器不改写未编辑的写法）。
  * - 只发出 commit / cancel，正文由编辑器修改。
  */
@@ -23,6 +26,7 @@ const props = defineProps<{
   label: string
   tex: string
   display: boolean
+  chem?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -35,6 +39,9 @@ MathfieldElement.fontsDirectory = null
 MathfieldElement.soundsDirectory = null
 
 const value = ref(props.tex)
+const initialChem = props.chem ? (chemContent(props.tex) ?? props.tex) : ''
+const chemText = ref(initialChem)
+const chemInput = ref<HTMLTextAreaElement | null>(null)
 const source = ref(preferSource)
 const showSymbols = ref(false)
 const panel = ref<HTMLElement | null>(null)
@@ -77,9 +84,31 @@ const SYMBOLS: readonly string[] = [
   '\\in', '\\notin', '\\subset', '\\subseteq', '\\cup', '\\cap', '\\forall', '\\exists', '\\angle', '\\degree',
 ]
 
+/** 化学式的常用写法：在光标处插入 before + select + after，select 是选中的待填写文字（有选中的文字时用它）。 */
+interface ChemTemplate {
+  readonly label: string
+  readonly icon: string
+  readonly before: string
+  readonly select?: string
+  readonly after?: string
+}
+
+const CHEM_TOOLS: readonly ChemTemplate[] = [
+  { label: '生成', icon: '\\ce{->}', before: ' -> ' },
+  { label: '反应条件（->[上方][下方]）', icon: '\\ce{->[\\square]}', before: ' ->[', select: '条件', after: '] ' },
+  { label: '可逆反应', icon: '\\ce{<=>}', before: ' <=> ' },
+  { label: '等号与条件', icon: '\\xlongequal{\\square}', before: ' \\xlongequal{', select: '条件', after: '} ' },
+  { label: '气体', icon: '\\uparrow', before: ' ^ ' },
+  { label: '沉淀', icon: '\\downarrow', before: ' v ' },
+  { label: '加热', icon: '\\Delta', before: '\\Delta' },
+  { label: '电荷（如 SO4^2-）', icon: '\\square^{n+}', before: '^', select: '2+' },
+  { label: '结晶水（如 CuSO4*5H2O）', icon: '\\square\\cdot\\square', before: '*' },
+]
+
 const icon = (tex: string) => katex.renderToString(tex, { throwOnError: false, output: 'html' })
 const structureIcons = STRUCTURES.map((item) => icon(item.icon))
 const symbolIcons = SYMBOLS.map(icon)
+const chemIcons = props.chem ? CHEM_TOOLS.map((item) => icon(item.icon)) : []
 
 function place(): void {
   const element = panel.value
@@ -92,18 +121,43 @@ function place(): void {
 
 function showPreview(): void {
   if (!preview.value) return
-  if (value.value.trim() === '') {
+  const tex = props.chem ? chemTex(chemText.value) : value.value
+  if (tex.trim() === '') {
     preview.value.textContent = ''
     preview.value.classList.remove('is-invalid')
     return
   }
-  renderMath(preview.value, value.value, props.display)
+  renderMath(preview.value, tex, props.display)
 }
 
-watch(value, showPreview)
+watch([value, chemText], showPreview)
 
 function commit(): void {
-  emit('commit', value.value.trim())
+  if (props.chem) emit('commit', chemText.value === initialChem ? props.tex.trim() : chemTex(chemText.value))
+  else emit('commit', value.value.trim())
+}
+
+/** 在化学式的光标处插入常用写法；两侧的空格不与已有的空白重复。 */
+async function insertChem(item: ChemTemplate): Promise<void> {
+  const input = chemInput.value
+  if (!input) return
+  const text = chemText.value
+  const start = input.selectionStart
+  const end = input.selectionEnd
+  const selected = text.slice(start, end)
+  let before = item.before
+  let after = item.after ?? ''
+  const spaceAfter = /\s/.test(text[end] ?? '')
+  if (start === 0 || /\s/.test(text[start - 1])) before = before.trimStart()
+  if (spaceAfter) after = after.trimEnd()
+  if (spaceAfter && item.select === undefined) before = before.trimEnd()
+  const middle = item.select === undefined ? '' : selected || item.select
+  chemText.value = text.slice(0, start) + before + middle + after + text.slice(end)
+  await nextTick()
+  input.focus({ preventScroll: true })
+  const from = start + before.length
+  if (item.select !== undefined && selected === '') input.setSelectionRange(from, from + middle.length)
+  else input.setSelectionRange(from + middle.length + after.length, from + middle.length + after.length)
 }
 
 function onSourceKeydown(event: KeyboardEvent): void {
@@ -168,7 +222,10 @@ function insertTemplate(latex: string): void {
 
 async function focusEditor(selectAll: boolean): Promise<void> {
   await nextTick()
-  if (source.value) {
+  if (props.chem) {
+    chemInput.value?.focus({ preventScroll: true })
+    if (selectAll) chemInput.value?.select()
+  } else if (source.value) {
     input.value?.focus({ preventScroll: true })
     if (selectAll) input.value?.select()
   } else {
@@ -189,7 +246,7 @@ async function toggleSource(): Promise<void> {
 }
 
 onMounted(async () => {
-  createMathfield()
+  if (!props.chem) createMathfield()
   showPreview()
   place()
   await focusEditor(true)
@@ -219,7 +276,38 @@ onBeforeUnmount(() => {
   >
     <div class="math-popover__label">{{ label }}</div>
 
-    <div v-show="!source" class="math-popover__visual">
+    <template v-if="chem">
+      <div class="math-popover__tools" role="toolbar" aria-label="插入化学式写法">
+        <button
+          v-for="(item, index) in CHEM_TOOLS"
+          :key="item.label"
+          type="button"
+          class="math-popover__tool"
+          :title="item.label"
+          :aria-label="item.label"
+          tabindex="-1"
+          @mousedown.prevent
+          @click="insertChem(item)"
+          v-html="chemIcons[index]"
+        ></button>
+      </div>
+      <div class="math-popover__field math-popover__field--chem" :data-value="chemText">
+        <textarea
+          ref="chemInput"
+          v-model="chemText"
+          class="math-popover__input"
+          rows="1"
+          placeholder="如 2H2 + O2 -> 2H2O"
+          :aria-label="label"
+          spellcheck="false"
+          autocomplete="off"
+          @keydown="onSourceKeydown"
+        ></textarea>
+      </div>
+      <div ref="preview" class="math-popover__preview document-body" aria-live="polite"></div>
+    </template>
+
+    <div v-show="!source && !chem" class="math-popover__visual">
       <div class="math-popover__tools" role="toolbar" aria-label="插入结构">
         <button
           v-for="(item, index) in STRUCTURES"
@@ -261,7 +349,7 @@ onBeforeUnmount(() => {
       <div ref="fieldHost" class="math-popover__visual-field" :class="{ 'is-display': display }"></div>
     </div>
 
-    <template v-if="source">
+    <template v-if="source && !chem">
       <div class="math-popover__field" :data-value="value">
         <textarea
           ref="input"
@@ -279,7 +367,9 @@ onBeforeUnmount(() => {
     </template>
 
     <div class="math-popover__footer">
+      <span v-if="chem" class="math-popover__hint">数字自动成为下标</span>
       <button
+        v-else
         type="button"
         class="math-popover__mode"
         :aria-pressed="source"
@@ -289,7 +379,7 @@ onBeforeUnmount(() => {
         LaTeX
       </button>
       <div class="math-popover__actions">
-        <span v-if="source" class="math-popover__hint">⇧↩ 换行</span>
+        <span v-if="source && !chem" class="math-popover__hint">⇧↩ 换行</span>
         <button type="button" class="math-popover__action" @mousedown.prevent @click="emit('cancel')">
           <span class="math-popover__key">⎋</span>取消
         </button>
@@ -430,6 +520,11 @@ onBeforeUnmount(() => {
 .math-popover__visual-field :deep(math-field)::part(menu-toggle),
 .math-popover__visual-field :deep(math-field)::part(virtual-keyboard-toggle) {
   display: none;
+}
+
+/* 化学式的输入框在常用写法之下。 */
+.math-popover__field--chem {
+  margin-top: var(--space-2);
 }
 
 /* 随内容增高的文本框（与脚注浮层相同的做法），等宽字体。 */

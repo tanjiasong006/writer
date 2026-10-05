@@ -1,5 +1,5 @@
 {
-  "说明": "公式（docs/decisions.md 第 14 节，pulldown-cmark ENABLE_MATH 的规则）：$…$ 行内，$$…$$ 行间；只含一个行间公式的段落是公式块（内容去掉首尾空白）。开头 $ 后、结尾 $ 前是空白，花括号不平衡，转义的 $ 都不是公式。表格中公式里的 \\| 是 |。",
+  "说明": "公式（docs/decisions.md 第 14 节，pulldown-cmark ENABLE_MATH 的规则）：$…$ 行内，$$…$$ 行间；只含一个行间公式的段落是公式块（内容去掉首尾空白）。开头 $ 后、结尾 $ 前是空白，花括号不平衡，转义的 $ 都不是公式。表格中公式里的 \\| 是 |。化学式 \\ce{…}（第 22 节）只是公式的内容，其中的 *、^、-> 不是 Markdown 记号。",
   "blocks": [
     {
       "type": "paragraph",
@@ -35,6 +35,19 @@
       "align": ["none"],
       "header": [[{ "text": "公式" }]],
       "rows": [[[{ "math": "\\alpha|\\beta", "display": false }]]]
-    }
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "化学式：" },
+        { "math": "\\ce{2H2 + O2 ->[点燃] 2H2O}", "display": false },
+        { "text": "、" },
+        { "math": "\\ce{CuSO4*5H2O}", "display": false },
+        { "text": " 与 " },
+        { "math": "\\ce{AgCl v}", "display": false },
+        { "text": "。" }
+      ]
+    },
+    { "type": "math", "tex": "\\ce{N2 + 3H2 <=>[催化剂][高温高压] 2NH3}" }
   ]
 }

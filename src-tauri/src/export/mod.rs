@@ -5,6 +5,7 @@
 //!   也不会破坏同名的旧文件。
 //! - 用户数据（图片等）中的任何问题都不能让导出崩溃：图片无法读取时输出占位文字并计入报告。
 
+pub mod chem;
 pub mod docx;
 pub mod epub;
 pub mod fonts;

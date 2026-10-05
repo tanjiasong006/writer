@@ -49,6 +49,9 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   // 公式与 Pages（⌥⌘E）一样没有“⌘ + 单键”，只在插入菜单与右键菜单中。
   math: { label: '行内公式…' },
   'math-block': { label: '公式块…' },
+  // 化学式（docs/decisions.md 第 22 节）是内容为 \ce{…} 的公式，同样没有快捷键。
+  chem: { label: '行内化学式…' },
+  'chem-block': { label: '化学式块…' },
   'row-before': { label: '在上方插入行' },
   'row-after': { label: '在下方插入行' },
   'column-before': { label: '在左侧插入列' },
@@ -209,6 +212,7 @@ export function editorContextMenu(
       commandEntry('footnote', state, { label: '插入脚注…' }),
       commandEntry('citation', state, { label: '插入文献引用…' }),
       commandEntry('math', state, { label: '插入行内公式…' }),
+      commandEntry('chem', state, { label: '插入行内化学式…' }),
     )
   }
   return entries

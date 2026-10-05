@@ -967,6 +967,8 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 5. ~~文档模板（论文、报告、书稿）。~~（完成，见下方“P2-5 文档模板”）
 6. ~~富文本粘贴识别 Word / WPS 的列表段落（目前是带 · 的普通段落）。~~（完成，见下方“P2-6 粘贴 Word / WPS 列表”）
 7. ~~大量章节虚拟滚动（ui-spec P1；1050 章节实测暂不需要；拖入折叠节点自动展开、拖拽自动滚动已完成）。~~（完成，见下方“P2-7 章节树虚拟滚动”）
+8. ~~化学式与化学方程式。~~（完成，见下方“P2-8 化学式”）
+9. 化学结构式：SMILES + smiles-drawer + 常见分子库，` ```smiles ` 代码块，输出为图片（方向已确认，见 decisions 第 22 节）。
 
 #### P2-1 专注模式（完成，2026-10-03）
 
@@ -1017,6 +1019,17 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   焦点、输入框与拖拽源不会因滚动消失。行数少时与之前完全相同（正常文档流）。
 - 验证：窗口范围、渲染行数与定位、滚动后更新、↓ 移到窗口外的行获得焦点、少于阈值时渲染全部行测试；
   Storybook `App/LargeDocument`（1050 章节）中滚动后只渲染 41 行、位置正确。未在 Tauri 中目视检查长距离拖拽。
+
+#### P2-8 化学式（完成，2026-10-05）
+
+- 规则见 decisions 第 22 节。编辑器：`math_view.ts` 引入 KaTeX mhchem；`chem.ts`（`chemContent` / `chemTex`）；
+  命令 `chem` / `chem-block`（插入菜单、右键菜单）；`MathPopover.vue` 的化学式模式（常用写法、输入框、预览）。
+- Rust：`export::chem`（`\ce{…}` → LaTeX，在 `math::to_typst` 中展开）；`export::math` 使用调整过的 mitex 命令规格，
+  可伸长箭头接受 `[下方]`（vendored 规格中的 `arrow-handle` 同步修改，见 WRITER-PATCH.md）。
+- 验证：转换单元测试（与 mhchem 原版的展开结果对照）、化学式与箭头在 PDF 中排版不回退、箭头的下方文字不再是方括号、
+  共享 fixture `math`、浮层组件测试（内容编辑、原文保留、常用写法插入）、编辑器集成测试（显示、插入、双击编辑、混合公式）；
+  Story `MathPopover/NewChem`、`EditingChem`、`ChapterEditor/Chemistry`，Storybook 中目视检查了浮层与正文中的显示。
+  未检查深色外观、Tauri WebView 中的输入法，以及 Word / WPS 中化学式图片的实际效果。
 
 ### 发布准备（非功能）
 

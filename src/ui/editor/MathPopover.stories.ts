@@ -46,3 +46,11 @@ export const Invalid: Story = {
   args: { tex: '\\frac{a' },
   play: ({ canvasElement }) => showSource(canvasElement, true),
 }
+
+/** 插入化学式：空的输入框，上方是箭头、条件、气体、沉淀等常用写法。 */
+export const NewChem: Story = { args: { label: '行内化学式', chem: true } }
+
+/** 编辑化学式块：输入 mhchem 写法，下方是预览（箭头上下的条件）。 */
+export const EditingChem: Story = {
+  args: { label: '化学式块', display: true, chem: true, tex: '\\ce{N2 + 3H2 <=>[催化剂][高温高压] 2NH3}' },
+}

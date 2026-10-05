@@ -330,6 +330,20 @@ export const Formulas: Story = {
   },
 }
 
+/** 化学式（docs/decisions.md 第 22 节）：行内的化学式与离子、化学式块中带条件的方程式。 */
+export const Chemistry: Story = {
+  args: {
+    chapterId: 'chemistry',
+    number: '4',
+    title: '实验原理',
+    content:
+      '硫酸铜晶体 $\\ce{CuSO4*5H2O}$ 溶于水，得到 $\\ce{Cu^2+}$ 与 $\\ce{SO4^2-}$；加入 $\\ce{BaCl2}$ 后生成白色沉淀。\n\n' +
+      '$$\\ce{Ba^2+ + SO4^2- -> BaSO4 v}$$\n\n' +
+      '$$\\ce{2KClO3 ->[MnO2][\\Delta] 2KCl + 3O2 ^}$$\n\n' +
+      '$$\\ce{N2 + 3H2 <=>[催化剂][高温高压] 2NH3}$$\n',
+  },
+}
+
 /** 专注模式：光标所在段落以外的正文与章节标题淡化。 */
 export const FocusMode: Story = {
   args: {

@@ -7309,8 +7309,11 @@ version = "0.1.0"
 dependencies = [
  "comemo",
  "docx-rs",
+ "fxhash",
  "image",
  "mitex",
+ "mitex-spec",
+ "mitex-spec-gen",
  "pdf-writer",
  "png 0.18.1",
  "pulldown-cmark",

@@ -1,4 +1,6 @@
 import katex from 'katex'
+// 化学式 \ce{…}（docs/decisions.md 第 22 节）。
+import 'katex/contrib/mhchem'
 import 'katex/dist/katex.min.css'
 import type { Node } from 'prosemirror-model'
 import type { NodeView } from 'prosemirror-view'

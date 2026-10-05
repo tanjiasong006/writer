@@ -33,6 +33,7 @@ import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import TextPopover from './TextPopover.vue'
 import MathPopover from './MathPopover.vue'
+import { chemContent, chemTex } from './chem.ts'
 import { mathNodeView } from './math_view.ts'
 import { chapterLabels, NO_ELEMENT_START, type ElementStart } from './element_numbering.ts'
 import { Decoration, DecorationSet } from 'prosemirror-view'
@@ -442,8 +443,8 @@ function runCommand(command: EditorCommand): void {
     requestCitation()
     return
   }
-  if (command === 'math' || command === 'math-block') {
-    startNewMath(command === 'math-block')
+  if (command === 'math' || command === 'math-block' || command === 'chem' || command === 'chem-block') {
+    startNewMath(command === 'math-block' || command === 'chem-block', command === 'chem' || command === 'chem-block')
     return
   }
   editorCommands[command](view.state, view.dispatch)
@@ -772,17 +773,20 @@ const mathEditor = shallowRef<{
   /** 已有公式的位置；新公式为 null。 */
   readonly pos: number | null
   readonly block: boolean
+  /** 化学式（docs/decisions.md 第 22 节）：整个公式是 \ce{…}，在化学式浮层中编辑。 */
+  readonly chem: boolean
   readonly tex: string
   readonly anchor: { readonly x: number; readonly y: number }
 } | null>(null)
 
-function startNewMath(block: boolean): void {
+function startNewMath(block: boolean, chem: boolean): void {
   if (!view || !(block ? insertMathBlock('x') : insertMath('x'))(view.state)) return
   const { from, to } = view.state.selection
   const caret = view.coordsAtPos(to)
-  // 选中的文字作为行内公式的初始内容。
-  const tex = block ? '' : view.state.doc.textBetween(from, to, ' ', '')
-  mathEditor.value = { chapterId: currentId, pos: null, block, tex, anchor: { x: caret.left, y: caret.bottom } }
+  // 选中的文字作为行内公式（化学式）的初始内容。
+  const text = block ? '' : view.state.doc.textBetween(from, to, ' ', '')
+  const tex = chem ? chemTex(text) : text
+  mathEditor.value = { chapterId: currentId, pos: null, block, chem, tex, anchor: { x: caret.left, y: caret.bottom } }
 }
 
 function editMath(pos: number): void {
@@ -795,6 +799,7 @@ function editMath(pos: number): void {
     chapterId: currentId,
     pos,
     block: node.type === nodes.math_block,
+    chem: chemContent(node.attrs.tex as string) !== null,
     tex: node.attrs.tex as string,
     anchor: { x: rect.left, y: rect.bottom },
   }
@@ -1085,9 +1090,10 @@ defineExpose({
     <MathPopover
       v-if="mathEditor"
       :anchor="mathEditor.anchor"
-      :label="mathEditor.block ? '公式块' : '行内公式'"
+      :label="mathEditor.chem ? (mathEditor.block ? '化学式块' : '行内化学式') : mathEditor.block ? '公式块' : '行内公式'"
       :tex="mathEditor.tex"
       :display="mathEditor.block"
+      :chem="mathEditor.chem"
       @commit="commitMath"
       @cancel="cancelMath"
     />

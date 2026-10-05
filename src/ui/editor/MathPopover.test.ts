@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import MathPopover from './MathPopover.vue'
 
@@ -109,4 +109,64 @@ test('点击“完成”与“取消”与按 Enter / Esc 相同', async () => {
   await other.findAll('.math-popover__action')[0].trigger('click')
   expect(other.emitted('cancel')).toHaveLength(1)
   expect(other.emitted('commit')).toBeUndefined()
+})
+
+describe('化学式（docs/decisions.md 第 22 节）', () => {
+  async function openChem(tex: string) {
+    const wrapper = mount(MathPopover, {
+      attachTo: document.body,
+      props: { anchor: { x: 100, y: 100 }, label: '行内化学式', tex, display: false, chem: true },
+    })
+    mounted.push(wrapper)
+    await flushPromises()
+    return wrapper
+  }
+  const input = (wrapper: VueWrapper) => wrapper.find('.math-popover__input').element as HTMLTextAreaElement
+
+  test('直接编辑 \\ce{…} 的内容，没有可视编辑与 LaTeX 切换；预览显示排好的化学式', async () => {
+    const wrapper = await openChem('\\ce{H2O}')
+    expect(wrapper.find('math-field').exists()).toBe(false)
+    expect(wrapper.find('.math-popover__mode').exists()).toBe(false)
+    expect(input(wrapper).value).toBe('H2O')
+    expect(wrapper.find('.math-popover__preview .katex').exists()).toBe(true)
+    await wrapper.find('.math-popover__input').setValue('2H2 + O2 -> 2H2O')
+    key(input(wrapper), { key: 'Enter' })
+    expect(wrapper.emitted('commit')).toEqual([['\\ce{2H2 + O2 -> 2H2O}']])
+  })
+
+  test('没有修改时完成得到原文；清空后完成得到空公式；Esc 放弃', async () => {
+    const wrapper = await openChem('\\ce { H2O }')
+    key(input(wrapper), { key: 'Enter' })
+    expect(wrapper.emitted('commit')).toEqual([['\\ce { H2O }']])
+
+    const cleared = await openChem('\\ce{H2O}')
+    await cleared.find('.math-popover__input').setValue(' ')
+    key(input(cleared), { key: 'Enter' })
+    expect(cleared.emitted('commit')).toEqual([['']])
+
+    const cancelled = await openChem('\\ce{H2O}')
+    key(input(cancelled), { key: 'Escape' })
+    expect(cancelled.emitted('cancel')).toHaveLength(1)
+  })
+
+  test('常用写法插入在光标处，两侧的空格不重复；带条件的写法选中待填写的文字', async () => {
+    const wrapper = await openChem('')
+    await wrapper.find('.math-popover__input').setValue('2H2 + O2')
+    input(wrapper).setSelectionRange(8, 8)
+    await tool(wrapper, '反应条件（->[上方][下方]）').trigger('click')
+    await flushPromises()
+    expect(input(wrapper).value).toBe('2H2 + O2 ->[条件] ')
+    expect(input(wrapper).value.slice(input(wrapper).selectionStart, input(wrapper).selectionEnd)).toBe('条件')
+    await tool(wrapper, '加热').trigger('click')
+    await flushPromises()
+    expect(input(wrapper).value).toBe('2H2 + O2 ->[\\Delta] ')
+
+    input(wrapper).setSelectionRange(input(wrapper).value.length, input(wrapper).value.length)
+    await wrapper.find('.math-popover__input').setValue('2H2 + O2 ->[\\Delta] 2H2O')
+    await tool(wrapper, '气体').trigger('click')
+    await flushPromises()
+    expect(input(wrapper).value).toBe('2H2 + O2 ->[\\Delta] 2H2O ^ ')
+    key(input(wrapper), { key: 'Enter' })
+    expect(wrapper.emitted('commit')).toEqual([['\\ce{2H2 + O2 ->[\\Delta] 2H2O ^}']])
+  })
 })

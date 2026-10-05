@@ -1,5 +1,6 @@
 // Writer: xarrow（GPL-3.0）不随应用分发，用 Typst 自带的 stretch 代替（见 WRITER-PATCH.md）。
-#let xarrow(sym: none, it) = math.attach(math.stretch(sym, size: 100% + 1.5em), t: it)
+// 箭头伸长到上下文字中较宽的一个。
+#let xarrow(sym: none, it, below: none) = math.attach(math.stretch(sym, size: 100% + 1.5em), t: it, b: below)
 
 #import "../prelude.typ": *
 
@@ -36,7 +37,16 @@
 
 // 1. functions created to make it easier to define a spec
 #let operatornamewithlimits(it) = math.op(limits: true, math.upright(it))
-#let arrow-handle(arrow-sym) = define-cmd(1, handle: it => $limits(xarrow(sym: #arrow-sym, it))$)
+// Writer: 可伸长箭头接受可选的下方文字 `\xrightarrow[下]{上}`（Writer 的 mitex 命令规格中这些命令是 `{,b}t`，见 export::math）。
+#let arrow-handle(alias, arrow-sym) = define-glob-cmd("{,b}t", alias, handle: (..args) => {
+  let args = args.pos()
+  if args.len() == 1 {
+    $limits(xarrow(sym: #arrow-sym, #args.at(0)))$
+  } else {
+    let below = args.at(0).children.filter(it => it != [\[] and it != [\]]).sum(default: [])
+    $limits(xarrow(sym: #arrow-sym, #args.at(1), below: #below))$
+  }
+})
 #let _greedy-handle(fn) = (..args) => $fn(#args.pos().sum())$
 #let greedy-handle(alias, fn) = define-greedy-cmd(alias, handle: _greedy-handle(fn))
 #let limits-handle(alias, wrap) = define-cmd(1, alias: alias, handle: (it) => math.limits(wrap(it)))
@@ -936,25 +946,25 @@
   varUpsilon: of-sym($italic(Upsilon)$),
   varXi: of-sym($italic(Xi)$),
   // xarrows
-  xleftarrow: arrow-handle(math.arrow.l.long),
-  xrightarrow: arrow-handle(math.arrow.r.long),
-  xLeftarrow: arrow-handle(math.arrow.l.double.long),
-  xRightarrow: arrow-handle(math.arrow.r.double.long),
-  xleftrightarrow: arrow-handle(math.arrow.l.r),
-  xLeftrightarrow: arrow-handle(math.arrow.l.r.double),
-  xhookleftarrow: arrow-handle(math.arrow.l.hook),
-  xhookrightarrow: arrow-handle(math.arrow.r.hook),
-  xtwoheadleftarrow: arrow-handle(math.arrow.l.twohead),
-  xtwoheadrightarrow: arrow-handle(math.arrow.r.twohead),
-  xleftharpoonup: arrow-handle(math.harpoon.lt),
-  xrightharpoonup: arrow-handle(math.harpoon.rt),
-  xleftharpoondown: arrow-handle(math.harpoon.lb),
-  xrightharpoondown: arrow-handle(math.harpoon.rb),
-  xleftrightharpoons: arrow-handle(math.harpoons.ltrb),
-  xrightleftharpoons: arrow-handle(math.harpoons.rtlb),
-  xtofrom: arrow-handle(math.arrows.rl),
-  xmapsto: arrow-handle(math.arrow.r.bar),
-  xlongequal: arrow-handle(math.eq),
+  xleftarrow: arrow-handle("xleftarrow", math.arrow.l),
+  xrightarrow: arrow-handle("xrightarrow", math.arrow.r),
+  xLeftarrow: arrow-handle("xLeftarrow", math.arrow.l.double),
+  xRightarrow: arrow-handle("xRightarrow", math.arrow.r.double),
+  xleftrightarrow: arrow-handle("xleftrightarrow", math.arrow.l.r),
+  xLeftrightarrow: arrow-handle("xLeftrightarrow", math.arrow.l.r.double),
+  xhookleftarrow: arrow-handle("xhookleftarrow", math.arrow.l.hook),
+  xhookrightarrow: arrow-handle("xhookrightarrow", math.arrow.r.hook),
+  xtwoheadleftarrow: arrow-handle("xtwoheadleftarrow", math.arrow.l.twohead),
+  xtwoheadrightarrow: arrow-handle("xtwoheadrightarrow", math.arrow.r.twohead),
+  xleftharpoonup: arrow-handle("xleftharpoonup", math.harpoon.lt),
+  xrightharpoonup: arrow-handle("xrightharpoonup", math.harpoon.rt),
+  xleftharpoondown: arrow-handle("xleftharpoondown", math.harpoon.lb),
+  xrightharpoondown: arrow-handle("xrightharpoondown", math.harpoon.rb),
+  xleftrightharpoons: arrow-handle("xleftrightharpoons", math.harpoons.ltrb),
+  xrightleftharpoons: arrow-handle("xrightleftharpoons", math.harpoons.rtlb),
+  xtofrom: arrow-handle("xtofrom", math.arrows.rl),
+  xmapsto: arrow-handle("xmapsto", math.arrow.r.bar),
+  xlongequal: arrow-handle("xlongequal", math.eq),
   pmod: define-cmd(1, handle: it => $quad (mod thick it)$),
   pod: define-cmd(1, handle: it => $quad (it)$),
   "set": define-cmd(1, handle: it => $\{it\}$),

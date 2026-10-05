@@ -2020,6 +2020,41 @@ mod tests {
         assert_eq!(report.invalid_formulas, Vec::<String>::new());
     }
 
+    /// 化学式（docs/decisions.md 第 22 节）：浮层中的模板与常见写法都能排版；箭头的条件可以在上下两侧。
+    #[test]
+    fn chemical_equations_typeset_without_falling_back() {
+        let formulas = [
+            r"\ce{2H2 + O2 ->[点燃] 2H2O}",
+            r"\ce{N2 + 3H2 <=>[催化剂][高温高压] 2NH3}",
+            r"\ce{2KClO3 ->[MnO2][\Delta] 2KCl + 3O2 ^}",
+            r"\ce{2H2 + O2 \xlongequal{点燃} 2H2O}",
+            r"\ce{Ag+ + Cl- -> AgCl v} + \ce{A <- B <-> C <--> D}",
+            r"\ce{CuSO4*5H2O} + \ce{[Cu(NH3)4]^2+} + \ce{SO4^{2-}} + \ce{Fe^{III}}",
+            r"\ce{^{14}_{6}C -> ^{14}_{7}N + e-}",
+            r"\ce{CH2=CH2 + Br2 -> CH2Br-CH2Br} + \ce{CH#CH}",
+            r"\ce{NaCl(aq) + 1/2O2 + n H2O + H2SO4(浓)}",
+            r"\Delta H = -57.3\,\mathrm{kJ/mol} \quad \ce{H+ + OH- -> H2O}",
+            r"\ce{->[]} \ce{} \ce{->[][]}",
+        ];
+        let markdown = formulas.iter().map(|tex| format!("$${tex}$$")).collect::<Vec<_>>().join("\n\n");
+        let document = build(&request("", &[("a", vec![1], "化学", &markdown)]));
+        let dir = project();
+        let (_, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        assert_eq!(report.invalid_formulas, Vec::<String>::new());
+    }
+
+    /// 可伸长箭头的可选参数是下方的文字，不是方括号与文字（mitex 默认的规格不认识它）。
+    #[test]
+    fn extensible_arrows_take_text_below() {
+        let document = build(&request("", &[("a", vec![1], "公式", "$$a \\xrightarrow[\\text{下方}]{\\text{上方}} b \\xrightleftharpoons[c]{} d$$")]));
+        let dir = project();
+        let (paged, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        assert_eq!(report.invalid_formulas, Vec::<String>::new());
+        let text = page_texts(&paged).concat();
+        assert!(text.contains("上方") && text.contains("下方"), "{text}");
+        assert!(!text.contains('[') && !text.contains(']'), "{text}");
+    }
+
     fn three_chapters(title: &str) -> Document {
         build(&request(
             title,

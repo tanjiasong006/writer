@@ -54,6 +54,8 @@ export type EditorCommand =
   | 'citation'
   | 'math'
   | 'math-block'
+  | 'chem'
+  | 'chem-block'
   | 'row-before'
   | 'row-after'
   | 'column-before'
@@ -506,7 +508,7 @@ const removeColumn = thenSelectCell(
 )
 
 export const editorCommands: Readonly<
-  Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote' | 'citation' | 'math' | 'math-block'>, Command>
+  Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote' | 'citation' | 'math' | 'math-block' | 'chem' | 'chem-block'>, Command>
 > = {
   undo,
   redo,
@@ -563,6 +565,8 @@ export function commandState(state: EditorState): CommandState {
     citation: plain(insertChapterRef('writer:cite/_', '')),
     math: plain(insertMath('x')),
     'math-block': plain(insertMathBlock('x')),
+    chem: plain(insertMath('x')),
+    'chem-block': plain(insertMathBlock('x')),
     'row-before': plain(rowBefore),
     'row-after': plain(rowAfter),
     'column-before': plain(columnBefore),

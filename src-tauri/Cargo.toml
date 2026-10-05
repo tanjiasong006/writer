@@ -34,6 +34,10 @@ comemo = "0.5"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tauri-plugin-updater = "2"
 mitex = "0.2"
+# 调整 mitex 的命令规格（可伸长箭头的可选下方文字，见 export::math）。
+mitex-spec = "0.2"
+mitex-spec-gen = "0.2"
+fxhash = "0.2"
 typst-render = "0.15"
 
 # 开发版也优化图片解码与排版的热点依赖，避免图文 PDF 导出被无优化构建拖慢。

@@ -1,6 +1,6 @@
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { NodeSelection, Selection } from 'prosemirror-state'
+import { NodeSelection, Selection, TextSelection } from 'prosemirror-state'
 import { undo } from 'prosemirror-history'
 import type { EditorView } from 'prosemirror-view'
 import ChapterEditor from './ChapterEditor.vue'
@@ -107,4 +107,62 @@ test('全文阅读中同样显示公式', () => {
   host.append(renderChapterBody('$x$\n\n$$y$$', () => null, NO_CHAPTER_REFS))
   expect(host.querySelector('.math-inline .katex')).not.toBeNull()
   expect(host.querySelector('.math-block .katex-display')).not.toBeNull()
+})
+
+describe('化学式（docs/decisions.md 第 22 节）', () => {
+  const chemInput = () => document.querySelector('.math-popover .math-popover__input') as HTMLTextAreaElement | null
+  const label = () => document.querySelector('.math-popover__label')?.textContent
+
+  async function typeChem(content: string) {
+    chemInput()!.value = content
+    chemInput()!.dispatchEvent(new Event('input'))
+    await flushPromises()
+    chemInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+  }
+
+  test('\\ce{…} 用 KaTeX 的 mhchem 显示', () => {
+    const { view } = mountEditor('水是 $\\ce{H2O}$。\n\n$$\\ce{2H2 + O2 ->[点燃] 2H2O}$$\n')
+    const inline = view.dom.querySelector('.math-inline')!
+    expect(inline.classList.contains('is-invalid')).toBe(false)
+    expect(inline.querySelector('.katex')).not.toBeNull()
+    expect(view.dom.querySelector('.math-block')!.classList.contains('is-invalid')).toBe(false)
+  })
+
+  test('插入行内化学式（选中的文字作为内容）与化学式块', async () => {
+    const { wrapper, view } = mountEditor('水的化学式是 H2O')
+    const run = (command: string) => (wrapper.vm as unknown as { runCommand(c: string): void }).runCommand(command)
+    const end = view.state.doc.content.size - 1
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, end - 3, end)))
+    run('chem')
+    await flushPromises()
+    expect(label()).toBe('行内化学式')
+    expect(field()).toBeNull()
+    expect(chemInput()!.value).toBe('H2O')
+    chemInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+    expect(lastChange(wrapper)).toBe('水的化学式是 $\\ce{H2O}$')
+
+    view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
+    run('chem-block')
+    await flushPromises()
+    expect(label()).toBe('化学式块')
+    await typeChem('2H2 + O2 -> 2H2O')
+    expect(lastChange(wrapper)).toBe('水的化学式是 $\\ce{H2O}$\n\n$$\\ce{2H2 + O2 -> 2H2O}$$')
+  })
+
+  test('双击化学式在化学式浮层中编辑；混有其他写法的公式仍是普通公式', async () => {
+    const { wrapper, view } = mountEditor('设 $\\ce{H2O}$ 与 $\\Delta H = \\ce{CO2}$\n')
+    const [chem, mixed] = view.dom.querySelectorAll('.math-inline')
+    chem.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
+    await flushPromises()
+    expect(label()).toBe('行内化学式')
+    await typeChem('D2O')
+    expect(lastChange(wrapper)).toBe('设 $\\ce{D2O}$ 与 $\\Delta H = \\ce{CO2}$\n')
+
+    mixed.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
+    await flushPromises()
+    expect(label()).toBe('行内公式')
+    expect(field()).not.toBeNull()
+  })
 })

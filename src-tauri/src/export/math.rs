@@ -19,13 +19,38 @@ pub const SCOPE_FILES: [(&str, &str); 3] = [
 /// 在 Typst 源码中导入规格（使用公式之前）。
 pub const SCOPE_IMPORT: &str = "#import \"/mitex/mod.typ\": mitex-scope\n";
 
+/// 可伸长箭头：mitex 默认只接受上方文字，Writer 的规格中还接受可选的下方文字 `\xrightarrow[下]{上}`
+/// （与 vendored 规格中的 `arrow-handle` 对应）。
+const X_ARROWS: [&str; 19] = [
+    "xleftarrow", "xrightarrow", "xLeftarrow", "xRightarrow", "xleftrightarrow", "xLeftrightarrow", "xhookleftarrow",
+    "xhookrightarrow", "xtwoheadleftarrow", "xtwoheadrightarrow", "xleftharpoonup", "xrightharpoonup", "xleftharpoondown",
+    "xrightharpoondown", "xleftrightharpoons", "xrightleftharpoons", "xtofrom", "xmapsto", "xlongequal",
+];
+
+/// mitex 的命令规格：默认规格加上 Writer 的调整。
+static SPEC: std::sync::LazyLock<mitex_spec::CommandSpec> = std::sync::LazyLock::new(|| {
+    use mitex_spec::{ArgPattern, ArgShape, CmdShape, CommandSpecItem};
+    let mut commands: fxhash::FxHashMap<String, CommandSpecItem> =
+        mitex_spec_gen::DEFAULT_SPEC.items().map(|(name, item)| (name.to_owned(), item.clone())).collect();
+    for name in X_ARROWS {
+        let shape = CmdShape {
+            args: ArgShape::Right { pattern: ArgPattern::Glob { pattern: "{,b}t".into() } },
+            alias: Some(name.to_owned()),
+        };
+        commands.insert(name.to_owned(), CommandSpecItem::Cmd(shape));
+    }
+    mitex_spec::CommandSpec::new(commands)
+});
+
 /// LaTeX → Typst 公式代码；不认识的命令等转换失败时为 None。
 pub fn to_typst(tex: &str) -> Option<String> {
     let tex = tex.trim();
     if tex.is_empty() {
         return None;
     }
-    std::panic::catch_unwind(|| mitex::convert_math(tex, None)).ok()?.ok()
+    // 化学式 \ce{…} 先展开为普通 LaTeX（docs/decisions.md 第 22 节）。
+    let tex = super::chem::expand(tex)?;
+    std::panic::catch_unwind(|| mitex::convert_math(&tex, Some(SPEC.clone()))).ok()?.ok()
 }
 
 /// 求值转换结果的 Typst 表达式（得到公式内容）。
