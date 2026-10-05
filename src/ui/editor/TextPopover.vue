@@ -5,7 +5,7 @@ import { nextTick, onMounted, ref } from 'vue'
  * 编辑一段短文字的浮层（脚注内容、表格标题）：在对象（或插入处）下方弹出，下方放不下时在上方。
  *
  * - 标题（如“脚注 2”“表格标题”）与一个随内容增高的文本框；内容只有一段文字，换行替换为空格。
- * - Enter 完成，Esc 放弃；点击浮层以外也完成（与图注相同，不丢失已输入的内容）。
+ * - Enter 或“完成”按钮完成，Esc 或“取消”按钮放弃；点击浮层以外也完成（与图注相同，不丢失已输入的内容）。
  * - 只发出 commit / cancel，正文由编辑器修改；焦点由编辑器放回正文。
  */
 const props = defineProps<{
@@ -93,7 +93,15 @@ onMounted(async () => {
         @keydown="onKeydown"
       ></textarea>
     </div>
-    <div class="text-popover__hint">{{ multiline ? '↩ 完成　⇧↩ 换行　⎋ 取消' : '↩ 完成　⎋ 取消' }}</div>
+    <div class="text-popover__footer">
+      <span v-if="multiline" class="text-popover__hint">⇧↩ 换行</span>
+      <button type="button" class="text-popover__action" @mousedown.prevent @click="emit('cancel')">
+        <span class="text-popover__key">⎋</span>取消
+      </button>
+      <button type="button" class="text-popover__action is-default" @mousedown.prevent @click="commit">
+        <span class="text-popover__key">↩</span>完成
+      </button>
+    </div>
   </div>
 </template>
 
@@ -170,14 +178,58 @@ onMounted(async () => {
   color: var(--color-text-tertiary);
 }
 
-.text-popover__hint {
-  margin-top: var(--space-2);
+.text-popover__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin: var(--space-2) calc(-1 * var(--space-3)) 0 0;
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-separator);
+}
+
+.text-popover__hint {
+  margin-right: var(--space-3);
   color: var(--color-text-tertiary);
   font-size: var(--text-xs);
-  text-align: right;
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* 取消 / 完成：低调的文字按钮（与公式浮层相同），按键符号提示快捷键；完成是默认操作，用强调色文字。 */
+.text-popover__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-h-s);
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.text-popover__action.is-default {
+  color: var(--color-accent-text);
+}
+
+.text-popover__action:hover {
+  background: var(--color-fill-hover);
+}
+
+.text-popover__action:active {
+  background: var(--color-fill-pressed);
+}
+
+.text-popover__action:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.text-popover__key {
+  color: var(--color-text-tertiary);
 }
 </style>
