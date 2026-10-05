@@ -159,9 +159,13 @@ fn block(block: &Block) -> Value {
                 Align::Center => "center",
                 Align::Right => "right",
             }).collect::<Vec<_>>(),
-            "header": header.iter().map(|cell| inlines(cell)).collect::<Vec<_>>(),
-            "rows": rows.iter().map(|row| row.iter().map(|cell| inlines(cell)).collect::<Vec<_>>()).collect::<Vec<_>>(),
+            // header 是表头第一行，rows 是之后的各行（多行表头时包括其余表头行，headerRows 是表头行数）。
+            "header": header.first().map(|row| row.iter().map(|cell| inlines(cell)).collect::<Vec<_>>()).unwrap_or_default(),
+            "rows": header.iter().skip(1).chain(rows).map(|row| row.iter().map(|cell| inlines(cell)).collect::<Vec<_>>()).collect::<Vec<_>>(),
             });
+            if header.len() > 1 {
+                table["headerRows"] = json!(header.len());
+            }
             if let Some(caption) = caption {
                 table["caption"] = match &caption.id {
                     Some(id) => json!({ "text": caption.text, "id": id }),

@@ -86,7 +86,7 @@ tokenizer.inline.ruler.disable(['footnote_inline'])
 type CellMark = 'plain' | 'left' | 'up'
 
 export interface CellSpan {
-  /** 从表头起算（表头是第 0 行）。 */
+  /** 从表头第一行起算。 */
   readonly row: number
   readonly col: number
   readonly rows: number
@@ -95,15 +95,15 @@ export interface CellSpan {
 
 /**
  * 由各单元格的合并记号得到合并区域（与 Rust render::markdown 的 cell_spans 相同）。
- * 第 0 行是表头。按行依次处理没有被合并的单元格：右侧连续的 `||` 是它合并的列；之后各行中，
- * 它所在列是 `^^`、其余各列都是 `||` 时这一行也属于这个区域。正文第一行的 `^^` 不与表头合并；
- * 没有被合并的记号是普通单元格（`||` 是空单元格，`^^` 是文字），同样可以向右、向下合并。
+ * 前 headerRows 行是表头。按行依次处理没有被合并的单元格：右侧连续的 `||` 是它合并的列；之后各行中，
+ * 它所在列是 `^^`、其余各列都是 `||` 时这一行也属于这个区域。表头第一行与正文第一行的 `^^` 不与上方合并
+ * （区域不跨越表头与正文）；没有被合并的记号是普通单元格（`||` 是空单元格，`^^` 是文字），同样可以向右、向下合并。
  */
-function tableSpans(marks: readonly (readonly CellMark[])[]): CellSpan[] {
+function tableSpans(marks: readonly (readonly CellMark[])[], headerRows: number): CellSpan[] {
   const mark = (r: number, c: number): CellMark => {
     const value = marks[r]?.[c]
     if (value === 'left' && c > 0) return 'left'
-    if (value === 'up' && r >= 2) return 'up'
+    if (value === 'up' && r !== 0 && r !== headerRows) return 'up'
     return 'plain'
   }
   const covered = marks.map((row) => row.map(() => false))
@@ -152,11 +152,49 @@ function rawTableCells(state: StateBlock, line: number): string[] {
   return cells
 }
 
+/**
+ * 分隔行之上多出的表头行（docs/decisions.md 第 23 节）：紧贴在表格之前（之间没有空行，也没有其他块）的段落
+ * （含紧凑列表项中的段落），每一行都以 `|` 开头时，这些行是表头在分隔行之上多出的行。与 Rust 渲染器的 header_lines 相同。
+ * 返回这些行的行号；不是时为 null。
+ */
+function headerLinesBefore(state: StateBlock, start: number, startLine: number): number[] | null {
+  const [open, , close] = state.tokens.slice(start - 3, start)
+  if (open?.type !== 'paragraph_open' || close?.type !== 'paragraph_close' || open.map?.[1] !== startLine) return null
+  const lines: number[] = []
+  for (let line = open.map[0]; line < open.map[1]; line++) lines.push(line)
+  const text = (line: number) => state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]).trim()
+  return lines.every((line) => text(line).startsWith('|')) ? lines : null
+}
+
 tokenizer.block.ruler.at('table', (state, startLine, endLine, silent) => {
-  const start = state.tokens.length
+  let start = state.tokens.length
   if (!gfmTable(state, startLine, endLine, silent)) return false
   if (silent) return true
   const tokens = state.tokens
+  // 多出的表头行：作为表头的前几行插入（单元格数补齐或截断为表格的列数，对齐随列），去掉它们所在的段落。
+  const headerLines = headerLinesBefore(state, start, startLine) ?? []
+  if (headerLines.length > 0) {
+    const header = tokens.slice(start).filter((token) => token.type === 'th_open')
+    const rows: Token[] = []
+    for (const line of headerLines) {
+      const raw = rawTableCells(state, line)
+      const tr = new state.Token('tr_open', 'tr', 1)
+      tr.map = [line, line + 1]
+      rows.push(tr)
+      header.forEach((th, i) => {
+        const open = new state.Token('th_open', 'th', 1)
+        open.attrs = th.attrs
+        const inline = new state.Token('inline', '', 0)
+        inline.content = raw[i]?.trim() ?? ''
+        inline.children = []
+        rows.push(open, inline, new state.Token('th_close', 'th', -1))
+      })
+      rows.push(new state.Token('tr_close', 'tr', -1))
+    }
+    tokens.splice(start + 2, 0, ...rows)
+    tokens.splice(start - 3, 3)
+    start -= 3
+  }
   // 各单元格开始记号的位置与合并记号，按行分组。
   const cells: number[][] = []
   const marks: CellMark[][] = []
@@ -175,7 +213,7 @@ tokenizer.block.ruler.at('table', (state, startLine, endLine, silent) => {
     }
   }
   const remove: number[] = []
-  for (const span of tableSpans(marks)) {
+  for (const span of tableSpans(marks, headerLines.length + 1)) {
     tokens[cells[span.row][span.col]].meta = { colspan: span.cols, rowspan: span.rows }
     for (let r = span.row; r < span.row + span.rows; r++) {
       for (let c = span.col; c < span.col + span.cols; c++) if (r !== span.row || c !== span.col) remove.push(cells[r][c])
@@ -184,7 +222,7 @@ tokenizer.block.ruler.at('table', (state, startLine, endLine, silent) => {
   // 被合并的单元格：开始、内容、结束三个记号。
   for (const index of remove.sort((a, b) => b - a)) tokens.splice(index, 3)
   return true
-})
+}, { alt: ['paragraph', 'reference'] }) // 与原规则相同，表格可以打断段落（不传时 at 会清空）。
 
 /** ASCII 空白（pulldown-cmark 判断 $ 能否开始 / 结束公式时使用的范围）。 */
 const isAsciiSpace = (char: string | undefined) => char !== undefined && /[ \t\n\r\f\v]/.test(char)
@@ -878,7 +916,9 @@ function serializeTable(state: MarkdownSerializerState, node: Node): void {
   // 合并单元格（docs/decisions.md 第 23 节）：区域左上角写内容；同一行中其余位置写 `||`（与左侧合并），
   // 以下各行中区域第一列写 `^^`（与上方合并）、其余位置写 `||`。表头不能与正文合并：
   // 从表头向下合并的部分（粘贴的表格可能出现）写成空单元格。null 是 `||`。
+  // 表头是开头连续的、全部由表头单元格组成的各行（至少一行），写在分隔行之上。
   const map = TableMap.get(node)
+  const headerRows = Math.max(1, tableHeaderRows(node, map))
   const rows: Array<Array<string | null>> = []
   const aligns: Array<string | null> = Array.from({ length: map.width }, () => null)
   const aligned = new Set<number>()
@@ -894,7 +934,7 @@ function serializeTable(state: MarkdownSerializerState, node: Node): void {
         aligned.add(col)
       }
       if (rect.top === row && rect.left === col) cells.push(cellMarkdown(cell))
-      else if (rect.top === 0 && row > 0) cells.push('')
+      else if (rect.top < headerRows && row >= headerRows) cells.push('')
       else if (rect.top === row || col !== rect.left) cells.push(null)
       else cells.push('^^')
     }
@@ -910,7 +950,7 @@ function serializeTable(state: MarkdownSerializerState, node: Node): void {
     const align = aligns[i]
     return align === 'center' ? ':---:' : align === 'right' ? '---:' : align === 'left' ? ':---' : '---'
   })
-  const lines = [line(rows[0] ?? []), `| ${delimiter.join(' | ')} |`, ...rows.slice(1).map(line)]
+  const lines = [...rows.slice(0, headerRows).map(line), `| ${delimiter.join(' | ')} |`, ...rows.slice(headerRows).map(line)]
   for (const text of lines) {
     state.write(text)
     state.ensureNewLine()
@@ -922,6 +962,20 @@ function serializeTable(state: MarkdownSerializerState, node: Node): void {
     state.write(`${NOTE_PREFIX}${state.esc(note.trim())}`)
     state.closeBlock(node)
   }
+}
+
+/** 表格开头连续的、经过的单元格全是表头单元格的行数（被上方合并而没有单元格的行按合并它的单元格判断）。 */
+export function tableHeaderRows(table: Node, map: TableMap = TableMap.get(table)): number {
+  let rows = 0
+  while (
+    rows < map.height &&
+    Array.from({ length: map.width }, (_, col) => table.nodeAt(map.map[rows * map.width + col])!).every(
+      (cell) => cell.type === nodes.table_header,
+    )
+  ) {
+    rows++
+  }
+  return rows
 }
 
 /** 单元格内容按段落序列化，再转义竖线（GFM 在行内解析之前处理 \|，代码中同样适用）。 */

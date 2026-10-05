@@ -255,6 +255,12 @@ describe('文档 → Markdown', () => {
       expect(cells(parseMarkdown('> | a || b |\n> |---|---|---|').child(0).child(0))).toEqual([['a c2', 'b']])
     })
 
+    test('紧跟在一行文字之后的表格仍是表格（与 pulldown-cmark 相同，表格可以打断段落）', () => {
+      const parsed = parseMarkdown('文字\n| a |\n| --- |\n| 1 |\n')
+      expect(parsed.childCount).toBe(2)
+      expect(parsed.child(1).type).toBe(table)
+    })
+
     test('内容恰好是 ^^ 的单元格写出时转义', () => {
       const written = write(
         doc.create(null, table.create(null, [table_row.create(null, [cell(table_header, 'a')]), table_row.create(null, [cell(table_cell, '^^')])])),

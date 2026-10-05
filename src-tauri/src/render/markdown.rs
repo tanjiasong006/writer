@@ -34,7 +34,8 @@ pub enum Block {
     },
     Table {
         alignments: Vec<Align>,
-        header: Vec<Vec<Inline>>,
+        /// 表头各行（至少一行）；分隔行之上紧贴着的、以 `|` 开头的各行也是表头（docs/decisions.md 第 23 节）。
+        header: Vec<Vec<Vec<Inline>>>,
         rows: Vec<Vec<Vec<Inline>>>,
         /// 合并单元格（docs/decisions.md 第 23 节）。header 与 rows 仍是完整的网格：
         /// 被合并的位置是空单元格，内容在区域左上角的单元格中。
@@ -47,7 +48,7 @@ pub enum Block {
     Rule,
 }
 
-/// 合并的单元格区域：row 从表头起算（表头是第 0 行），区域不跨越表头与正文。
+/// 合并的单元格区域：row 从表头第一行起算（表头各行之后是正文），区域不跨越表头与正文。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellSpan {
     pub row: usize,
@@ -67,7 +68,7 @@ pub enum CellPlace {
     Covered(CellSpan),
 }
 
-/// 第 row 行（表头是第 0 行）第 col 列的单元格在合并区域中的位置。
+/// 第 row 行（从表头第一行起算）第 col 列的单元格在合并区域中的位置。
 pub fn cell_place(spans: &[CellSpan], row: usize, col: usize) -> CellPlace {
     for &span in spans {
         if (span.row..span.row + span.rows).contains(&row) && (span.col..span.col + span.cols).contains(&col) {
@@ -280,6 +281,8 @@ enum CellMark {
 thread_local! {
     /// 按顺序记录每个表格单元格原文的合并记号（由 HeadingsAsText 在产生单元格开始时记下）。
     static CELL_MARKS: RefCell<VecDeque<CellMark>> = const { RefCell::new(VecDeque::new()) };
+    /// 按顺序记录每个表格在分隔行之上多出的表头行（见 header_lines），没有时为 None。
+    static HEADER_ROWS: RefCell<VecDeque<Option<Vec<String>>>> = const { RefCell::new(VecDeque::new()) };
 }
 
 const CAPTION_PREFIX: &str = "Table: ";
@@ -324,11 +327,14 @@ pub fn parse(markdown: &str) -> Vec<Block> {
         inner: Parser::new_ext(markdown, options).into_offset_iter(),
         queued: VecDeque::new(),
         row_end: 0,
+        run: None,
+        run_open: false,
     }
     .peekable();
     FOOTNOTES.with(|footnotes| footnotes.borrow_mut().clear());
     TABLE_MARKS.with(|queue| queue.borrow_mut().clear());
     CELL_MARKS.with(|queue| queue.borrow_mut().clear());
+    HEADER_ROWS.with(|queue| queue.borrow_mut().clear());
     let mut parsed = blocks(&mut events, &|_| false, 0);
     let definitions = FOOTNOTES.with(|footnotes| std::mem::take(&mut *footnotes.borrow_mut()));
     for block in &mut parsed {
@@ -349,7 +355,8 @@ fn resolve_block(block: &mut Block, definitions: &HashMap<String, Vec<Inline>>) 
             .for_each(|block| resolve_block(block, definitions)),
         Block::Table { header, rows, .. } => header
             .iter_mut()
-            .chain(rows.iter_mut().flatten())
+            .chain(rows.iter_mut())
+            .flatten()
             .for_each(|cell| resolve_inlines(cell, definitions)),
         Block::Code { .. } | Block::Structure { .. } | Block::Rule => {}
     }
@@ -406,7 +413,8 @@ fn block_text(block: &Block) -> String {
         Block::Structure { smiles, .. } => smiles.clone(),
         Block::Table { header, rows, .. } => header
             .iter()
-            .chain(rows.iter().flatten())
+            .chain(rows.iter())
+            .flatten()
             .map(|cell| plain_text(cell))
             .collect::<Vec<_>>()
             .join(" "),
@@ -424,6 +432,10 @@ struct HeadingsAsText<'a> {
     queued: VecDeque<Event<'a>>,
     /// 当前表格行原文的结束位置：行中缺少的单元格由解析器补齐，位置在行尾，不是原文中的 `||`。
     row_end: usize,
+    /// 最近一段行内内容（段落或紧凑列表项中的文字）在原文中的范围；遇到其他块的开始或结束时清除。
+    /// 表格开始时据此判断紧贴在它之前的各行是不是表头行（见 header_lines）。
+    run: Option<(usize, usize)>,
+    run_open: bool,
 }
 
 impl<'a> Iterator for HeadingsAsText<'a> {
@@ -434,6 +446,25 @@ impl<'a> Iterator for HeadingsAsText<'a> {
             return Some(event);
         }
         let (event, range) = self.inner.next()?;
+        match &event {
+            _ if is_inline_event(&event) => match (&mut self.run, self.run_open) {
+                (Some(run), true) => run.1 = range.end,
+                _ => {
+                    self.run = Some((range.start, range.end));
+                    self.run_open = true;
+                }
+            },
+            Event::End(TagEnd::Paragraph) => self.run_open = false,
+            Event::Start(Tag::Table(_)) => {
+                let lines = self.run.take().and_then(|run| header_lines(self.source, run, range.start));
+                HEADER_ROWS.with(|queue| queue.borrow_mut().push_back(lines));
+                self.run_open = false;
+            }
+            _ => {
+                self.run = None;
+                self.run_open = false;
+            }
+        }
         match event {
             Event::Start(Tag::TableHead | Tag::TableRow) => self.row_end = range.end,
             Event::Start(Tag::TableCell) => {
@@ -478,6 +509,39 @@ impl<'a> Iterator for HeadingsAsText<'a> {
         TABLE_MARKS.with(|queue| queue.borrow_mut().push_back(TableMark::None));
         Some(Event::Start(Tag::Paragraph))
     }
+}
+
+fn is_inline_event(event: &Event) -> bool {
+    let inline_tag = |tag: &Tag| {
+        matches!(
+            tag,
+            Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Superscript | Tag::Subscript | Tag::Link { .. } | Tag::Image { .. }
+        )
+    };
+    match event {
+        Event::Start(tag) => inline_tag(tag),
+        Event::End(end) => matches!(
+            end,
+            TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough | TagEnd::Superscript | TagEnd::Subscript | TagEnd::Link | TagEnd::Image
+        ),
+        Event::Rule => false,
+        _ => true,
+    }
+}
+
+/// 紧贴在表格之前（之间没有空行，也没有其他块）的一段文字，每一行（去掉引用记号与缩进后）都以 `|` 开头时，
+/// 这些行是表头在分隔行之上多出的行（docs/decisions.md 第 23 节）。返回各行原文（去掉了引用记号与缩进）。
+/// 与编辑器（ui/editor/markdown.ts 的表格规则）相同。
+fn header_lines(source: &str, run: (usize, usize), table_start: usize) -> Option<Vec<String>> {
+    let gap = source.get(run.1..table_start)?;
+    if gap.chars().filter(|c| !matches!(c, ' ' | '\t' | '>')).collect::<String>() != "\n" {
+        return None;
+    }
+    let lines: Vec<String> = source[run.0..run.1]
+        .lines()
+        .map(|line| line.trim_start_matches([' ', '\t', '>']).trim().to_owned())
+        .collect();
+    lines.iter().all(|line| line.starts_with('|')).then_some(lines)
 }
 
 /// 标题原文的各行（之间是软换行）。ATX 标题是“#… 内容”（去掉结尾的 # 序列），
@@ -526,6 +590,8 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
     let mut pending = InlineRun::default();
     // 原文以 `Table: ` 开头的段落的位置：紧接着（之间没有其他块）是表格时成为表格的标题。
     let mut caption_at: Option<usize> = None;
+    // 上一个段落之前的 caption_at：上一个段落成为表头行时，表格标题仍是它之前的段落。
+    let mut caption_before: Option<usize> = None;
     let flush = |pending: &mut InlineRun, out: &mut Vec<Block>| {
         if !pending.is_empty() {
             out.push(Block::Paragraph(std::mem::take(pending).finish()));
@@ -546,6 +612,7 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
                     continue;
                 }
                 out.push(Block::Paragraph(content));
+                caption_before = caption_at;
                 caption_at = (mark == TableMark::Caption).then_some(out.len() - 1);
             }
             Event::Start(Tag::BlockQuote(_) | Tag::List(_)) if depth >= MAX_NESTING => {
@@ -590,8 +657,22 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
                 out.push(list(events, start, depth + 1));
             }
             Event::Start(Tag::Table(alignments)) => {
+                // 紧贴在表格之前的表头行：去掉它们所在的段落（或紧凑列表项中的文字），并入表格。
+                let lines = HEADER_ROWS.with(|queue| queue.borrow_mut().pop_front()).flatten();
+                let lines = match lines {
+                    Some(lines) if !pending.is_empty() => {
+                        pending = InlineRun::default();
+                        lines
+                    }
+                    Some(lines) if matches!(out.last(), Some(Block::Paragraph(_))) => {
+                        out.pop();
+                        caption_at = caption_before;
+                        lines
+                    }
+                    _ => Vec::new(),
+                };
                 flush(&mut pending, &mut out);
-                let mut block = table(events, &alignments);
+                let mut block = table(events, &alignments, &lines);
                 if let (Some(index), Block::Table { caption, .. }) = (caption_at.take(), &mut block) {
                     if index + 1 == out.len() {
                         if let Block::Paragraph(inlines) = out.remove(index) {
@@ -645,8 +726,8 @@ fn list(events: &mut Events, start: Option<u64>, depth: usize) -> Block {
     }
 }
 
-fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
-    let alignments = alignments
+fn table(events: &mut Events, alignments: &[Alignment], header_lines: &[String]) -> Block {
+    let alignments: Vec<Align> = alignments
         .iter()
         .map(|a| match a {
             Alignment::None => Align::None,
@@ -655,6 +736,39 @@ fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
             Alignment::Right => Align::Right,
         })
         .collect();
+    let (mut grid, mut marks) = (Vec::new(), Vec::new());
+    for line in header_lines {
+        let (cells, row_marks) = header_line(line, alignments.len());
+        grid.push(cells);
+        marks.push(row_marks);
+    }
+    let (rest, rest_marks) = table_grid(events);
+    let header_rows = header_lines.len() + 1;
+    grid.extend(rest);
+    marks.extend(rest_marks);
+    let spans = cell_spans(&marks, header_rows);
+    for span in &spans {
+        for r in span.row..span.row + span.rows {
+            for c in span.col..span.col + span.cols {
+                if (r, c) != (span.row, span.col) {
+                    grid[r][c].clear();
+                }
+            }
+        }
+    }
+    let rows = grid.split_off(header_rows.min(grid.len()));
+    Block::Table {
+        alignments,
+        header: grid,
+        rows,
+        spans,
+        caption: None,
+        note: None,
+    }
+}
+
+/// 表格各行的单元格与合并记号（第一行是分隔行之上的那一行表头），直到表格结束。
+fn table_grid(events: &mut Events) -> (Vec<Vec<Vec<Inline>>>, Vec<Vec<CellMark>>) {
     let mut grid: Vec<Vec<Vec<Inline>>> = Vec::new();
     let mut marks: Vec<Vec<CellMark>> = Vec::new();
     let mut row: Vec<Vec<Inline>> = Vec::new();
@@ -673,35 +787,70 @@ fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
             _ => {}
         }
     }
-    let spans = cell_spans(&marks);
-    for span in &spans {
-        for r in span.row..span.row + span.rows {
-            for c in span.col..span.col + span.cols {
-                if (r, c) != (span.row, span.col) {
-                    grid[r][c].clear();
-                }
-            }
+    (grid, marks)
+}
+
+/// 分隔行之上多出的一行表头：与 GFM 表格的行相同地切分并解析（单独作为一个表格的表头解析），
+/// 单元格数补齐或截断为表格的列数。
+fn header_line(line: &str, columns: usize) -> (Vec<Vec<Inline>>, Vec<CellMark>) {
+    let count = gfm_cell_count(line).max(1);
+    let source = format!("{line}\n|{}\n", "-|".repeat(count));
+    let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_MATH;
+    let mut events = HeadingsAsText {
+        source: &source,
+        inner: Parser::new_ext(&source, options).into_offset_iter(),
+        queued: VecDeque::new(),
+        row_end: 0,
+        run: None,
+        run_open: false,
+    }
+    .peekable();
+    let (mut cells, mut marks) = (Vec::new(), Vec::new());
+    while let Some(event) = events.next() {
+        if matches!(event, Event::Start(Tag::Table(_))) {
+            // 这里的表格开始同样记下了一项表头行（总是 None），取出以免影响正文中之后的表格。
+            HEADER_ROWS.with(|queue| queue.borrow_mut().pop_back());
+            let (grid, grid_marks) = table_grid(&mut events);
+            cells = grid.into_iter().next().unwrap_or_default();
+            marks = grid_marks.into_iter().next().unwrap_or_default();
+            break;
         }
     }
-    let mut rows = grid.into_iter();
-    Block::Table {
-        alignments,
-        header: rows.next().unwrap_or_default(),
-        rows: rows.collect(),
-        spans,
-        caption: None,
-        note: None,
+    cells.resize(columns, Vec::new());
+    marks.resize(columns, CellMark::Plain);
+    (cells, marks)
+}
+
+/// GFM 表格一行的单元格数（与 markdown-it 的切分相同：未转义的竖线分隔，首尾为空的部分不算单元格）。
+fn gfm_cell_count(line: &str) -> usize {
+    let mut parts = vec![String::new()];
+    let mut escaped = false;
+    for c in line.trim().chars() {
+        if c == '|' && !escaped {
+            parts.push(String::new());
+        } else {
+            parts.last_mut().unwrap().push(c);
+        }
+        escaped = c == '\\';
     }
+    let mut count = parts.len();
+    if parts.first().is_some_and(String::is_empty) {
+        count -= 1;
+    }
+    if count > 0 && parts.last().is_some_and(String::is_empty) {
+        count -= 1;
+    }
+    count
 }
 
 /// 由各单元格的合并记号得到合并区域（与编辑器 ui/editor/markdown.ts 的 tableSpans 相同）。
-/// 第 0 行是表头。按行依次处理没有被合并的单元格：右侧连续的 `||` 是它合并的列；之后各行中，
-/// 它所在列是 `^^`、其余各列都是 `||` 时这一行也属于这个区域。正文第一行的 `^^` 不与表头合并；
-/// 没有被合并的记号是普通单元格（`||` 是空单元格，`^^` 是文字），同样可以向右、向下合并。
-fn cell_spans(marks: &[Vec<CellMark>]) -> Vec<CellSpan> {
+/// 前 header_rows 行是表头。按行依次处理没有被合并的单元格：右侧连续的 `||` 是它合并的列；之后各行中，
+/// 它所在列是 `^^`、其余各列都是 `||` 时这一行也属于这个区域。表头第一行与正文第一行的 `^^` 不与上方合并
+/// （区域不跨越表头与正文）；没有被合并的记号是普通单元格（`||` 是空单元格，`^^` 是文字），同样可以向右、向下合并。
+fn cell_spans(marks: &[Vec<CellMark>], header_rows: usize) -> Vec<CellSpan> {
     let mark = |r: usize, c: usize| match marks.get(r).and_then(|row| row.get(c)) {
         Some(CellMark::Left) if c > 0 => CellMark::Left,
-        Some(CellMark::Up) if r >= 2 => CellMark::Up,
+        Some(CellMark::Up) if r != 0 && r != header_rows => CellMark::Up,
         _ => CellMark::Plain,
     };
     let mut covered: Vec<Vec<bool>> = marks.iter().map(|row| vec![false; row.len()]).collect();
@@ -1149,7 +1298,7 @@ mod tests {
             blocks,
             vec![Block::Table {
                 alignments: vec![Align::Left, Align::Right],
-                header: vec![vec![text("组别")], vec![text("数")]],
+                header: vec![vec![vec![text("组别")], vec![text("数")]]],
                 rows: vec![
                     vec![vec![text("对照")], vec![text("30")]],
                     vec![vec![text("实验")], vec![Inline::Strong(vec![text("32")])]],
@@ -1197,10 +1346,51 @@ mod tests {
     fn merged_cells_keep_the_grid_and_the_content_in_the_first_cell() {
         let blocks = parse("| a || b |\n|---|---|---|\n| ^^ | 2 | 3 |\n| ^^ | \\^^ |  |");
         let Some(Block::Table { header, rows, .. }) = blocks.first() else { panic!("不是表格") };
-        assert_eq!(header, &vec![vec![text("a")], vec![], vec![text("b")]]);
+        assert_eq!(header, &vec![vec![vec![text("a")], vec![], vec![text("b")]]]);
         // 正文第一行的 ^^ 不与表头合并，是文字；第二行的 ^^ 与它合并，位置是空单元格。转义的 \^^ 是文字。
         assert_eq!(rows[0], vec![vec![text("^^")], vec![text("2")], vec![text("3")]]);
         assert_eq!(rows[1], vec![vec![], vec![text("^^")], vec![]]);
+    }
+
+    #[test]
+    fn lines_right_above_the_header_are_more_header_rows() {
+        fn find_table(blocks: Vec<Block>) -> Option<Block> {
+            blocks.into_iter().find_map(|block| match block {
+                Block::Table { .. } => Some(block),
+                Block::Quote(children) => find_table(children),
+                Block::List { items, .. } => find_table(items.into_iter().flatten().collect()),
+                _ => None,
+            })
+        }
+        let table = |markdown: &str| match find_table(parse(markdown)) {
+            Some(Block::Table { header, rows, spans, caption, .. }) => (header, rows, spans, caption),
+            _ => panic!("不是表格"),
+        };
+        let span = |row, col, rows, cols| CellSpan { row, col, rows, cols };
+        let (header, rows, spans, _) = table("| 地区 | 2024 || 备注 |\n| ^^ | 上 | 下 | ^^ |\n|---|---|---|---|\n| 华东 | 1 | 2 | 甲 |\n| ^^ | 3 || 乙 |");
+        assert_eq!(header.len(), 2);
+        assert_eq!(header[0], vec![vec![text("地区")], vec![text("2024")], vec![], vec![text("备注")]]);
+        assert_eq!(header[1], vec![vec![], vec![text("上")], vec![text("下")], vec![]]);
+        assert_eq!(rows.len(), 2);
+        // 表头内纵向合并；正文第一行的 ^^ 不与表头合并（区域不跨越表头与正文）。
+        assert_eq!(spans, vec![span(0, 0, 2, 1), span(0, 1, 1, 2), span(0, 3, 2, 1), span(2, 0, 2, 1), span(3, 1, 1, 2)]);
+        let (_, rows, spans, _) = table("| a |\n|---|\n| ^^ |");
+        assert_eq!((rows, spans), (vec![vec![vec![text("^^")]]], vec![]));
+        // 多出的行单元格数补齐或截断为表格的列数；行内格式照常解析，转义的竖线是文字。
+        let (header, _, _, _) = table("| **x** | a\\|b | c |\n| a | b |\n|---|---|");
+        assert_eq!(header[0], vec![vec![Inline::Strong(vec![text("x")])], vec![text("a|b")]]);
+        let (header, _, _, _) = table("| x |\n| a | b |\n|---|---|");
+        assert_eq!(header[0], vec![vec![text("x")], vec![]]);
+        // 表格标题仍是表头行之前的段落；在引用与紧凑列表项中同样适用。
+        let (header, _, _, caption) = table("Table: 甲\n\n| x |\n| a |\n|---|");
+        assert_eq!((header.len(), caption.map(|c| c.text)), (2, Some("甲".to_owned())));
+        assert_eq!(table("> | x |\n> | a |\n> |---|").0.len(), 2);
+        assert_eq!(table("- | x |\n  | a |\n  |---|").0.len(), 2);
+        assert_eq!(parse("- | x |\n  | a |\n  |---|").len(), 1);
+        // 隔着空行、不全是以 | 开头的行、或前面是其他块时，段落保留。
+        assert_eq!(table("| x |\n\n| a |\n|---|").0.len(), 1);
+        assert_eq!(table("文字\n| x |\n| a |\n|---|").0.len(), 1);
+        assert_eq!(parse("文字\n| x |\n| a |\n|---|").len(), 2);
     }
 
     #[test]

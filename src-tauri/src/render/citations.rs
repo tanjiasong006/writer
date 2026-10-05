@@ -58,7 +58,8 @@ fn blocks(blocks_: &[Block], visit: &mut dyn FnMut(&str)) {
             Block::Quote(children) => blocks(children, visit),
             Block::Table { header, rows, .. } => header
                 .iter()
-                .chain(rows.iter().flatten())
+                .chain(rows.iter())
+                .flatten()
                 .for_each(|cell| inlines(cell, visit)),
             Block::Code { .. } | Block::Structure { .. } | Block::Rule => {}
         }

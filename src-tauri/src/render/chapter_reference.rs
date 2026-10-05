@@ -208,7 +208,7 @@ fn broken_in_blocks(blocks: &[Block], targets: &Targets, out: &mut Vec<String>) 
             }
             Block::Quote(children) => broken_in_blocks(children, targets, out),
             Block::Table { header, rows, .. } => {
-                for cell in header.iter().chain(rows.iter().flatten()) {
+                for cell in header.iter().chain(rows.iter()).flatten() {
                     broken_in_inlines(cell, targets, out);
                 }
             }

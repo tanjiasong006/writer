@@ -200,8 +200,7 @@ fn document_has_cjk(document: &Document) -> bool {
             Block::Code { text, .. } => text.chars().any(is_cjk),
             Block::Structure { .. } => false,
             Block::Table { header, rows, note, .. } => {
-                header.iter().any(|c| inlines_have_cjk(c))
-                    || rows.iter().flatten().any(|c| inlines_have_cjk(c))
+                header.iter().chain(rows).flatten().any(|c| inlines_have_cjk(c))
                     || note.as_deref().is_some_and(|note| note.chars().any(is_cjk))
             }
             Block::Rule => false,
@@ -412,12 +411,8 @@ impl<'a> Writer<'a> {
              #show raw.where(block: true): set text(size: {code}pt)\n\
              #show raw.where(block: true): block.with(fill: luma(245), inset: 8pt, radius: 3pt, width: 100%)\n\
              #set table(stroke: {table_stroke}, inset: {inset}pt)\n\
-             #let writer-three-line = (_, y) => (\n\
-               top: if y == 0 {{ 1pt }} else {{ none }},\n\
-               bottom: if y == 0 {{ 0.5pt }} else {{ none }},\n\
-             )\n\
+             #let writer-three-line = (_, y) => (top: if y == 0 {{ 1pt }} else {{ none }})\n\
              #show table: set text(size: {table}pt)\n\
-             #show table.cell.where(y: 0): set text(weight: \"bold\")\n\
              #set figure(numbering: none)\n\
              #show figure: set block(above: {figure}em, below: {figure}em)\n\
              #let writer-caption = (font: {caption_font}, size: {caption}pt)\n\
@@ -659,7 +654,7 @@ impl<'a> Writer<'a> {
     fn table(
         &mut self,
         alignments: &[Align],
-        header: &Vec<Vec<Inline>>,
+        header: &[Vec<Vec<Inline>>],
         rows: &[Vec<Vec<Inline>>],
         spans: &[CellSpan],
         note: Option<&str>,
@@ -667,7 +662,7 @@ impl<'a> Writer<'a> {
         {
             {
                 // 三线表 / 网格表（无图片时列宽随内容；含图片时各列等宽，见下）。
-                let columns = header.len().max(rows.iter().map(Vec::len).max().unwrap_or(0)).max(1);
+                let columns = header.iter().chain(rows).map(Vec::len).max().unwrap_or(0).max(1);
                 let align: Vec<&str> = (0..columns)
                     .map(|i| match alignments.get(i) {
                         Some(Align::Center) => "center",
@@ -685,36 +680,53 @@ impl<'a> Writer<'a> {
                 let text_height = self.page.text_height_pt();
                 let column_width = self.page.text_width_pt() / columns as f64;
                 let cell_limit = num(text_height - 2.0 * TABLE_INSET_PT - IMAGE_HEIGHT_SLACK);
-                // 表头在每页重复，其中的图片不超过正文区高度的四分之一（与 Word 相同），不能占满页面。
-                let head_height = format!("{}pt", num(text_height / 4.0));
+                // 表头在每页重复，其中的图片合计不超过正文区高度的四分之一（与 Word 相同），不能占满页面：
+                // 多行表头时按行数均分。
+                let head_height = format!("{}pt", num(text_height / 4.0 / header.len().max(1) as f64));
                 let body_height = line_limit(&format!("{cell_limit}pt - writer-table-head"));
+                // 表头各行的文字加粗；三线表中每个表头单元格下方是细线（多行表头中，跨列的分组表头下方是一条短线）。
+                let three_line = matches!(self.layout.table, TableStyle::ThreeLine);
                 let row = |writer: &mut Self, r: usize, row: &[Vec<Inline>], max_height: &str| -> Vec<String> {
+                    let is_header = r < header.len();
                     (0..columns)
                         .filter_map(|i| {
-                            let (cell, cols) = match cell_place(spans, r, i) {
+                            let mut attributes = Vec::new();
+                            let cols = match cell_place(spans, r, i) {
                                 CellPlace::Covered(_) => return None,
-                                CellPlace::Origin(span) => (
-                                    format!("table.cell(colspan: {}, rowspan: {})", span.cols, span.rows),
-                                    span.cols,
-                                ),
-                                CellPlace::Single => (String::new(), 1),
+                                CellPlace::Origin(span) => {
+                                    attributes.push(format!("colspan: {}, rowspan: {}", span.cols, span.rows));
+                                    span.cols
+                                }
+                                CellPlace::Single => 1,
                             };
+                            if is_header && three_line {
+                                attributes.push("stroke: (bottom: 0.5pt)".to_owned());
+                            }
                             let container = Container {
                                 width: column_width * cols as f64 - 2.0 * TABLE_INSET_PT,
                                 max_height: max_height.to_owned(),
                             };
                             let content = writer.inlines(row.get(i).map_or(&[][..], Vec::as_slice), &container);
-                            Some(format!("{cell}[{content}]"))
+                            let content = if is_header { format!("#set text(weight: \"bold\");{content}") } else { content };
+                            Some(if attributes.is_empty() {
+                                format!("[{content}]")
+                            } else {
+                                format!("table.cell({})[{content}]", attributes.join(", "))
+                            })
                         })
                         .collect()
                 };
-                let head = row(self, 0, header, &head_height).join(", ");
+                let mut head = Vec::new();
+                for (r, cells_of_row) in header.iter().enumerate() {
+                    head.extend(row(self, r, cells_of_row, &head_height));
+                }
+                let head = head.join(", ");
                 for (r, cells_of_row) in rows.iter().enumerate() {
-                    cells.extend(row(self, r + 1, cells_of_row, &body_height));
+                    cells.extend(row(self, header.len() + r, cells_of_row, &body_height));
                 }
                 let align = align.join(", ");
                 let cells = cells.join(", ");
-                let with_images = std::iter::once(header).chain(rows).flatten().any(|cell| has_image(cell));
+                let with_images = header.iter().chain(rows).flatten().any(|cell| has_image(cell));
                 // 三线表：顶线、表头下的细线与底线；表头随跨页重复，顶线与表头线也随之重复。
                 // 底线是最后一行之后的横线（不按单元格判断：跨行的单元格只按它的第一行判断，底线会断开）。
                 // 网格表使用 preamble 中的统一描边。
@@ -2850,17 +2862,26 @@ mod tests {
         assert!(export(&english, dir.path(), fonts, &PdfLayout::default()).is_ok());
     }
 
-    /// 合并单元格（docs/decisions.md 第 23 节）：区域左上角是 table.cell，被合并的位置不输出；
-    /// 三线表的底线是最后一行之后的横线，不会在跨行的单元格下方断开。
+    /// 合并单元格与多行表头（docs/decisions.md 第 23 节）：区域左上角是 table.cell，被合并的位置不输出；
+    /// 表头各行加粗，三线表中每个表头单元格下方是细线；底线是最后一行之后的横线，不会在跨行的单元格下方断开。
     #[test]
-    fn merged_cells_span_rows_and_columns() {
+    fn merged_cells_and_header_rows() {
         let dir = project();
         let mut writer = Writer::new(dir.path(), &PdfLayout::default());
-        let markdown = "| 地区 | 2024 || 备注 |\n| --- | --- | --- | --- |\n| 华东 | 1 | 2 | 甲 |\n| ^^ | 3 || 乙 |";
+        let markdown = "| 地区 | 2024 || 备注 |\n| ^^ | 上 | 下 | ^^ |\n| --- | --- | --- | --- |\n| 华东 | 1 | 2 | 甲 |\n| ^^ | 3 || 乙 |";
         let document = build(&request("", &[("a", vec![1], "表", markdown)]));
         writer.preamble(&document, system_fonts().book());
         writer.section(&document.sections[0]);
-        assert!(writer.out.contains("table.header([#\"地区\"], table.cell(colspan: 2, rowspan: 1)[#\"2024\"], [#\"备注\"])"), "{}", writer.out);
+        let head = |attributes: &str, text: &str| format!("table.cell({attributes}stroke: (bottom: 0.5pt))[#set text(weight: \"bold\");#\"{text}\"]");
+        let header = [
+            head("colspan: 1, rowspan: 2, ", "地区"),
+            head("colspan: 2, rowspan: 1, ", "2024"),
+            head("colspan: 1, rowspan: 2, ", "备注"),
+            head("", "上"),
+            head("", "下"),
+        ]
+        .join(", ");
+        assert!(writer.out.contains(&format!("table.header({header})")), "{}", writer.out);
         assert!(writer.out.contains("table.cell(colspan: 1, rowspan: 2)[#\"华东\"], [#\"1\"], [#\"2\"], [#\"甲\"], table.cell(colspan: 2, rowspan: 1)[#\"3\"], [#\"乙\"], table.hline(stroke: 1pt)"), "{}", writer.out);
         assert_eq!(layout_with(&document, PdfLayout::default()).pages().len(), 2);
     }

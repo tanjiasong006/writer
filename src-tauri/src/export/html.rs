@@ -205,7 +205,7 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                     ),
                     _ => String::new(),
                 };
-                // 第 r 行（表头是第 0 行）的单元格；被合并的位置不输出，区域左上角带 colspan / rowspan。
+                // 第 r 行（从表头第一行起算）的单元格；被合并的位置不输出，区域左上角带 colspan / rowspan。
                 let row = |writer: &mut Self, r: usize, cells: &[Vec<Inline>], tag: &str| -> String {
                     cells
                         .iter()
@@ -220,14 +220,18 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                         })
                         .collect()
                 };
-                let head = row(self, 0, header, "th");
+                let head: String = header
+                    .iter()
+                    .enumerate()
+                    .map(|(r, cells)| format!("<tr>{}</tr>", row(self, r, cells, "th")))
+                    .collect();
                 let body: String = rows
                     .iter()
                     .enumerate()
-                    .map(|(r, cells)| format!("<tr>{}</tr>\n", row(self, r + 1, cells, "td")))
+                    .map(|(r, cells)| format!("<tr>{}</tr>\n", row(self, header.len() + r, cells, "td")))
                     .collect();
                 let note = note.as_deref().map(|note| format!("<p class=\"table-note\">{}</p>\n", escape(note))).unwrap_or_default();
-                format!("<table>{caption}<thead><tr>{head}</tr></thead>\n<tbody>\n{body}</tbody></table>\n{note}")
+                format!("<table>{caption}<thead>{head}</thead>\n<tbody>\n{body}</tbody></table>\n{note}")
             }
             Block::Rule => "<hr/>\n".to_owned(),
         }
@@ -554,6 +558,20 @@ mod tests {
         let html = String::from_utf8(bytes).unwrap();
         assert!(html.contains("<thead><tr><th colspan=\"2\">甲</th><th style=\"text-align: right\">丙</th></tr></thead>"), "{html}");
         assert!(html.contains("<tr><td rowspan=\"2\">1</td><td>2</td><td style=\"text-align: right\">3</td></tr>\n<tr><td colspan=\"2\">4</td></tr>"), "{html}");
+    }
+
+    /// 多行表头（docs/decisions.md 第 23 节）：表头各行都在 thead 中，可以纵向合并。
+    #[test]
+    fn header_rows_are_all_in_thead() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let request = RenderRequest {
+            chapters: vec![chapter("a", vec![1], "表", "| 地区 | 2024 || \n| ^^ | 上 | 下 |\n| --- | --- | --- |\n| 华东 | 1 | 2 |")],
+            ..Default::default()
+        };
+        let (bytes, _) = export(&build(&request), dir.path());
+        let html = String::from_utf8(bytes).unwrap();
+        assert!(html.contains("<thead><tr><th rowspan=\"2\">地区</th><th colspan=\"2\">2024</th></tr><tr><th>上</th><th>下</th></tr></thead>"), "{html}");
+        assert!(html.contains("<tbody>\n<tr><td>华东</td><td>1</td><td>2</td></tr>"), "{html}");
     }
 
     /// 化学结构式（docs/decisions.md 第 22 节）：图片按显示尺寸；没有图片的以原文输出并列入报告。

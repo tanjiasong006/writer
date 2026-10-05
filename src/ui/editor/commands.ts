@@ -21,6 +21,7 @@ import {
   type TableRect,
 } from 'prosemirror-tables'
 import { marks, nodes } from './schema.ts'
+import { tableHeaderRows } from './markdown.ts'
 import { elementsOf } from './element_numbering.ts'
 import {
   chapterRefAddress,
@@ -69,6 +70,7 @@ export type EditorCommand =
   | 'delete-table'
   | 'merge-cells'
   | 'split-cell'
+  | 'header-row'
 
 export interface CommandItemState {
   readonly enabled: boolean
@@ -505,10 +507,55 @@ function updateSelectedRef(state: EditorState, attrs: Record<string, unknown>): 
   return tr.setSelection(NodeSelection.create(tr.doc, pos))
 }
 
-/** 选区在表格的表头行中（GFM 表格的第一行，必须保留且只能是表头）。 */
-function inHeaderRow(state: EditorState): boolean {
+/** 选区所在表格的表头行数（开头连续的表头行，至少一行）。 */
+function headerRowsOf(rect: TableRect): number {
+  return Math.max(1, tableHeaderRows(rect.table, rect.map))
+}
+
+/** 第 row 行与上一行之间没有合并的单元格跨过（这条边界可以成为表头与正文的分界）。 */
+function rowBoundaryIsFree(rect: TableRect, row: number): boolean {
+  if (row <= 0 || row >= rect.map.height) return true
+  for (let col = 0; col < rect.map.width; col++) {
+    const index = row * rect.map.width + col
+    if (rect.map.map[index] === rect.map.map[index - rect.map.width]) return false
+  }
+  return true
+}
+
+/**
+ * 光标所在行作为表头行（docs/decisions.md 第 23 节）：表头是表格开头连续的几行。
+ * 只能把第一个正文行设为表头，或把最后一个表头行（不是唯一的一行时）改回正文；合并的单元格不能跨越新的分界。
+ */
+const toggleHeaderRow: Command = (state, dispatch) => {
   if (!isInTable(state)) return false
-  return selectedRect(state).top === 0
+  const rect = selectedRect(state)
+  if (rect.bottom - rect.top !== 1) return false
+  const headerRows = headerRowsOf(rect)
+  const row = rect.top
+  const toHeader = row === headerRows
+  if (!toHeader && !(row === headerRows - 1 && headerRows > 1)) return false
+  if (!rowBoundaryIsFree(rect, toHeader ? row + 1 : row)) return false
+  if (dispatch) {
+    const tr = state.tr
+    const type = toHeader ? nodes.table_header : nodes.table_cell
+    const seen = new Set<number>()
+    for (let col = 0; col < rect.map.width; col++) {
+      const pos = rect.map.map[row * rect.map.width + col]
+      if (seen.has(pos)) continue
+      seen.add(pos)
+      const cell = rect.table.nodeAt(pos)!
+      tr.setNodeMarkup(rect.tableStart + pos, type, cell.attrs)
+    }
+    dispatch(tr)
+  }
+  return true
+}
+
+/** 光标所在行是表头行。 */
+function inHeaderRows(state: EditorState): boolean {
+  if (!isInTable(state)) return false
+  const rect = selectedRect(state)
+  return rect.top < headerRowsOf(rect)
 }
 
 /**
@@ -539,11 +586,12 @@ function thenSelectCell(
 }
 
 /**
- * 表格的行操作：表头行只能是第一行，不能在它上方插入行，也不能删除它（删除整个表格用"删除表格"）；
- * 只剩一行正文时仍可以删除它，表格保留表头。
+ * 表格的行操作：表头是开头连续的几行，不能在第一行上方插入行；表头至少保留一行，不能全部删除
+ * （删除整个表格用"删除表格"）。只剩一行正文时仍可以删除它，表格保留表头。在表头行之间插入的是表头行，
+ * 在最后一个表头行下方插入的是正文行（prosemirror-tables 按相邻的行决定）。
  */
 const rowBefore = thenSelectCell(
-  (state, dispatch) => !inHeaderRow(state) && addRowBefore(state, dispatch),
+  (state, dispatch) => isInTable(state) && selectedRect(state).top > 0 && addRowBefore(state, dispatch),
   (before) => ({ row: before.top, col: before.left }),
 )
 const rowAfter = thenSelectCell(addRowAfter, (before) => ({ row: before.bottom, col: before.left }))
@@ -551,7 +599,11 @@ const columnBefore = thenSelectCell(addColumnBefore, (before) => ({ row: before.
 const columnAfter = thenSelectCell(addColumnAfter, (before) => ({ row: before.top, col: before.right }))
 /** 删除后进入下方的行；删除的是最后几行时进入上方的行。 */
 const removeRow = thenSelectCell(
-  (state, dispatch) => selectedRect(state).top > 0 && deleteRow(state, dispatch),
+  (state, dispatch) => {
+    if (!isInTable(state)) return false
+    const rect = selectedRect(state)
+    return (rect.top > 0 || rect.bottom < headerRowsOf(rect)) && deleteRow(state, dispatch)
+  },
   (before, after) => ({ row: Math.min(before.top, after.height - 1), col: before.left }),
 )
 /** 只剩一列时不能再删除列（请删除表格）。删除后进入右侧的列；删除的是最后几列时进入左侧的列。 */
@@ -561,13 +613,14 @@ const removeColumn = thenSelectCell(
 )
 
 /**
- * 合并选中的单元格（docs/decisions.md 第 23 节）。表头只能横向合并，不能与正文合并。
+ * 合并选中的单元格（docs/decisions.md 第 23 节）。表头与正文不能合并在一起。
  * 单元格只有一行文字，各单元格的内容按顺序以空格连接（prosemirror-tables 直接拼接，文字会粘在一起）。
  */
 const mergeSelectedCells: Command = (state, dispatch) => {
   if (!isInTable(state)) return false
   const rect = selectedRect(state)
-  if (rect.top === 0 && rect.bottom > 1) return false
+  const headerRows = headerRowsOf(rect)
+  if (rect.top < headerRows && rect.bottom > headerRows) return false
   return mergeCells(
     state,
     dispatch &&
@@ -621,6 +674,7 @@ export const editorCommands: Readonly<
   'delete-table': deleteTable,
   'merge-cells': mergeSelectedCells,
   'split-cell': splitCell,
+  'header-row': toggleHeaderRow,
 }
 
 /** 每个编辑命令的可用 / 激活状态，全部由当前 EditorState 推导。 */
@@ -665,5 +719,6 @@ export function commandState(state: EditorState): CommandState {
     'delete-table': plain(deleteTable),
     'merge-cells': plain(mergeSelectedCells),
     'split-cell': plain(splitCell),
+    'header-row': { enabled: can(toggleHeaderRow), active: inHeaderRows(state) },
   }
 }

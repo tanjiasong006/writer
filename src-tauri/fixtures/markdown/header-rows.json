@@ -1,0 +1,51 @@
+{
+  "说明": "多行表头（docs/decisions.md 第 23 节）：紧贴在表格之前（之间没有空行）、每一行都以 | 开头的段落是表头在分隔行之上多出的行，在引用与紧凑列表项中同样适用。表头内可以纵向合并；正文第一行的 ^^ 不与表头合并。表格标题仍是表头行之前的段落。隔着空行的段落保留为段落。header 是表头第一行，rows 是之后的各行（包括其余表头行），headerRows 是表头行数。",
+  "blocks": [
+    {
+      "type": "table",
+      "align": ["none", "right", "right", "none"],
+      "header": [[{ "text": "地区" }], [{ "text": "2024 年" }], [], [{ "text": "备注" }]],
+      "rows": [
+        [[], [{ "text": "上半年" }], [{ "text": "下半年" }], []],
+        [[{ "text": "华东" }], [{ "text": "120" }], [{ "text": "135" }], [{ "text": "含上海" }]],
+        [[], [{ "text": "合计 255" }], [], [{ "text": "同比增长" }]]
+      ],
+      "caption": { "text": "各地区产量", "id": "output" },
+      "spans": [
+        { "row": 0, "col": 0, "rows": 2, "cols": 1 },
+        { "row": 0, "col": 1, "rows": 1, "cols": 2 },
+        { "row": 0, "col": 3, "rows": 2, "cols": 1 },
+        { "row": 2, "col": 0, "rows": 2, "cols": 1 },
+        { "row": 3, "col": 1, "rows": 1, "cols": 2 }
+      ],
+      "headerRows": 2
+    },
+    {
+      "type": "quote",
+      "blocks": [
+        {
+          "type": "table",
+          "align": ["none"],
+          "header": [[{ "text": "引用中" }]],
+          "rows": [[[{ "text": "第二行" }]], [[{ "text": "x" }]]],
+          "headerRows": 2
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            { "type": "table", "align": ["none"], "header": [[{ "text": "列表中" }]], "rows": [[[{ "text": "第二行" }]]], "headerRows": 2 }
+          ]
+        }
+      ]
+    },
+    { "type": "paragraph", "inlines": [{ "text": "| 隔着空行的段落 |" }] },
+    { "type": "table", "align": ["none"], "header": [[{ "text": "a" }]], "rows": [] }
+  ]
+}

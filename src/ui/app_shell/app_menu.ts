@@ -380,6 +380,7 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         { separator: true },
         editorItem('merge-cells'),
         editorItem('split-cell'),
+        editorItem('header-row', { checkable: true }),
         { separator: true },
         editorItem('delete-row'),
         editorItem('delete-column'),

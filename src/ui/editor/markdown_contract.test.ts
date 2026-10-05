@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { Mark, Node } from 'prosemirror-model'
-import { parseChapter, serializeChapter } from './markdown.ts'
+import { parseChapter, serializeChapter, tableHeaderRows } from './markdown.ts'
 import { TableMap } from 'prosemirror-tables'
 import { nodes } from './schema.ts'
 import { parseChapterRefAddress } from '../../domain/chapter_reference/chapter_reference.ts'
@@ -55,6 +55,7 @@ type SemBlock =
       caption?: { text: string; id?: string }
       note?: string
       spans?: { row: number; col: number; rows: number; cols: number }[]
+      headerRows?: number
     }
 
 const MARK_NAMES: Record<string, string> = { strong: 'strong', em: 'emphasis', strike: 'strike' }
@@ -167,8 +168,11 @@ function block(node: Node): SemBlock {
         }
         rows.push(cells)
       }
+      // header 是表头第一行，rows 是之后的各行（多行表头时包括其余表头行，headerRows 是表头行数）。
       let table: SemBlock = { type: 'table', align, header: rows[0] ?? [], rows: rows.slice(1) }
       if (spans.length > 0) table = { ...table, spans }
+      const headerRows = tableHeaderRows(node, map)
+      if (headerRows > 1) table = { ...table, headerRows }
       const caption = node.attrs.caption as string | null
       if (caption !== null) {
         const id = node.attrs.captionId as string | null

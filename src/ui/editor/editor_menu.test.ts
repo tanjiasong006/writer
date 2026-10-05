@@ -31,8 +31,8 @@ test('正文中：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当�
 test('表格中：行列操作在最前；表头行不能在上方插入行或删除', () => {
   const table = '| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n'
   const inHeader = editorContextMenu(commandState(stateAt(table, 3)), null)
-  expect(labels(inHeader).slice(0, 11)).toEqual([
-    '在上方插入行', '在下方插入行', '在左侧插入列', '在右侧插入列', '-', '合并单元格', '拆分单元格', '-', '删除行', '删除列', '删除表格',
+  expect(labels(inHeader).slice(0, 12)).toEqual([
+    '在上方插入行', '在下方插入行', '在左侧插入列', '在右侧插入列', '-', '合并单元格', '拆分单元格', '表头行', '-', '删除行', '删除列', '删除表格',
   ])
   const disabled = (entries: readonly MenuEntry[], label: string) =>
     entries.some((entry) => 'label' in entry && entry.label === label && entry.disabled)

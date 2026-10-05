@@ -524,15 +524,12 @@ impl Writer<'_> {
     fn table(
         &mut self,
         alignments: &[Align],
-        header: &[Vec<Inline>],
+        header: &[Vec<Vec<Inline>>],
         rows: &[Vec<Vec<Inline>>],
         spans: &[CellSpan],
         note: Option<&str>,
     ) {
-        let columns = header
-            .len()
-            .max(rows.iter().map(Vec::len).max().unwrap_or(0))
-            .max(1);
+        let columns = header.iter().chain(rows).map(Vec::len).max().unwrap_or(0).max(1);
         let width = TEXT_WIDTH as usize / columns;
         // 单元格中的图片不超过单元格去掉左右内边距后的宽度（各列等宽，合并的单元格是所跨各列之和）。
         let cell_width = |cols: usize| f64::from(((width * cols) as u32).saturating_sub(2 * CELL_MARGIN)) / 20.0;
@@ -544,35 +541,45 @@ impl Writer<'_> {
         // 因此按表头文字折行的上限估计表头高度（表头中的图片另有上限），正文行中的图片不超过
         // 正文区减去表头与单元格段落间距。
         let text_height = f64::from(TEXT_HEIGHT) / 20.0;
-        let head_image_height = text_height * HEADER_IMAGE_SHARE;
+        // 多行表头时各行均分表头中图片的高度上限，表头高度是各行之和。
+        let head_image_height = text_height * HEADER_IMAGE_SHARE / header.len().max(1) as f64;
         let table_size = self.theme.table;
-        let head_height = header
+        let head_height: f64 = header
             .iter()
             .enumerate()
-            .map(|(i, cell)| {
-                let text = crate::render::markdown::plain_text(cell);
-                let image = if has_image(cell) { head_image_height } else { 0.0 };
-                text_height_pt(&text, table_size, table_size * 1.5, cell_width(cols_at(0, i))) + image
+            .map(|(r, cells)| {
+                cells
+                    .iter()
+                    .enumerate()
+                    .map(|(i, cell)| {
+                        let text = crate::render::markdown::plain_text(cell);
+                        let image = if has_image(cell) { head_image_height } else { 0.0 };
+                        text_height_pt(&text, table_size, table_size * 1.5, cell_width(cols_at(r, i))) + image
+                    })
+                    .fold(0.0, f64::max)
+                    + TABLE_TEXT_SPACING_PT
             })
-            .fold(0.0, f64::max)
-            + TABLE_TEXT_SPACING_PT;
+            .sum();
         let body_image_height = text_height - head_height - TABLE_TEXT_SPACING_PT - IMAGE_HEIGHT_SLACK;
         let bold = RunStyle {
             bold: true,
             ..RunStyle::default()
         };
         // 最后一行的段落“与下段同页”，表注不会单独落到下一页。
-        // r 是行号（表头是第 0 行）。
+        // r 是行号（从表头第一行起算）。
         let make_row = |writer: &mut Self, r: usize, cells: &[Vec<Inline>], style: RunStyle, keep_next: bool| {
-            let is_header = r == 0;
+            let is_header = r < header.len();
             let cells = (0..columns)
                 .filter_map(|i| {
                     // 被合并的位置：区域第一列以下各行是继续纵向合并的单元格，其余不输出。
-                    let (cols, merge) = match cell_place(spans, r, i) {
-                        CellPlace::Covered(span) if span.row != r && span.col == i => (span.cols, Some(VMergeType::Continue)),
+                    // bottom：这个单元格在区域的最后一行（纵向合并的单元格只在最后一行设下边框）。
+                    let (cols, merge, bottom) = match cell_place(spans, r, i) {
+                        CellPlace::Covered(span) if span.row != r && span.col == i => {
+                            (span.cols, Some(VMergeType::Continue), span.row + span.rows == r + 1)
+                        }
                         CellPlace::Covered(_) => return None,
-                        CellPlace::Origin(span) => (span.cols, (span.rows > 1).then_some(VMergeType::Restart)),
-                        CellPlace::Single => (1, None),
+                        CellPlace::Origin(span) => (span.cols, (span.rows > 1).then_some(VMergeType::Restart), span.rows == 1),
+                        CellPlace::Single => (1, None, true),
                     };
                     let mut p = Paragraph::new().style("TableText");
                     p = match alignments.get(i) {
@@ -598,8 +605,8 @@ impl Writer<'_> {
                     if let Some(merge) = merge {
                         cell = cell.vertical_merge(merge);
                     }
-                    // 三线表：表头下方一条细线。
-                    Some(if is_header {
+                    // 三线表：每个表头单元格下方一条细线（多行表头中，跨列的分组表头下方是一条短线）。
+                    Some(if is_header && bottom {
                         cell.set_borders(
                             TableCellBorders::with_empty().set(
                                 TableCellBorder::new(TableCellBorderPosition::Bottom)
@@ -621,9 +628,12 @@ impl Writer<'_> {
             }
         };
         let keep_last = note.is_some();
-        let mut table_rows = vec![make_row(self, 0, header, bold, keep_last && rows.is_empty())];
+        let mut table_rows = Vec::new();
+        for (r, row) in header.iter().enumerate() {
+            table_rows.push(make_row(self, r, row, bold, keep_last && rows.is_empty() && r + 1 == header.len()));
+        }
         for (i, row) in rows.iter().enumerate() {
-            table_rows.push(make_row(self, i + 1, row, RunStyle::default(), keep_last && i + 1 == rows.len()));
+            table_rows.push(make_row(self, header.len() + i, row, RunStyle::default(), keep_last && i + 1 == rows.len()));
         }
         // 三线表：顶线与底线 1 磅，无竖线与内部横线（与 PDF 默认一致）。
         let rule = |position| {
@@ -1993,6 +2003,21 @@ mod tests {
         // 两列：2 × 3008 twip，减去左右内边距 2 × 108 → 5800 twip = 290 磅。
         let (cx, _) = extents(&xml)[0];
         assert!((cx / EMU_PER_PT - 290.0).abs() < 0.01, "{cx}");
+    }
+
+    /// 多行表头（docs/decisions.md 第 23 节）：表头各行在每页重复、加粗；表头单元格下方是细线，
+    /// 纵向合并的单元格只在最后一行设下边框（不在合并的格子中间画线）。
+    #[test]
+    fn header_rows_repeat_and_have_rules_below_each_header_cell() {
+        let dir = project();
+        let (bytes, _) = export_ok(
+            &dir,
+            &[("a", vec![1], "表", "| 地区 | 2024 || \n| ^^ | 上 | 下 |\n| --- | --- | --- |\n| 华东 | 1 | 2 |")],
+        );
+        let xml = part(&bytes, "word/document.xml");
+        assert_eq!(xml.matches("<w:tblHeader />").count(), 2, "{xml}");
+        // 第一行：地区（纵向合并的开始，没有下边框）与 2024（有）；第二行：继续合并的单元格、上、下（都有）。
+        assert_eq!(xml.matches("<w:bottom w:val=\"single\" w:sz=\"4\"").count(), 4, "{xml}");
     }
 
     #[test]

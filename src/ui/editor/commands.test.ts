@@ -337,6 +337,56 @@ describe('合并与拆分单元格（docs/decisions.md 第 23 节）', () => {
   })
 })
 
+describe('多行表头（docs/decisions.md 第 23 节）', () => {
+  const TABLE = '| A | B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |\n'
+
+  test('表头行：第一个正文行设为表头，最后一个表头行改回正文', () => {
+    const header = run(stateOf(TABLE, { cursorAfter: 'a1' }), editorCommands['header-row'])
+    expect(markdown(header)).toBe('| A | B |\n| a1 | b1 |\n| --- | --- |\n| a2 | b2 |\n')
+    expect(commandState(header.apply(header.tr.setSelection(TextSelection.create(header.doc, find(header, 'a1')))))['header-row'].active).toBe(true)
+    const back = header.apply(header.tr.setSelection(TextSelection.create(header.doc, find(header, 'a1'))))
+    expect(markdown(run(back, editorCommands['header-row']))).toBe(TABLE)
+  })
+
+  test('表头行：唯一的表头行、不相邻的行、被合并的单元格跨过分界时不可用', () => {
+    expect(editorCommands['header-row'](stateOf(TABLE, { cursorAfter: 'A' }))).toBe(false)
+    expect(editorCommands['header-row'](stateOf(TABLE, { cursorAfter: 'a2' }))).toBe(false)
+    expect(editorCommands['header-row'](stateOf('| A | B |\n| --- | --- |\n| a1 | b1 |\n| ^^ | b2 |\n', { cursorAfter: 'b1' }))).toBe(false)
+  })
+
+  const TWO = '| A | B |\n| C | D |\n| --- | --- |\n| a1 | b1 |\n'
+
+  test('表头行之间插入的是表头行；最后一个表头行下方插入的是正文行；第一行上方不能插入', () => {
+    expect(markdown(run(stateOf(TWO, { cursorAfter: 'C' }), editorCommands['row-before']))).toBe(
+      '| A | B |\n|  |  |\n| C | D |\n| --- | --- |\n| a1 | b1 |\n',
+    )
+    expect(markdown(run(stateOf(TWO, { cursorAfter: 'C' }), editorCommands['row-after']))).toBe(
+      '| A | B |\n| C | D |\n| --- | --- |\n|  |  |\n| a1 | b1 |\n',
+    )
+    expect(editorCommands['row-before'](stateOf(TWO, { cursorAfter: 'A' }))).toBe(false)
+  })
+
+  test('表头至少保留一行：多行表头时可以删除其中的行', () => {
+    expect(markdown(run(stateOf(TWO, { cursorAfter: 'A' }), editorCommands['delete-row']))).toBe(
+      '| C | D |\n| --- | --- |\n| a1 | b1 |\n',
+    )
+    expect(editorCommands['delete-row'](stateOf(TABLE, { cursorAfter: 'A' }))).toBe(false)
+  })
+
+  test('表头内可以纵向合并，但不能与正文合并', () => {
+    let state = stateOf(TWO)
+    const cell = (text: string) => {
+      const $pos = state.doc.resolve(find(state, text))
+      return $pos.before($pos.depth)
+    }
+    state = state.apply(state.tr.setSelection(CellSelection.create(state.doc, cell('A'), cell('C'))))
+    expect(markdown(run(state, editorCommands['merge-cells']))).toBe('| A C | B |\n| ^^ | D |\n| --- | --- |\n| a1 | b1 |\n')
+    state = stateOf(TWO)
+    state = state.apply(state.tr.setSelection(CellSelection.create(state.doc, cell('C'), cell('a1'))))
+    expect(editorCommands['merge-cells'](state)).toBe(false)
+  })
+})
+
 describe('撤销 / 重做', () => {
   test('格式与插入都可以撤销和重做', () => {
     const start = stateOf('引言正文', { select: '正文' })

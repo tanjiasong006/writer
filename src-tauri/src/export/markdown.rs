@@ -126,12 +126,18 @@ impl Writer<'_> {
                 format!("{fence}{info}\n{smiles}\n{fence}")
             }
             // 合并单元格不写出合并记号（其他 Markdown 工具不认识）：被合并的位置是空单元格。
+            // 多行表头中第一行之后的各行写成正文的前几行，在其他工具中仍是一个表格。
             Block::Table { alignments, header, rows, caption, note, .. } => {
+                let empty = Vec::new();
+                let (header, rows) = match header.split_first() {
+                    Some((first, rest)) => (first, rest.iter().chain(rows.iter()).collect::<Vec<_>>()),
+                    None => (&empty, rows.iter().collect()),
+                };
                 let mut out = String::new();
                 if let (Some(caption), Some(target)) = (caption, &element) {
                     out.push_str(&format!("**{}**\n\n", escape(&format!("{}{ELEMENT_SEPARATOR}{}", target.label, caption.text))));
                 }
-                let columns = header.len().max(rows.iter().map(Vec::len).max().unwrap_or(0)).max(1);
+                let columns = header.len().max(rows.iter().map(|row| row.len()).max().unwrap_or(0)).max(1);
                 let cell = |writer: &mut Self, cells: &[Vec<Inline>], i: usize| {
                     cells.get(i).map(|cell| writer.inlines(cell).replace('\n', " ")).unwrap_or_default()
                 };
@@ -316,6 +322,20 @@ mod tests {
             ],
             "{text}"
         );
+    }
+
+    /// 合并单元格与多行表头（docs/decisions.md 第 23 节）：不写合并记号，被合并的位置是空单元格；
+    /// 表头第一行之后的各行写成正文的前几行，在其他工具中仍是一个表格。
+    #[test]
+    fn merged_cells_and_header_rows_become_a_plain_table() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let markdown = "| 地区 | 2024 || \n| ^^ | 上 | 下 |\n| --- | --- | --- |\n| 华东 | 1 | 2 |";
+        let request = RenderRequest {
+            chapters: vec![RenderChapter { id: "a".into(), number: vec![1], title: "表".into(), markdown: markdown.into() }],
+            ..Default::default()
+        };
+        let text = export(&build(&request), dir.path(), "assets").text;
+        assert!(text.contains("| 地区 | 2024 |  |\n| --- | --- | --- |\n|  | 上 | 下 |\n| 华东 | 1 | 2 |"), "{text}");
     }
 
     #[test]
