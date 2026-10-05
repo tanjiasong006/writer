@@ -77,6 +77,13 @@ opt-level = 3
 panic = "unwind"
 strip = true
 
+# 本地验证 release 行为用：关闭 LTO、并行代码生成，只改 Writer 代码时重建约 35 秒（release 约 5 分钟）。
+# 体积约大 18%，发布仍用 release。用法：npm run tauri build -- --bundles app -- --profile release-fast
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 [dev-dependencies]
 tempfile = "3.27.0"
 # 直接验证本地 krilla 补丁的过滤数据与 PDF DecodeParms。
