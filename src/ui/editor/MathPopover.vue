@@ -1,11 +1,21 @@
+<script lang="ts">
+/** 本次运行中最近使用的编辑方式：熟悉 LaTeX 的人切换到源码后，下次打开仍是源码。 */
+let preferSource = false
+</script>
+
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import katex from 'katex'
+import { MathfieldElement } from 'mathlive'
 import { renderMath } from './math_view.ts'
 
 /**
- * 编辑公式（docs/decisions.md 第 14 节）：在公式（或插入处）下方弹出，上面是 LaTeX 文本框，下面是实时预览。
+ * 编辑公式（docs/decisions.md 第 14 节）：在公式（或插入处）下方弹出。
  *
- * - Enter 完成，⇧Enter 换行（公式块可以多行），Esc 放弃；点击浮层以外也完成。
+ * - 默认是可视编辑（MathLive）：直接编辑排好版的公式，上方是常用结构与符号；输入 / 生成分数、^ 上标、_ 下标，
+ *   方向键在各部分之间移动。
+ * - “LaTeX”切换到源码：文本框加实时预览；⇧Enter 换行（公式块可以多行）。
+ * - Enter 或“完成”按钮完成，Esc 或“取消”按钮放弃；点击浮层以外也完成。没有修改时完成得到原文（可视编辑器不改写未编辑的写法）。
  * - 只发出 commit / cancel，正文由编辑器修改。
  */
 const props = defineProps<{
@@ -20,15 +30,56 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
+// 字体用 katex.min.css 已经加载的 KaTeX 字体（MathLive 使用同一套），不另行加载；不播放按键声音。
+MathfieldElement.fontsDirectory = null
+MathfieldElement.soundsDirectory = null
+
 const value = ref(props.tex)
+const source = ref(preferSource)
+const showSymbols = ref(false)
 const panel = ref<HTMLElement | null>(null)
+const fieldHost = ref<HTMLElement | null>(null)
 const input = ref<HTMLTextAreaElement | null>(null)
 const preview = ref<HTMLElement | null>(null)
 const position = ref<{ left: number; top?: number; bottom?: number } | null>(null)
+let mathfield: MathfieldElement | null = null
 
 const EDGE = 8
 const GAP = 6
 const LINE = 28
+
+/** 插入的写法：#0 是当前选中的内容，#? 是待填写的空位。 */
+interface Template {
+  readonly label: string
+  readonly icon: string
+  readonly insert: string
+}
+
+const STRUCTURES: readonly Template[] = [
+  { label: '分数', icon: '\\dfrac{\\square}{\\square}', insert: '\\frac{#0}{#?}' },
+  { label: '上标', icon: '\\square^{\\square}', insert: '#0^{#?}' },
+  { label: '下标', icon: '\\square_{\\square}', insert: '#0_{#?}' },
+  { label: '根号', icon: '\\sqrt{\\square}', insert: '\\sqrt{#0}' },
+  { label: 'n 次根号', icon: '\\sqrt[\\square]{\\square}', insert: '\\sqrt[#?]{#0}' },
+  { label: '括号', icon: '\\left(\\square\\right)', insert: '\\left(#0\\right)' },
+  { label: '求和', icon: '\\sum', insert: '\\sum_{#?}^{#?}' },
+  { label: '积分', icon: '\\int', insert: '\\int_{#?}^{#?}' },
+  { label: '极限', icon: '\\lim', insert: '\\lim_{#?\\to #?}' },
+  { label: '矩阵', icon: '\\begin{pmatrix}\\square&\\square\\\\\\square&\\square\\end{pmatrix}', insert: '\\begin{pmatrix}#?&#?\\\\#?&#?\\end{pmatrix}' },
+  { label: '方程组', icon: '\\begin{cases}\\square\\\\\\square\\end{cases}', insert: '\\begin{cases}#?\\\\#?\\end{cases}' },
+]
+
+const SYMBOLS: readonly string[] = [
+  '\\alpha', '\\beta', '\\gamma', '\\delta', '\\epsilon', '\\theta', '\\lambda', '\\mu', '\\pi', '\\rho', '\\sigma', '\\varphi', '\\omega',
+  '\\Gamma', '\\Delta', '\\Theta', '\\Lambda', '\\Sigma', '\\Phi', '\\Omega',
+  '\\pm', '\\times', '\\div', '\\cdot', '\\le', '\\ge', '\\ne', '\\approx', '\\equiv', '\\propto',
+  '\\infty', '\\partial', '\\nabla', '\\to', '\\Rightarrow', '\\Leftrightarrow',
+  '\\in', '\\notin', '\\subset', '\\subseteq', '\\cup', '\\cap', '\\forall', '\\exists', '\\angle', '\\degree',
+]
+
+const icon = (tex: string) => katex.renderToString(tex, { throwOnError: false, output: 'html' })
+const structureIcons = STRUCTURES.map((item) => icon(item.icon))
+const symbolIcons = SYMBOLS.map(icon)
 
 function place(): void {
   const element = panel.value
@@ -51,11 +102,15 @@ function showPreview(): void {
 
 watch(value, showPreview)
 
-function onKeydown(event: KeyboardEvent): void {
+function commit(): void {
+  emit('commit', value.value.trim())
+}
+
+function onSourceKeydown(event: KeyboardEvent): void {
   if (event.isComposing) return
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
-    emit('commit', value.value.trim())
+    commit()
   } else if (event.key === 'Escape') {
     event.preventDefault()
     event.stopPropagation()
@@ -63,17 +118,90 @@ function onKeydown(event: KeyboardEvent): void {
   }
 }
 
-onMounted(async () => {
+/** 先于 MathLive 处理 Enter 与 Esc（MathLive 中 Esc 是输入 LaTeX 命令）；正在输入 LaTeX 命令时交给 MathLive。 */
+function onFieldKeydown(event: KeyboardEvent): void {
+  if (event.isComposing || mathfield?.mode === 'latex') return
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    commit()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    emit('cancel')
+  }
+}
+
+/**
+ * 可视编辑器中的公式 → 保存的 LaTeX：展开 MathLive 自己的命令（如 \differentialD → \mathrm{d}，KaTeX 与导出都不认识前者），
+ * 去掉未填写的空位；没有填写次数的根号写成普通根号（导出不接受 \sqrt[]）。
+ */
+function fieldLatex(field: MathfieldElement): string {
+  return field
+    .getValue('latex-expanded')
+    .replace(/\\placeholder(?:\[[^\]]*\])?\{([^{}]*)\}/g, '$1')
+    .replace(/\\sqrt\[\]/g, '\\sqrt')
+}
+
+function createMathfield(): void {
+  if (!fieldHost.value) return
+  const field = new MathfieldElement()
+  field.setAttribute('aria-label', props.label)
+  // 选项要在挂载之后设置。
+  fieldHost.value.append(field)
+  field.mathVirtualKeyboardPolicy = 'manual'
+  field.menuItems = []
+  field.defaultMode = props.display ? 'math' : 'inline-math'
+  field.value = value.value
+  field.addEventListener('input', () => {
+    value.value = fieldLatex(field)
+  })
+  fieldHost.value.addEventListener('keydown', onFieldKeydown, { capture: true })
+  mathfield = field
+}
+
+function insertTemplate(latex: string): void {
+  if (!mathfield) return
+  mathfield.insert(latex, { selectionMode: 'placeholder', focus: true })
+  value.value = fieldLatex(mathfield)
+}
+
+async function focusEditor(selectAll: boolean): Promise<void> {
+  await nextTick()
+  if (source.value) {
+    input.value?.focus({ preventScroll: true })
+    if (selectAll) input.value?.select()
+  } else {
+    mathfield?.focus()
+    if (selectAll) mathfield?.executeCommand('selectAll')
+  }
+}
+
+async function toggleSource(): Promise<void> {
+  source.value = !source.value
+  preferSource = source.value
+  showSymbols.value = false
+  if (!source.value && mathfield && fieldLatex(mathfield) !== value.value) mathfield.value = value.value
+  await nextTick()
   showPreview()
   place()
-  await nextTick()
-  input.value?.focus({ preventScroll: true })
-  input.value?.select()
+  await focusEditor(false)
+}
+
+onMounted(async () => {
+  createMathfield()
+  showPreview()
+  place()
+  await focusEditor(true)
+})
+
+onBeforeUnmount(() => {
+  fieldHost.value?.removeEventListener('keydown', onFieldKeydown, { capture: true })
 })
 </script>
 
 <template>
-  <div class="math-popover__backdrop" @mousedown.prevent="emit('commit', value.trim())"></div>
+  <div class="math-popover__backdrop" @mousedown.prevent="commit"></div>
   <div
     ref="panel"
     class="math-popover"
@@ -90,21 +218,86 @@ onMounted(async () => {
     "
   >
     <div class="math-popover__label">{{ label }}</div>
-    <div class="math-popover__field" :data-value="value">
-      <textarea
-        ref="input"
-        v-model="value"
-        class="math-popover__input"
-        rows="1"
-        placeholder="LaTeX，如 \frac{a}{b}"
-        aria-label="LaTeX"
-        spellcheck="false"
-        autocomplete="off"
-        @keydown="onKeydown"
-      ></textarea>
+
+    <div v-show="!source" class="math-popover__visual">
+      <div class="math-popover__tools" role="toolbar" aria-label="插入结构">
+        <button
+          v-for="(item, index) in STRUCTURES"
+          :key="item.label"
+          type="button"
+          class="math-popover__tool"
+          :title="item.label"
+          :aria-label="item.label"
+          tabindex="-1"
+          @mousedown.prevent
+          @click="insertTemplate(item.insert)"
+          v-html="structureIcons[index]"
+        ></button>
+        <button
+          type="button"
+          class="math-popover__tool math-popover__tool--text"
+          :aria-pressed="showSymbols"
+          tabindex="-1"
+          @mousedown.prevent
+          @click="showSymbols = !showSymbols"
+        >
+          符号
+        </button>
+      </div>
+      <div v-if="showSymbols" class="math-popover__symbols" role="toolbar" aria-label="插入符号">
+        <button
+          v-for="(symbol, index) in SYMBOLS"
+          :key="symbol"
+          type="button"
+          class="math-popover__tool math-popover__tool--symbol"
+          :title="symbol"
+          :aria-label="symbol"
+          tabindex="-1"
+          @mousedown.prevent
+          @click="insertTemplate(symbol)"
+          v-html="symbolIcons[index]"
+        ></button>
+      </div>
+      <div ref="fieldHost" class="math-popover__visual-field" :class="{ 'is-display': display }"></div>
     </div>
-    <div ref="preview" class="math-popover__preview document-body" aria-live="polite"></div>
-    <div class="math-popover__hint">↩ 完成　⇧↩ 换行　⎋ 取消</div>
+
+    <template v-if="source">
+      <div class="math-popover__field" :data-value="value">
+        <textarea
+          ref="input"
+          v-model="value"
+          class="math-popover__input"
+          rows="1"
+          placeholder="LaTeX，如 \frac{a}{b}"
+          aria-label="LaTeX"
+          spellcheck="false"
+          autocomplete="off"
+          @keydown="onSourceKeydown"
+        ></textarea>
+      </div>
+      <div ref="preview" class="math-popover__preview document-body" aria-live="polite"></div>
+    </template>
+
+    <div class="math-popover__footer">
+      <button
+        type="button"
+        class="math-popover__mode"
+        :aria-pressed="source"
+        @mousedown.prevent
+        @click="toggleSource"
+      >
+        LaTeX
+      </button>
+      <div class="math-popover__actions">
+        <span v-if="source" class="math-popover__hint">⇧↩ 换行</span>
+        <button type="button" class="math-popover__action" @mousedown.prevent @click="emit('cancel')">
+          <span class="math-popover__key">⎋</span>取消
+        </button>
+        <button type="button" class="math-popover__action is-default" @mousedown.prevent @click="commit">
+          <span class="math-popover__key">↩</span>完成
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -143,6 +336,100 @@ onMounted(async () => {
   font-size: var(--text-s);
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* 常用结构与符号：安静的图标按钮，悬停时才有底色。 */
+.math-popover__tools,
+.math-popover__symbols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0 calc(-1 * var(--space-2));
+}
+
+.math-popover__symbols {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-separator);
+}
+
+.math-popover__tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-h-m);
+  height: var(--control-h-m);
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-s);
+  line-height: 1;
+  cursor: default;
+}
+
+.math-popover__tool:hover {
+  background: var(--color-fill-hover);
+  color: var(--color-text);
+}
+
+.math-popover__tool:active {
+  background: var(--color-fill-pressed);
+}
+
+.math-popover__tool[aria-pressed='true'] {
+  background: var(--color-accent-fill);
+  color: var(--color-accent-text);
+}
+
+/* 按钮中的公式图标：结构图标缩小到按钮高度内，符号保持正常大小。 */
+.math-popover__tool :deep(.katex) {
+  font-size: 11px;
+}
+
+.math-popover__tool--symbol :deep(.katex) {
+  font-size: var(--text-l);
+}
+
+.math-popover__tool--text {
+  margin-left: auto;
+  font-family: var(--font-ui);
+}
+
+/* 可视编辑区：与源码模式的预览同一底色，比界面文字大，便于看清上下标。 */
+.math-popover__visual-field {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-m);
+  background: var(--color-fill-hover);
+}
+
+.math-popover__visual-field :deep(math-field) {
+  display: block;
+  width: 100%;
+  min-height: 1.6em;
+  border: none;
+  background: transparent;
+  color: var(--color-doc-text);
+  font-size: 18px;
+  outline: none;
+  --caret-color: var(--color-accent);
+  --selection-background-color: var(--color-doc-selection);
+  --selection-color: inherit;
+  --contains-highlight-background-color: transparent;
+  --placeholder-color: var(--color-text-tertiary);
+  --smart-fence-color: var(--color-text-tertiary);
+  --primary: var(--color-accent);
+}
+
+.math-popover__visual-field.is-display :deep(math-field) {
+  font-size: 20px;
+}
+
+.math-popover__visual-field :deep(math-field)::part(menu-toggle),
+.math-popover__visual-field :deep(math-field)::part(virtual-keyboard-toggle) {
+  display: none;
 }
 
 /* 随内容增高的文本框（与脚注浮层相同的做法），等宽字体。 */
@@ -201,13 +488,89 @@ onMounted(async () => {
   font-size: var(--text-s);
 }
 
-.math-popover__hint {
+.math-popover__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-top: var(--space-2);
   padding-top: var(--space-3);
   border-top: 1px solid var(--color-separator);
+}
+
+/* 切换到源码：低调的文字按钮，打开时是强调色。 */
+.math-popover__mode {
+  height: var(--control-h-s);
+  margin-left: calc(-1 * var(--space-3));
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.math-popover__mode:hover {
+  background: var(--color-fill-hover);
+  color: var(--color-text-secondary);
+}
+
+.math-popover__mode[aria-pressed='true'] {
+  background: var(--color-accent-fill);
+  color: var(--color-accent-text);
+}
+
+/* 取消 / 完成：与“LaTeX”同样低调的文字按钮，按键符号提示快捷键；完成是默认操作，用强调色文字。 */
+.math-popover__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-right: calc(-1 * var(--space-3));
+}
+
+.math-popover__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-h-s);
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  cursor: default;
+}
+
+.math-popover__action.is-default {
+  color: var(--color-accent-text);
+}
+
+.math-popover__action:hover {
+  background: var(--color-fill-hover);
+}
+
+.math-popover__action:active {
+  background: var(--color-fill-pressed);
+}
+
+.math-popover__key {
+  color: var(--color-text-tertiary);
+}
+
+.math-popover__mode:focus-visible,
+.math-popover__action:focus-visible,
+.math-popover__tool:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
+}
+
+.math-popover__hint {
+  margin-right: var(--space-3);
   color: var(--color-text-tertiary);
   font-size: var(--text-xs);
-  text-align: right;
   -webkit-user-select: none;
   user-select: none;
 }

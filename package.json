@@ -20,6 +20,7 @@
     "katex": "^0.19.0",
     "markdown-it": "^14.3.2",
     "markdown-it-footnote": "^4.0.0",
+    "mathlive": "^0.111.0",
     "prosemirror-commands": "^1.7.2",
     "prosemirror-dropcursor": "^1.8.4",
     "prosemirror-gapcursor": "^1.4.1",

@@ -922,6 +922,11 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   PDF 公式定义放在源码开头，出错的公式改用替代后重排；报告 `invalidFormulas`，导出提示中说明。
 - 验证：解析 / 写出、共享 fixture `math`、编辑交互（显示、插入、编辑、删除、撤销、输入规则、阅读）、常用 LaTeX 写法在 PDF 中都能排版、
   Word 中嵌入图片、失败回退测试；Story `ChapterEditor/Formulas`、`MathPopover`（Storybook 中目视检查了公式显示）。
+- 可视编辑（2026-10-04）：`MathPopover.vue` 默认用 MathLive（`mathlive`，字体复用 KaTeX 的，不加载声音），常用结构与符号面板，
+  “LaTeX”切换到源码；写出时展开 MathLive 命令、去掉空位、`\sqrt[]` → `\sqrt`（mitex 不接受）。测试环境把 `mathlive` 指向浏览器版本
+  （`vite.config.js`）。验证：浮层组件测试（未修改保存原文、结构插入、符号、Esc / Enter 交给 LaTeX 命令输入、源码切换与记忆）、
+  编辑器集成测试、浮层可能写出的写法在 PDF 中都能排版；Storybook 中目视检查了可视编辑、模板插入、符号面板、源码切换与 Esc。
+  未检查深色外观与 Tauri WebView 中的中文输入法。
 
 #### P1-5 Word 目录（完成，2026-10-03）
 

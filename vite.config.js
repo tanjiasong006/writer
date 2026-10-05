@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
@@ -12,6 +13,8 @@ export default defineConfig(() => ({
   test: {
     environment: "happy-dom",
     update: "none",
+    // MathLive 在 Node 中解析为没有编辑器的 SSR 版本；测试在 DOM 环境中使用浏览器版本。
+    alias: [{ find: /^mathlive$/, replacement: fileURLToPath(new URL("./node_modules/mathlive/mathlive.mjs", import.meta.url)) }],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

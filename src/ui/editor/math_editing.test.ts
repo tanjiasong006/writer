@@ -9,6 +9,9 @@ import { NO_CHAPTER_REFS } from './chapter_ref_view.ts'
 
 /** 编辑器中的公式：KaTeX 显示、插入、编辑、输入规则（docs/decisions.md 第 14 节）。 */
 
+// happy-dom 没有 document.fonts，MathLive 的可视编辑器需要它。
+Object.defineProperty(document, 'fonts', { value: { ready: Promise.resolve() }, configurable: true })
+
 const mounted: VueWrapper[] = []
 afterEach(() => {
   for (const wrapper of mounted.splice(0)) wrapper.unmount()
@@ -22,13 +25,14 @@ function mountEditor(content: string) {
 }
 
 const lastChange = (wrapper: VueWrapper) => (wrapper.emitted('change') as Array<[string, string]> | undefined)?.at(-1)?.[1]
-const popover = () => document.querySelector<HTMLTextAreaElement>('.math-popover__input')
+const field = () => document.querySelector('.math-popover math-field') as (HTMLElement & { value: string }) | null
 
-async function type(text: string) {
-  popover()!.value = text
-  popover()!.dispatchEvent(new Event('input'))
+/** 在可视编辑器中把公式改为 tex，按 Enter 完成。 */
+async function type(tex: string) {
+  field()!.value = tex
+  field()!.dispatchEvent(new Event('input'))
   await flushPromises()
-  popover()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  field()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }))
   await flushPromises()
 }
 
@@ -41,18 +45,17 @@ test('公式用 KaTeX 显示；无法识别的写法以红色原文显示；载�
   expect(wrapper.emitted('change')).toBeUndefined()
 })
 
-test('插入行内公式与公式块：先填写 LaTeX（有预览），Enter 完成后插入；取消不插入', async () => {
+test('插入行内公式与公式块：先在可视编辑器中填写，Enter 完成后插入；取消不插入', async () => {
   const { wrapper, view } = mountEditor('正文')
   view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
   const run = (command: string) => (wrapper.vm as unknown as { runCommand(c: string): void }).runCommand(command)
   run('math')
   await flushPromises()
-  popover()!.value = 'a+b'
-  popover()!.dispatchEvent(new Event('input'))
+  field()!.value = 'a+b'
+  field()!.dispatchEvent(new Event('input'))
+  field()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true }))
   await flushPromises()
-  expect(document.querySelector('.math-popover__preview .katex')).not.toBeNull()
-  popover()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-  await flushPromises()
+  expect(field()).toBeNull()
   expect(wrapper.emitted('change')).toBeUndefined()
 
   run('math')
@@ -62,14 +65,15 @@ test('插入行内公式与公式块：先填写 LaTeX（有预览），Enter �
   run('math-block')
   await flushPromises()
   await type('\\sum_i x_i')
-  expect(lastChange(wrapper)).toBe('正文$a+b$\n\n$$\\sum_i x_i$$')
+  // 可视编辑器按自己的风格写出编辑过的公式。
+  expect(lastChange(wrapper)).toBe('正文$a+b$\n\n$$\\sum_{i}x_{i}$$')
 })
 
 test('双击或选中后按 Enter 编辑；清空即删除；可以撤销', async () => {
   const { wrapper, view } = mountEditor('设 $x$ 成立\n')
   view.dom.querySelector('.math-inline')!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
   await flushPromises()
-  expect(popover()!.value).toBe('x')
+  expect(field()!.value).toBe('x')
   await type('y')
   expect(lastChange(wrapper)).toBe('设 $y$ 成立\n')
   undo(view.state, view.dispatch)

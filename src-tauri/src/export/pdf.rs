@@ -1977,6 +1977,26 @@ mod tests {
         assert_eq!(report.invalid_formulas, Vec::<String>::new());
     }
 
+    /// 可视公式编辑器（MathLive）写出的写法：浮层中的常用结构（含未填写的空位）、符号，以及它的输出风格。
+    #[test]
+    fn visual_formula_editor_output_typesets_without_falling_back() {
+        let formulas = [
+            r"\frac{}{}", r"{}^{}", r"{}_{}", r"^{}", r"_{}", r"\sqrt{}", r"\left(\right)",
+            r"\sum_{}^{} + \int_{}^{} + \lim_{\to}",
+            r"\begin{pmatrix}&\\&\end{pmatrix} + \begin{cases}\\\end{cases}",
+            r"\frac{a}{b}+x^{2}+x_{i}+\sqrt[3]{x}+\left(a+b\right)+\sum_{i=1}^{n}+\int_{0}^{1}+\lim_{x\to0}",
+            r"\alpha\beta\gamma\delta\epsilon\theta\lambda\mu\pi\rho\sigma\varphi\omega\Gamma\Delta\Theta\Lambda\Sigma\Phi\Omega",
+            r"\pm\times\div\cdot\le\ge\ne\approx\equiv\propto\infty\partial\nabla\to\Rightarrow\Leftrightarrow",
+            r"\in\notin\subset\subseteq\cup\cap\forall\exists\angle 90\degree",
+            r"\mathrm{d}x+\mathrm{e}^{\mathrm{i}}+\operatorname{\mathrm{sin}}x+\sin x+\mathbb{R}",
+        ];
+        let markdown = formulas.iter().map(|tex| format!("$${tex}$$")).collect::<Vec<_>>().join("\n\n");
+        let document = build(&request("", &[("a", vec![1], "公式", &markdown)]));
+        let dir = project();
+        let (_, report) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        assert_eq!(report.invalid_formulas, Vec::<String>::new());
+    }
+
     fn three_chapters(title: &str) -> Document {
         build(&request(
             title,
