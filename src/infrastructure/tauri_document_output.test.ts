@@ -12,6 +12,7 @@ const request: RenderRequest = {
   author: '',
   chapters: [{ id: 'a', number: [1], title: '绪论', markdown: '正文' }],
   references: [],
+  structures: [],
 }
 
 const layout = resolvePdfLayout({ toc: false })
@@ -21,11 +22,16 @@ beforeEach(() => {
 })
 
 test('按格式调用对应命令，并解析导出报告', async () => {
-  invokeMock.mockResolvedValue({ missingImages: ['../assets/a.png', 3], brokenReferences: ['原目标'], invalidFormulas: ['\\bad'] })
+  invokeMock.mockResolvedValue({
+    missingImages: ['../assets/a.png', 3],
+    brokenReferences: ['原目标'],
+    invalidFormulas: ['\\bad'],
+    invalidStructures: ['C1CC('],
+  })
   const output = createTauriDocumentOutput()
   expect(await output.exportDocument('/p', request, 'docx', '/out/论文.docx', layout)).toEqual({
     ok: true,
-    value: { missingImages: ['../assets/a.png'], brokenReferences: ['原目标'], invalidFormulas: ['\\bad'] },
+    value: { missingImages: ['../assets/a.png'], brokenReferences: ['原目标'], invalidFormulas: ['\\bad'], invalidStructures: ['C1CC('] },
   })
   expect(invokeMock).toHaveBeenCalledWith('export_docx', { path: '/p', document: request, target: '/out/论文.docx' })
 

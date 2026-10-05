@@ -14,13 +14,19 @@ export function createTauriDocumentOutput(): DocumentOutput {
         format === 'pdf' ? invoke<unknown>('export_pdf', { ...args, layout: pdfLayout }) : invoke<unknown>(`export_${format}`, args),
       )
       if (!result.ok) return result
-      const raw = result.value as { missingImages?: unknown; brokenReferences?: unknown; invalidFormulas?: unknown } | null
+      const raw = result.value as {
+        missingImages?: unknown
+        brokenReferences?: unknown
+        invalidFormulas?: unknown
+        invalidStructures?: unknown
+      } | null
       return {
         ok: true,
         value: {
           missingImages: strings(raw?.missingImages),
           brokenReferences: strings(raw?.brokenReferences),
           invalidFormulas: strings(raw?.invalidFormulas),
+          invalidStructures: strings(raw?.invalidStructures),
         },
       }
     },

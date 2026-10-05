@@ -968,7 +968,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 6. ~~富文本粘贴识别 Word / WPS 的列表段落（目前是带 · 的普通段落）。~~（完成，见下方“P2-6 粘贴 Word / WPS 列表”）
 7. ~~大量章节虚拟滚动（ui-spec P1；1050 章节实测暂不需要；拖入折叠节点自动展开、拖拽自动滚动已完成）。~~（完成，见下方“P2-7 章节树虚拟滚动”）
 8. ~~化学式与化学方程式。~~（完成，见下方“P2-8 化学式”）
-9. 化学结构式：SMILES + smiles-drawer + 常见分子库，` ```smiles ` 代码块，输出为图片（方向已确认，见 decisions 第 22 节）。
+9. ~~化学结构式：SMILES + smiles-drawer + 常见分子库，` ```smiles ` 代码块，输出为图片。~~（完成，见下方“P2-9 化学结构式”）
 
 #### P2-1 专注模式（完成，2026-10-03）
 
@@ -1030,6 +1030,19 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   共享 fixture `math`、浮层组件测试（内容编辑、原文保留、常用写法插入）、编辑器集成测试（显示、插入、双击编辑、混合公式）；
   Story `MathPopover/NewChem`、`EditingChem`、`ChapterEditor/Chemistry`，Storybook 中目视检查了浮层与正文中的显示。
   未检查深色外观、Tauri WebView 中的输入法，以及 Word / WPS 中化学式图片的实际效果。
+
+#### P2-9 化学结构式（完成，2026-10-05）
+
+- 规则见 decisions 第 22 节。编辑器：schema `structure`；`markdown.ts`（`writer_structure` 规则、逐行写出的围栏、`structureSources`）；
+  `structure_view.ts`（smiles-drawer 绘制、节点视图、全文阅读、导出 PNG 与 `documentStructureImages`）；`structure_library.ts`；
+  `StructurePopover.vue`；命令 `structure`、`insertStructure` / `setStructure` / `selectedStructure`，右键“编辑结构式…”。
+- 导出：`document_output.ts` 的 `RenderStructure` / `StructureDrawer`（Markdown 导出不画图，样张只画一次）；报告 `invalidStructures` 与导出提示。
+  Rust：`Block::Structure`、`RenderRequest::structures`（base64 PNG 解码，`base64` crate）；PDF / Word / HTML / EPUB 中的居中图片与原文回退。
+- 验证：Markdown 解析 / 写出（引用与列表中）、共享 fixture `structures`、分子库（全部可画出、查找排序）、浮层组件测试、编辑器集成测试
+  （显示、插入、双击 / Enter 编辑、清空删除、撤销、全文阅读）、应用层请求组装、各导出器的嵌入与回退；
+  Story `StructurePopover/*`、`ChapterEditor/Structures`，Storybook（Chrome）中目视检查了浮层、正文显示与导出 PNG，
+  并把浏览器画出的 PNG 交给 PDF 导出检查了页面效果。未检查深色外观、Tauri WebView（WKWebView / WebView2）中的栅格化，
+  以及 Word / WPS 中的实际效果。
 
 ### 发布准备（非功能）
 

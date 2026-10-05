@@ -60,7 +60,7 @@ fn blocks(blocks_: &[Block], visit: &mut dyn FnMut(&str)) {
                 .iter()
                 .chain(rows.iter().flatten())
                 .for_each(|cell| inlines(cell, visit)),
-            Block::Code { .. } | Block::Rule => {}
+            Block::Code { .. } | Block::Structure { .. } | Block::Rule => {}
         }
     }
 }

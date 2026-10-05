@@ -14,8 +14,11 @@ import {
   insertImage,
   insertMath,
   insertMathBlock,
+  insertStructure,
   selectedMath,
+  selectedStructure,
   setMath,
+  setStructure,
   setTableCaption,
   setElementId,
   selectedFootnote,
@@ -33,6 +36,8 @@ import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import TextPopover from './TextPopover.vue'
 import MathPopover from './MathPopover.vue'
+import StructurePopover from './StructurePopover.vue'
+import { structureNodeView } from './structure_view.ts'
 import { chemContent, chemTex } from './chem.ts'
 import { mathNodeView } from './math_view.ts'
 import { chapterLabels, NO_ELEMENT_START, type ElementStart } from './element_numbering.ts'
@@ -381,6 +386,7 @@ onMounted(() => {
       chapter_ref: chapterRefs.nodeView,
       math: mathNodeView,
       math_block: mathNodeView,
+      structure: structureNodeView,
     },
     attributes: {
       class: 'chapter-editor__content document-body',
@@ -447,6 +453,10 @@ function runCommand(command: EditorCommand): void {
     startNewMath(command === 'math-block' || command === 'chem-block', command === 'chem' || command === 'chem-block')
     return
   }
+  if (command === 'structure') {
+    startNewStructure()
+    return
+  }
   editorCommands[command](view.state, view.dispatch)
   focus()
 }
@@ -474,7 +484,7 @@ async function openContextMenu(event: MouseEvent): Promise<void> {
     const { doc, selection } = view.state
     const inside = hit.inside >= 0 ? doc.nodeAt(hit.inside) : null
     const onFigure = (event.target as Element).closest?.('.editor-figure') && inside?.type === nodes.figure
-    const ref = chapterRefPos(view, event.target) ?? footnotePos(event.target) ?? mathPos(event.target)
+    const ref = chapterRefPos(view, event.target) ?? footnotePos(event.target) ?? mathPos(event.target) ?? structurePos(event.target)
     if (ref !== null) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, ref)))
     else if (onFigure) view.dispatch(view.state.tr.setSelection(NodeSelection.create(doc, hit.inside)))
     else if (!inSelection(selection, hit.pos) || selection instanceof NodeSelection) {
@@ -493,6 +503,13 @@ function onFootnoteKeydown(event: KeyboardEvent): void {
     event.preventDefault()
     event.stopPropagation()
     editMath(math.pos)
+    return
+  }
+  const structure = selectedStructure(view.state)
+  if (structure) {
+    event.preventDefault()
+    event.stopPropagation()
+    editStructure(structure.pos)
     return
   }
   const note = selectedFootnote(view.state)
@@ -546,6 +563,7 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
     selectedFootnote(view.state) !== null,
     tableCaptionState(),
     selectedMath(view.state) !== null,
+    selectedStructure(view.state) !== null,
   )
   const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
@@ -562,6 +580,10 @@ function runMenuItem(id: string): void {
   else if (id === 'math:edit' && view) {
     const math = selectedMath(view.state)
     if (math) editMath(math.pos)
+  }
+  else if (id === 'structure:edit' && view) {
+    const structure = selectedStructure(view.state)
+    if (structure) editStructure(structure.pos)
   }
   else if (id === 'table:caption') {
     const pos = tableAtSelection()
@@ -825,6 +847,63 @@ function cancelMath(): void {
   focus()
 }
 
+/**
+ * 化学结构式的编辑（docs/decisions.md 第 22 节）：与公式块相同，插入时先在浮层中选择或填写，完成后才插入；
+ * 已有结构式双击、选中后按 Enter 或右键“编辑结构式…”时编辑；清空即删除。修改是一个可撤销的事务。
+ */
+const structureEditor = shallowRef<{
+  readonly chapterId: ChapterId
+  /** 已有结构式的位置；新结构式为 null。 */
+  readonly pos: number | null
+  readonly smiles: string
+  readonly anchor: { readonly x: number; readonly y: number }
+} | null>(null)
+
+function startNewStructure(): void {
+  if (!view || !insertStructure('C')(view.state)) return
+  const caret = view.coordsAtPos(view.state.selection.to)
+  structureEditor.value = { chapterId: currentId, pos: null, smiles: '', anchor: { x: caret.left, y: caret.bottom } }
+}
+
+function editStructure(pos: number): void {
+  if (!view) return
+  const node = view.state.doc.nodeAt(pos)
+  if (node?.type !== nodes.structure) return
+  const dom = view.nodeDOM(pos)
+  const rect = dom instanceof Element ? dom.getBoundingClientRect() : view.coordsAtPos(pos)
+  structureEditor.value = { chapterId: currentId, pos, smiles: node.attrs.smiles as string, anchor: { x: rect.left, y: rect.bottom } }
+}
+
+function commitStructure(smiles: string): void {
+  const editing = structureEditor.value
+  structureEditor.value = null
+  if (!view || !editing || editing.chapterId !== currentId) return
+  const value = smiles.trim()
+  if (editing.pos === null) {
+    if (value !== '') insertStructure(value)(view.state, view.dispatch)
+  } else if (value === '') {
+    const node = view.state.doc.nodeAt(editing.pos)
+    if (node) view.dispatch(view.state.tr.delete(editing.pos, editing.pos + node.nodeSize))
+  } else {
+    setStructure(editing.pos, smiles)(view.state, view.dispatch)
+  }
+  focus()
+}
+
+function cancelStructure(): void {
+  structureEditor.value = null
+  focus()
+}
+
+/** 点在结构式上时它在文档中的位置。 */
+function structurePos(target: EventTarget | null): number | null {
+  if (!view || !(target instanceof Element)) return null
+  const dom = target.closest('.structure-block')
+  if (!dom || !view.dom.contains(dom)) return null
+  const pos = view.posAtDOM(dom, 0)
+  return view.state.doc.nodeAt(pos)?.type === nodes.structure ? pos : null
+}
+
 /** 点在公式上时它在文档中的位置。 */
 function mathPos(target: EventTarget | null): number | null {
   if (!view || !(target instanceof Element)) return null
@@ -864,6 +943,12 @@ function onFootnoteClick(event: MouseEvent): void {
   if (math !== null) {
     event.preventDefault()
     editMath(math)
+    return
+  }
+  const structure = structurePos(event.target)
+  if (structure !== null) {
+    event.preventDefault()
+    editStructure(structure)
     return
   }
   const pos = footnotePos(event.target)
@@ -1096,6 +1181,13 @@ defineExpose({
       :chem="mathEditor.chem"
       @commit="commitMath"
       @cancel="cancelMath"
+    />
+    <StructurePopover
+      v-if="structureEditor"
+      :anchor="structureEditor.anchor"
+      :smiles="structureEditor.smiles"
+      @commit="commitStructure"
+      @cancel="cancelStructure"
     />
     <TextPopover
       v-if="footnoteEditor"
@@ -1419,6 +1511,17 @@ defineExpose({
 
 .chapter-editor__body :deep(.find-match.is-current) {
   background: var(--color-doc-find-current);
+}
+
+/* 选中的结构式与图片相同，只在图形外画框。 */
+.chapter-editor__body :deep(.structure-block.ProseMirror-selectednode) {
+  outline: none;
+}
+
+.chapter-editor__body :deep(.structure-block.ProseMirror-selectednode > svg),
+.chapter-editor__body :deep(.structure-block.ProseMirror-selectednode.is-invalid) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 /* 选中的图片只在图片本身外画一个框（不用 ProseMirror 默认画在外层容器上的框）。 */

@@ -326,6 +326,25 @@
   font-size: 0.9em;
 }
 
+/* 化学结构式（structure_view.ts）：居中，随正文颜色，过宽时横向滚动；无法画出时与公式相同以红色原文显示。 */
+.document-body .structure-block {
+  margin: 0.8em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+.document-body .structure-block svg {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.document-body .structure-block.is-invalid {
+  color: var(--color-danger-text);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
 /* 文献引用：上标的“[编号]”，不加下划线。 */
 .document-body .chapter-ref.is-citation {
   font-size: 0.72em;

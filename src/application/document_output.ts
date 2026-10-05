@@ -28,7 +28,23 @@ export interface RenderRequest {
   readonly chapters: readonly RenderChapter[]
   /** 参考文献条目：标识与按著录格式生成好的文字（docs/decisions.md 第 13 节）。 */
   readonly references: ReadonlyArray<{ readonly id: string; readonly text: string }>
+  /** 化学结构式的图片（docs/decisions.md 第 22 节）：按 SMILES，没有图片的结构式按原文输出。 */
+  readonly structures: readonly RenderStructure[]
 }
+
+/** 前端画好的结构式图片：PNG（base64）与显示尺寸（磅）。 */
+export interface RenderStructure {
+  readonly smiles: string
+  readonly png: string
+  readonly width: number
+  readonly height: number
+}
+
+/**
+ * 画出正文中全部化学结构式的图片（由界面层提供：按编辑器的规则找出结构式，在浏览器中画图）。
+ * 参数是各章节的正文 Markdown；画不出的结构式不在结果中。
+ */
+export type StructureDrawer = (markdowns: readonly string[]) => Promise<readonly RenderStructure[]>
 
 export interface RenderChapter {
   readonly id: ChapterId
@@ -58,6 +74,8 @@ export interface ExportReport {
   readonly brokenReferences: readonly string[]
   /** 无法排版的公式（LaTeX 原文），已按原文输出；旧的报告中没有这一项。 */
   readonly invalidFormulas?: readonly string[]
+  /** 无法画出的化学结构式（SMILES 原文），已按原文输出；旧的报告中没有这一项。 */
+  readonly invalidStructures?: readonly string[]
 }
 
 export interface DocumentOutput {
@@ -78,17 +96,26 @@ export interface DocumentOutput {
   previewPdf(projectPath: string, request: RenderRequest, pdfLayout: PdfLayout): Promise<OutputResult<readonly string[]>>
 }
 
-/** 导出当前文档；内容与 PDF 排版配置取自同一时刻。 */
-export function exportDocument(
+/** 导出当前文档；内容与 PDF 排版配置取自同一时刻。合并的 Markdown 保留结构式的原文，不画图片。 */
+export async function exportDocument(
   output: DocumentOutput,
   projectPath: string,
   document: WriterDocument,
   pdfLayout: PdfLayoutSettings,
   format: ExportFormat,
   targetPath: string,
+  drawStructures: StructureDrawer,
 ): Promise<OutputResult<ExportReport>> {
-  const request = buildRenderRequest(document)
-  return output.exportDocument(projectPath, request, format, targetPath, resolvePdfLayout(pdfLayout))
+  const layout = resolvePdfLayout(pdfLayout)
+  const content = buildRenderRequest(document)
+  const request = format === 'markdown' ? content : await withStructures(content, drawStructures)
+  return output.exportDocument(projectPath, request, format, targetPath, layout)
+}
+
+/** 请求加上其中结构式的图片。 */
+async function withStructures(request: RenderRequest, drawStructures: StructureDrawer): Promise<RenderRequest> {
+  const structures = await drawStructures(request.chapters.map((chapter) => chapter.markdown))
+  return { ...request, structures }
 }
 
 /** PDF 样张最多取的一级章节数。 */
@@ -104,9 +131,11 @@ export function createPdfPreview(
   output: DocumentOutput,
   projectPath: string,
   document: WriterDocument,
+  drawStructures: StructureDrawer,
 ): (settings: PdfLayoutSettings) => Promise<OutputResult<readonly string[]>> {
-  const request = buildPdfSample(buildRenderRequest(document))
-  return (settings) => output.previewPdf(projectPath, request, resolvePdfLayout(settings))
+  // 结构式的图片只画一次，之后的每次排版复用。
+  const request = withStructures(buildPdfSample(buildRenderRequest(document)), drawStructures)
+  return async (settings) => output.previewPdf(projectPath, await request, resolvePdfLayout(settings))
 }
 
 export function buildPdfSample(request: RenderRequest): RenderRequest {
@@ -145,5 +174,5 @@ export function buildRenderRequest(document: WriterDocument): RenderRequest {
   }
   visit(document.tree)
   const references = document.references.map((entry) => ({ id: entry.id, text: formatReference(entry) }))
-  return { title: document.title, subtitle: document.subtitle, author: document.author, chapters, references }
+  return { title: document.title, subtitle: document.subtitle, author: document.author, chapters, references, structures: [] }
 }

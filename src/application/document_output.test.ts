@@ -1,7 +1,14 @@
 import { expect, test } from 'vitest'
 import { createDocument, setDocumentInfo, setReferences } from '../domain/document/document.ts'
 import { emptyReference } from '../domain/bibliography/bibliography.ts'
-import { buildPdfSample, buildRenderRequest, createPdfPreview, type RenderRequest } from './document_output.ts'
+import {
+  buildPdfSample,
+  buildRenderRequest,
+  createPdfPreview,
+  exportDocument,
+  type RenderRequest,
+  type StructureDrawer,
+} from './document_output.ts'
 import { MemoryDocumentOutput } from '../testing/memory_document_output.ts'
 
 test('buildRenderRequest：按阅读顺序展开，编号来自结构，正文原样', () => {
@@ -29,6 +36,7 @@ test('buildRenderRequest：按阅读顺序展开，编号来自结构，正文�
       { id: 'b', number: [2], title: '方法', markdown: '' },
     ],
     references: [],
+    structures: [],
   })
 })
 
@@ -45,7 +53,7 @@ test('buildRenderRequest：只携带内容与结构，不携带任何排版参�
   const result = createDocument('论文', [{ id: 'a', title: '绪论', children: [] }], new Map([['a', '![图](../assets/图.png)']]))
   if (!result.ok) throw new Error('fixture')
   const request = buildRenderRequest(result.document)
-  expect(Object.keys(request).sort()).toEqual(['author', 'chapters', 'references', 'subtitle', 'title'])
+  expect(Object.keys(request).sort()).toEqual(['author', 'chapters', 'references', 'structures', 'subtitle', 'title'])
   expect(Object.keys(request.chapters[0]).sort()).toEqual(['id', 'markdown', 'number', 'title'])
   expect(request.chapters[0].markdown).toBe('![图](../assets/图.png)')
 })
@@ -53,7 +61,7 @@ test('buildRenderRequest：只携带内容与结构，不携带任何排版参�
 test('buildRenderRequest：空文档', () => {
   const result = createDocument('空', [], new Map())
   if (!result.ok) throw new Error('fixture')
-  expect(buildRenderRequest(result.document)).toEqual({ title: '空', subtitle: '', author: '', chapters: [], references: [] })
+  expect(buildRenderRequest(result.document)).toEqual({ title: '空', subtitle: '', author: '', chapters: [], references: [], structures: [] })
 })
 
 const sampleRequest = (chapters: [string, number[], string][]): RenderRequest => ({
@@ -62,7 +70,18 @@ const sampleRequest = (chapters: [string, number[], string][]): RenderRequest =>
   author: '',
   chapters: chapters.map(([id, number, markdown]) => ({ id, number, title: id, markdown })),
   references: [],
+  structures: [],
 })
+
+/** 测试用的结构式画法：记录收到的正文，每个正文画出一张图。 */
+function recordingDrawer(): { draw: StructureDrawer; calls: Array<readonly string[]> } {
+  const calls: Array<readonly string[]> = []
+  const draw: StructureDrawer = async (markdowns) => {
+    calls.push(markdowns)
+    return markdowns.filter((markdown) => markdown !== '').map((markdown) => ({ smiles: markdown, png: 'AA==', width: 10, height: 5 }))
+  }
+  return { draw, calls }
+}
 
 test('buildPdfSample：取前两个一级章节及其子章节', () => {
   const sample = buildPdfSample(
@@ -98,10 +117,28 @@ test('createPdfPreview：内容只捕获一次，每次按完整的排版配置�
   const result = createDocument('论文', [{ id: 'a', title: '绪论', children: [] }], new Map([['a', '正文']]))
   if (!result.ok) throw new Error('fixture')
   const output = new MemoryDocumentOutput()
-  const preview = createPdfPreview(output, '/p', result.document)
+  const drawer = recordingDrawer()
+  const preview = createPdfPreview(output, '/p', result.document, drawer.draw)
   expect(await preview({ paper: 'b5' })).toEqual({ ok: true, value: ['<svg data-paper="b5"></svg>'] })
   await preview({})
   expect(output.previews[0].request).toBe(output.previews[1].request)
+  // 结构式的图片只画一次。
+  expect(drawer.calls).toEqual([['正文']])
+  expect(output.previews[0].request.structures).toEqual([{ smiles: '正文', png: 'AA==', width: 10, height: 5 }])
   expect(output.previews[0].request.chapters).toEqual([{ id: 'a', number: [1], title: '绪论', markdown: '正文' }])
   expect(output.previews[1].pdfLayout.paper).toBe('a4')
+})
+
+test('exportDocument：请求中带上画好的结构式图片；合并的 Markdown 保留原文，不画图片', async () => {
+  const result = createDocument('论文', [{ id: 'a', title: '绪论', children: [] }], new Map([['a', '```smiles\nCCO\n```']]))
+  if (!result.ok) throw new Error('fixture')
+  const output = new MemoryDocumentOutput()
+  const drawer = recordingDrawer()
+  await exportDocument(output, '/p', result.document, {}, 'pdf', '/out.pdf', drawer.draw)
+  expect(drawer.calls).toEqual([['```smiles\nCCO\n```']])
+  expect(output.exports[0].request.structures).toHaveLength(1)
+
+  await exportDocument(output, '/p', result.document, {}, 'markdown', '/out.md', drawer.draw)
+  expect(drawer.calls).toHaveLength(1)
+  expect(output.exports[1].request.structures).toEqual([])
 })

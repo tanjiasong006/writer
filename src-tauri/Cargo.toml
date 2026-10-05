@@ -38,6 +38,8 @@ mitex = "0.2"
 mitex-spec = "0.2"
 mitex-spec-gen = "0.2"
 fxhash = "0.2"
+# 化学结构式的图片随导出请求以 base64 传入（render::RenderStructure）。
+base64 = "0.22"
 typst-render = "0.15"
 
 # 开发版也优化图片解码与排版的热点依赖，避免图文 PDF 导出被无优化构建拖慢。

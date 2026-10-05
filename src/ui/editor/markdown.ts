@@ -268,7 +268,7 @@ tokenizer.core.ruler.after('footnote_tail', 'writer_footnote', (state) => {
       } else if (token.type === 'inline') {
         parts.push(inlinePlainText(token.children ?? []))
         if (token.map) range = [range?.[0] ?? token.map[0], token.map[1]]
-      } else if (token.type === 'fence' || token.type === 'code_block') {
+      } else if (token.type === 'fence' || token.type === 'code_block' || token.type === 'structure') {
         parts.push(token.content.trim())
       } else if (token.type === 'footnote_close') {
         definitions.set(id, { text: parts.join(' ').replace(/\s+/g, ' ').trim(), source: definitionSource(lines, range, label) })
@@ -416,6 +416,39 @@ tokenizer.core.ruler.push('writer_math_block', (state) => {
   }
 })
 
+/** 化学结构式的语言（与 Rust 的 Block::Structure 相同）：围栏代码块信息的第一个词，不区分大小写。 */
+export function isStructureFence(info: string): boolean {
+  return info.trim().split(/\s+/)[0].toLowerCase() === 'smiles'
+}
+
+/** 语言为 smiles 的围栏代码块是化学结构式，内容去掉首尾空白。 */
+tokenizer.core.ruler.push('writer_structure', (state) => {
+  for (const token of state.tokens) {
+    if (token.type !== 'fence' || !isStructureFence(token.info)) continue
+    token.type = 'structure'
+    token.content = token.content.trim()
+  }
+})
+
+/** 结构式的围栏：内容中有反引号时用更长的围栏。 */
+function structureFence(smiles: string): string {
+  const longest = Math.max(2, ...[...smiles.matchAll(/`+/g)].map((match) => match[0].length))
+  return '`'.repeat(longest + 1)
+}
+
+/** 正文中全部化学结构式的 SMILES（去重，按出现顺序）：导出前画出它们的图片。 */
+export function structureSources(markdown: string): readonly string[] {
+  const sources = new Set<string>()
+  for (const token of flattenTokens(tokenizer.parse(markdown, {}))) {
+    if (token.type === 'structure' && token.content !== '') sources.add(token.content)
+  }
+  return [...sources]
+}
+
+function flattenTokens(tokens: readonly Token[]): Token[] {
+  return tokens.flatMap((token) => [token, ...flattenTokens(token.children ?? [])])
+}
+
 tokenizer.core.ruler.push('writer_task_list', (state) => {
   const tokens = state.tokens
   for (let i = 0; i + 2 < tokens.length; i++) {
@@ -523,6 +556,7 @@ const parser = new MarkdownParser(schema, tokenizer, {
   },
   code_block: { block: 'code_block', noCloseToken: true },
   fence: { block: 'code_block', getAttrs: (token) => ({ params: token.info.trim() }), noCloseToken: true },
+  structure: { node: 'structure', getAttrs: (token) => ({ smiles: token.content }) },
   hr: { node: 'horizontal_rule' },
   table: {
     block: 'table',
@@ -723,6 +757,18 @@ const serializer = new MarkdownSerializer(
     },
     math(state, node) {
       state.write(mathMarkdown(node.attrs.tex as string, node.attrs.display as boolean))
+    },
+    // 化学结构式：语言为 smiles 的围栏代码块。
+    // 逐行写出，在引用与列表中每行都带上前缀。
+    structure(state, node) {
+      const smiles = (node.attrs.smiles as string).trim()
+      const fence = structureFence(smiles)
+      state.write(`${fence}smiles`)
+      state.ensureNewLine()
+      state.text(smiles, false)
+      state.ensureNewLine()
+      state.write(fence)
+      state.closeBlock(node)
     },
     // 单独一段的行间公式；多行的写成 $$ 各占一行。
     math_block(state, node) {

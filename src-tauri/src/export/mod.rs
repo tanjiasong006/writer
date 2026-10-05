@@ -49,6 +49,8 @@ pub struct ExportReport {
     pub broken_references: Vec<String>,
     /// 无法排版的公式（LaTeX 原文），已按原文输出。
     pub invalid_formulas: Vec<String>,
+    /// 无法画出的化学结构式（SMILES 原文，docs/decisions.md 第 22 节），已按原文输出。
+    pub invalid_structures: Vec<String>,
 }
 
 /// 文件系统错误 → 导出错误。

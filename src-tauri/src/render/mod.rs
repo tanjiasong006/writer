@@ -30,6 +30,27 @@ pub struct RenderRequest {
     /// 参考文献条目（docs/decisions.md 第 13 节）：标识与按著录格式生成好的文字。
     #[serde(default)]
     pub references: Vec<RenderReference>,
+    /// 化学结构式的图片（docs/decisions.md 第 22 节）：前端按 SMILES 画好的 PNG。没有图片的结构式按原文输出。
+    #[serde(default)]
+    pub structures: Vec<RenderStructure>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct RenderStructure {
+    pub smiles: String,
+    /// PNG 的 base64。
+    pub png: String,
+    /// 显示尺寸（磅）。
+    pub width: f64,
+    pub height: f64,
+}
+
+/// 结构式的图片：PNG 与显示尺寸（磅）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructureImage {
+    pub png: Vec<u8>,
+    pub width_pt: f64,
+    pub height_pt: f64,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -57,7 +78,10 @@ pub struct Document {
     pub sections: Vec<Section>,
     /// 参考文献条目（全部，含未被引用的）；输出时只列出被引用的，按引用顺序编号。
     pub references: Vec<RenderReference>,
+    /// 结构式的图片，按 SMILES 查找；无法解码或尺寸异常的不在其中。
+    pub structures: std::collections::HashMap<String, StructureImage>,
 }
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Section {
@@ -76,6 +100,18 @@ pub fn build(request: &RenderRequest) -> Document {
         subtitle: request.subtitle.clone(),
         author: request.author.clone(),
         references: request.references.clone(),
+        structures: request
+            .structures
+            .iter()
+            .filter_map(|structure| {
+                use base64::Engine;
+                let png = base64::engine::general_purpose::STANDARD.decode(structure.png.as_bytes()).ok()?;
+                let valid = |size: f64| size.is_finite() && size > 0.0 && size < 10_000.0;
+                (png.starts_with(b"\x89PNG") && valid(structure.width) && valid(structure.height)).then(|| {
+                    (structure.smiles.trim().to_owned(), StructureImage { png, width_pt: structure.width, height_pt: structure.height })
+                })
+            })
+            .collect(),
         sections: request
             .chapters
             .iter()
@@ -145,7 +181,7 @@ fn percent_decode(text: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
@@ -176,10 +212,38 @@ mod tests {
         assert!(document.sections[1].blocks.is_empty());
     }
 
+    /// 测试用的结构式图片：一张 40×20 像素的 PNG，显示为 30×15 磅。
+    pub(crate) fn test_structure(smiles: &str) -> RenderStructure {
+        use base64::Engine;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbImage::from_pixel(40, 20, image::Rgb([0, 0, 0])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        RenderStructure {
+            smiles: smiles.into(),
+            png: base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
+            width: 30.0,
+            height: 15.0,
+        }
+    }
+
+    #[test]
+    fn structure_images_are_decoded_and_invalid_ones_skipped() {
+        let mut broken = test_structure("CC");
+        broken.png = "不是 base64".into();
+        let mut no_size = test_structure("CCC");
+        no_size.width = 0.0;
+        let document = build(&RenderRequest {
+            structures: vec![test_structure(" CCO "), broken, no_size],
+            ..Default::default()
+        });
+        assert_eq!(document.structures.keys().collect::<Vec<_>>(), vec!["CCO"]);
+        assert_eq!(document.structures["CCO"].width_pt, 30.0);
+        assert!(document.structures["CCO"].png.starts_with(b"\x89PNG"));
+    }
+
     /// 与前端 application/document_output.ts 的 RenderRequest 形状一致。
     #[test]
     fn request_deserializes_from_frontend_json() {
-        let json = r#"{"title":"论文","chapters":[{"id":"a","number":[1,2],"title":"方法","markdown":"正文"}]}"#;
+        let json = r#"{"title":"论文","chapters":[{"id":"a","number":[1,2],"title":"方法","markdown":"正文"}],"structures":[{"smiles":"C","png":"","width":1,"height":2}]}"#;
         let request: RenderRequest = serde_json::from_str(json).unwrap();
         assert_eq!(request.chapters[0].number, vec![1, 2]);
         let document = build(&request);

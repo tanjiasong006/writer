@@ -21,7 +21,8 @@
 | `selection.ts` | 自绘选区底色：WebKit 原生底色从段落中间开始选择时第一行偏高，改为每行一整行行高、行与行首尾相接。 |
 | `figure_editing.ts` | 独立成段的图片（figure 节点）的编辑：Enter、Backspace / Delete，以及把只剩一张图片的段落转成 figure。 |
 | `element_numbering.ts` | 图表编号（与 Rust `render::elements` 同一规则）：章节中有编号的图表、全文索引、本章标注。 |
-| `math_view.ts` | 公式的显示（KaTeX）：节点视图与全文阅读的静态 DOM；编辑浮层是 `MathPopover.vue`（MathLive 可视编辑，可切换到 LaTeX 源码）。 |
+| `math_view.ts` | 公式的显示（KaTeX）：节点视图与全文阅读的静态 DOM；编辑浮层是 `MathPopover.vue`（MathLive 可视编辑，可切换到 LaTeX 源码；整个公式是 `\ce{…}` 时是化学式浮层）。 |
+| `structure_view.ts` | 化学结构式的显示（smiles-drawer）：节点视图、全文阅读的静态 DOM 与导出用的 PNG；编辑浮层是 `StructurePopover.vue`（分子库 `structure_library.ts`）。 |
 | `footnote_view.ts` | 脚注的显示：上标编号（decoration）与章节末尾的脚注列表；编辑浮层是 `FootnotePopover.vue`。 |
 | `find.ts` | 查找与替换：文字块内（可跨格式边界）不区分拉丁大小写的匹配、上一个 / 下一个、替换事务与高亮 decoration。查找栏与跨章节由工作区 `use_find.ts` 组织。 |
 | `chapter_documents.ts` | 应用状态 ⇄ 编辑器状态的适配：每章节一个 EditorState，决定何时产生新正文。 |

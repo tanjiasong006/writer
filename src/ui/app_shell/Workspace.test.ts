@@ -538,7 +538,7 @@ test('没有文档样式与图片布局入口；导出请求只携带内容与�
 
   await exportPdf(wrapper)
   const { request } = services.output.exports[0]
-  expect(Object.keys(request).sort()).toEqual(['author', 'chapters', 'references', 'subtitle', 'title'])
+  expect(Object.keys(request).sort()).toEqual(['author', 'chapters', 'references', 'structures', 'subtitle', 'title'])
   expect(request.chapters[0].markdown).toBe('![装置](../assets/装置.png)\n')
 })
 

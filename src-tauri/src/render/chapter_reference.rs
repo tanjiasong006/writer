@@ -212,7 +212,7 @@ fn broken_in_blocks(blocks: &[Block], targets: &Targets, out: &mut Vec<String>) 
                     broken_in_inlines(cell, targets, out);
                 }
             }
-            Block::Code { .. } | Block::Rule => {}
+            Block::Code { .. } | Block::Structure { .. } | Block::Rule => {}
         }
     }
 }

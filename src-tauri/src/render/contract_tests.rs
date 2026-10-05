@@ -134,6 +134,7 @@ fn block(block: &Block) -> Value {
         Block::Code { language, text } => {
             json!({ "type": "code", "language": language, "text": text })
         }
+        Block::Structure { smiles } => json!({ "type": "structure", "smiles": smiles }),
         Block::Rule => json!({ "type": "rule" }),
         Block::List { ordered, start, items } => json!({
             "type": "list",

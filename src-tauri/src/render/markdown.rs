@@ -26,6 +26,11 @@ pub enum Block {
         language: Option<String>,
         text: String,
     },
+    /// 化学结构式（docs/decisions.md 第 22 节）：语言为 `smiles` 的围栏代码块，smiles 是去掉首尾空白的内容。
+    /// 图片由前端画好随请求传入（`render::Document::structures`）。
+    Structure {
+        smiles: String,
+    },
     Table {
         alignments: Vec<Align>,
         header: Vec<Vec<Inline>>,
@@ -204,7 +209,7 @@ fn resolve_block(block: &mut Block, definitions: &HashMap<String, Vec<Inline>>) 
             .iter_mut()
             .chain(rows.iter_mut().flatten())
             .for_each(|cell| resolve_inlines(cell, definitions)),
-        Block::Code { .. } | Block::Rule => {}
+        Block::Code { .. } | Block::Structure { .. } | Block::Rule => {}
     }
 }
 
@@ -256,6 +261,7 @@ fn block_text(block: &Block) -> String {
         Block::List { items, .. } => items.iter().flatten().map(block_text).collect::<Vec<_>>().join(" "),
         Block::Quote(blocks) => blocks.iter().map(block_text).collect::<Vec<_>>().join(" "),
         Block::Code { text, .. } => text.clone(),
+        Block::Structure { smiles } => smiles.clone(),
         Block::Table { header, rows, .. } => header
             .iter()
             .chain(rows.iter().flatten())
@@ -391,6 +397,10 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
                     CodeBlockKind::Indented => None,
                 };
                 let mut text = raw_text(events, TagEnd::CodeBlock);
+                if language.as_deref().is_some_and(|language| language.eq_ignore_ascii_case("smiles")) {
+                    out.push(Block::Structure { smiles: text.trim().to_owned() });
+                    continue;
+                }
                 if text.ends_with('\n') {
                     text.pop();
                 }
@@ -885,6 +895,18 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn smiles_fences_are_structures() {
+        assert_eq!(
+            parse("```smiles\n  CCO \n```\n\n~~~SMILES x\nC=C\n~~~\n\n```js\nCCO\n```"),
+            vec![
+                Block::Structure { smiles: "CCO".into() },
+                Block::Structure { smiles: "C=C".into() },
+                Block::Code { language: Some("js".into()), text: "CCO".into() },
+            ]
+        );
     }
 
     #[test]

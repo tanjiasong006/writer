@@ -12,6 +12,7 @@
 //! - 图片按统一规则确定尺寸（`export::images`）：保持比例、不放大，不超过所在容器的宽度与正文区高度；
 //!   独立成段的图片居中，为图注预留空间并与图注保持在同一页，实际分页由 Word / WPS 完成。
 
+use std::collections::HashMap;
 use std::io::{Cursor, Write};
 use std::path::Path;
 
@@ -33,7 +34,7 @@ use crate::render::citations::Citations;
 use crate::render::elements::{ElementTarget, ElementTargets};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::markdown::{Align, Block, Inline};
-use crate::render::{resolve_image, Document, Section};
+use crate::render::{resolve_image, Document, Section, StructureImage};
 
 /// A4，单位 twip（1/20 磅）。
 const PAGE_WIDTH: u32 = 11906;
@@ -103,6 +104,7 @@ pub fn export(
         targets: ChapterTargets::new(document),
         elements: ElementTargets::new(document),
         citations: Citations::new(document),
+        structures: &document.structures,
         next_numbering: FIRST_LIST_NUMBERING,
         numberings: Vec::new(),
         items: Vec::new(),
@@ -283,6 +285,8 @@ struct Writer<'a> {
     elements: ElementTargets,
     /// 文献引用的编号（docs/decisions.md 第 13 节）。
     citations: Citations,
+    /// 化学结构式的图片（docs/decisions.md 第 22 节）。
+    structures: &'a HashMap<String, StructureImage>,
     next_numbering: usize,
     numberings: Vec<Numbering>,
     items: Vec<Item>,
@@ -403,6 +407,7 @@ impl Writer<'_> {
                     .shading(Shading::new().shd_type(ShdType::Clear).fill(CODE_FILL));
                 self.items.push(Item::Paragraph(p));
             }
+            Block::Structure { smiles } => self.structure(smiles, context),
             Block::Table {
                 alignments,
                 header,
@@ -624,6 +629,27 @@ impl Writer<'_> {
                 styled(Run::new().add_text(xml_safe(tex.trim())), RunStyle { code: true, ..style }).color("B91C1C")
             }
         }
+    }
+
+    /// 化学结构式（docs/decisions.md 第 22 节）：前端画好的图片，与没有图注的图片相同地居中，前后留出间距；
+    /// 不放大，宽度不超过正文区。没有图片时以红色的 SMILES 原文输出并列入报告。
+    fn structure(&mut self, smiles: &str, context: BlockContext) {
+        let spacing = twips(self.theme.image_spacing * self.theme.body.size);
+        let p = self
+            .indent(Paragraph::new().align(AlignmentType::Center), context)
+            .line_spacing(LineSpacing::new().before(spacing).after(spacing));
+        let run = match self.structures.get(smiles).and_then(|image| png_size(&image.png).map(|size| (image, size))) {
+            Some((image, (width_px, height_px))) => {
+                let bounds = Bounds { width: content_width_pt(context, 0), height: f64::from(TEXT_HEIGHT) / 20.0 - IMAGE_HEIGHT_SLACK };
+                let (width, height) = display_size_pt((image.width_pt, image.height_pt), bounds);
+                Run::new().add_image(Pic::new_with_dimensions(image.png.clone(), width_px, height_px).size(pt_to_emu(width), pt_to_emu(height)))
+            }
+            None => {
+                self.report.invalid_structures.push(smiles.to_owned());
+                styled(Run::new().add_text(xml_safe(smiles)), RunStyle { code: true, ..RunStyle::default() }).color("B91C1C")
+            }
+        };
+        self.items.push(Item::Paragraph(p.add_run(run)));
     }
 
     /// 图注 / 表格标题段落：Caption 样式；有编号的图表带书签（图表引用的跳转目标）。
@@ -1270,6 +1296,16 @@ fn pt_to_emu(pt: f64) -> u32 {
     (pt * EMU_PER_PT).round() as u32
 }
 
+/// PNG 的像素尺寸（IHDR）；不是 PNG 时为 None。
+fn png_size(png: &[u8]) -> Option<(u32, u32)> {
+    if !png.starts_with(b"\x89PNG\r\n\x1a\n") || png.len() < 24 {
+        return None;
+    }
+    let width = u32::from_be_bytes(png[16..20].try_into().ok()?);
+    let height = u32::from_be_bytes(png[20..24].try_into().ok()?);
+    (width > 0 && height > 0).then_some((width, height))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1402,6 +1438,21 @@ mod tests {
         assert!(!xml.contains(r#"<w:pStyle w:val="Subtitle" />"#));
         assert!(!xml.contains(r#"<w:pStyle w:val="Author" />"#));
         assert!(!part(&bytes, "docProps/core.xml").contains("dc:creator"));
+    }
+
+    /// 化学结构式（docs/decisions.md 第 22 节）：居中的图片段落，按图片的显示尺寸；没有图片的以原文输出并列入报告。
+    #[test]
+    fn structures_are_centered_pictures_and_missing_ones_fall_back_to_smiles() {
+        let dir = project();
+        let mut request = request(&[("a", vec![1], "结构", "```smiles\nCCO\n```\n\n```smiles\nC1CC(\n```")]);
+        request.structures = vec![crate::render::tests::test_structure("CCO")];
+        let (bytes, report) = export(&build(&request), dir.path()).unwrap();
+        docx_rs::read_docx(&bytes).expect("generated docx must be readable");
+        let xml = part(&bytes, "word/document.xml");
+        // 30 × 15 磅 = 381000 × 190500 EMU。
+        assert!(xml.contains(r#"cx="381000" cy="190500""#), "{xml}");
+        assert!(xml.contains("C1CC("));
+        assert_eq!(report.invalid_structures, vec!["C1CC("]);
     }
 
     #[test]
@@ -2046,6 +2097,7 @@ fn write_sample_docx() {
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.jpg)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
         references: Vec::new(),
+        structures: Vec::new(),
     };
     let (bytes, report) = export(&build(&request), &root).unwrap();
     assert!(report.missing_images.is_empty());

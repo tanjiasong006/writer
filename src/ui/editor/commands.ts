@@ -56,6 +56,7 @@ export type EditorCommand =
   | 'math-block'
   | 'chem'
   | 'chem-block'
+  | 'structure'
   | 'row-before'
   | 'row-after'
   | 'column-before'
@@ -418,6 +419,33 @@ export function setMath(pos: number, tex: string): Command {
   }
 }
 
+/** 化学结构式（docs/decisions.md 第 22 节）：与公式块相同的插入规则，光标放在其后的段落中。 */
+export function insertStructure(smiles: string): Command {
+  const block = nodes.structure.create({ smiles })
+  return insertBlock(block, (tr, start) => {
+    const after = start + block.nodeSize
+    if (tr.doc.resolve(after).nodeAfter?.type !== nodes.paragraph) tr.insert(after, nodes.paragraph.create())
+    tr.setSelection(TextSelection.create(tr.doc, after + 1))
+  })
+}
+
+/** 修改 pos 处结构式的 SMILES。 */
+export function setStructure(pos: number, smiles: string): Command {
+  return (state, dispatch) => {
+    const node = state.doc.nodeAt(pos)
+    if (node?.type !== nodes.structure) return false
+    if (node.attrs.smiles === smiles) return true
+    if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, smiles }))
+    return true
+  }
+}
+
+/** 选中的结构式；没有时为 null。 */
+export function selectedStructure(state: EditorState): { readonly pos: number; readonly node: Node } | null {
+  const { selection } = state
+  return selection instanceof NodeSelection && selection.node.type === nodes.structure ? { pos: selection.from, node: selection.node } : null
+}
+
 /** 选中的公式（行内或公式块）；没有时为 null。 */
 export function selectedMath(state: EditorState): { readonly pos: number; readonly node: Node } | null {
   const { selection } = state
@@ -508,7 +536,7 @@ const removeColumn = thenSelectCell(
 )
 
 export const editorCommands: Readonly<
-  Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote' | 'citation' | 'math' | 'math-block' | 'chem' | 'chem-block'>, Command>
+  Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote' | 'citation' | 'math' | 'math-block' | 'chem' | 'chem-block' | 'structure'>, Command>
 > = {
   undo,
   redo,
@@ -567,6 +595,7 @@ export function commandState(state: EditorState): CommandState {
     'math-block': plain(insertMathBlock('x')),
     chem: plain(insertMath('x')),
     'chem-block': plain(insertMathBlock('x')),
+    structure: plain(insertStructure('C')),
     'row-before': plain(rowBefore),
     'row-after': plain(rowAfter),
     'column-before': plain(columnBefore),

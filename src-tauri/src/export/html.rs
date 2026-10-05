@@ -14,7 +14,7 @@ use crate::render::chapter_reference::{broken_references, ref_text, ChapterTarge
 use crate::render::citations::Citations;
 use crate::render::elements::ElementTargets;
 use crate::render::markdown::{Align, Block, Inline};
-use crate::render::{resolve_image, Document, Section};
+use crate::render::{resolve_image, Document, Section, StructureImage};
 
 /// 图表编号与图注之间的分隔（与 Word / PDF 相同）。
 const ELEMENT_SEPARATOR: &str = "\u{3000}";
@@ -37,6 +37,9 @@ pub struct HtmlWriter<'a, S: ImageSink, L: Locator> {
     targets: ChapterTargets,
     elements: ElementTargets,
     citations: Citations,
+    /// 化学结构式的图片（docs/decisions.md 第 22 节）与已输出的地址（同一结构式只输出一次）。
+    structures: HashMap<String, StructureImage>,
+    structure_urls: HashMap<String, String>,
     /// 每个章节的序号（锚点名）。
     section_index: HashMap<String, usize>,
     pub report: ExportReport,
@@ -81,6 +84,8 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
             targets: ChapterTargets::new(document),
             elements: ElementTargets::new(document),
             citations: Citations::new(document),
+            structures: document.structures.clone(),
+            structure_urls: HashMap::new(),
             section_index: document
                 .sections
                 .iter()
@@ -190,6 +195,7 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                 let class = language.as_deref().map(|l| format!(" class=\"language-{}\"", escape(l))).unwrap_or_default();
                 format!("<pre><code{class}>{}</code></pre>\n", escape(text))
             }
+            Block::Structure { smiles } => self.structure(smiles),
             Block::Table { alignments, header, rows, caption } => {
                 let caption = match (caption, &element) {
                     (Some(caption), Some(target)) => format!(
@@ -225,6 +231,28 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
             }
             Block::Rule => "<hr/>\n".to_owned(),
         }
+    }
+
+    /// 化学结构式：前端画好的图片，按其显示尺寸（宽度不超过正文）；没有图片时是红色的 SMILES 原文并列入报告。
+    fn structure(&mut self, smiles: &str) -> String {
+        let Some(image) = self.structures.get(smiles) else {
+            self.report.invalid_structures.push(smiles.to_owned());
+            return format!("<figure class=\"structure\"><code class=\"structure-invalid\">{}</code></figure>\n", escape(smiles));
+        };
+        let width = image.width_pt;
+        let url = match self.structure_urls.get(smiles) {
+            Some(url) => url.clone(),
+            None => {
+                let url = self.images.image(image.png.clone(), false);
+                self.structure_urls.insert(smiles.to_owned(), url.clone());
+                url
+            }
+        };
+        format!(
+            "<figure class=\"structure\"><img src=\"{}\" alt=\"{}\" style=\"width: {width:.1}pt\"/></figure>\n",
+            escape(&url),
+            escape(smiles)
+        )
     }
 
     fn image(&mut self, src: &str, alt: &str) -> String {
@@ -353,7 +381,7 @@ hr { border: none; border-top: 1px solid #ccc; width: 30%; margin: 2em auto; }
 a { color: #2f4b74; }
 .math svg { vertical-align: middle; }
 .math-block { text-align: center; margin: 1em 0; }
-.math-invalid, .missing { color: #b91c1c; }
+.math-invalid, .missing, .structure-invalid { color: #b91c1c; }
 .footnotes { font-size: 0.9em; color: #55555a; margin-top: 2em; }
 .footnotes hr { width: 30%; margin: 1em 0; }
 .footnote-ref a, .citation a { text-decoration: none; }
@@ -487,5 +515,22 @@ mod tests {
         assert!(html.contains("<li id=\"cite-1\"><span class=\"cite-number\">[1]</span> 甲. 书[M]. 2020.</li>"));
         assert!(html.contains("<span class=\"math\"><svg"), "formula rendered as svg");
         assert_eq!(report.missing_images, vec!["../assets/none.png"]);
+    }
+
+    /// 化学结构式（docs/decisions.md 第 22 节）：图片按显示尺寸；没有图片的以原文输出并列入报告。
+    #[test]
+    fn structures_are_images_and_missing_ones_fall_back_to_smiles() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let request = RenderRequest {
+            chapters: vec![chapter("a", vec![1], "结构", "```smiles\nCCO\n```\n\n```smiles\nC1CC(\n```")],
+            structures: vec![crate::render::tests::test_structure("CCO")],
+            ..Default::default()
+        };
+        let (bytes, report) = export(&build(&request), dir.path());
+        let html = String::from_utf8(bytes).unwrap();
+        assert!(html.contains("<figure class=\"structure\"><img src=\"data:image/png;base64,"), "{html}");
+        assert!(html.contains("alt=\"CCO\" style=\"width: 30.0pt\""), "{html}");
+        assert!(html.contains("<code class=\"structure-invalid\">C1CC(</code>"));
+        assert_eq!(report.invalid_structures, vec!["C1CC("]);
     }
 }

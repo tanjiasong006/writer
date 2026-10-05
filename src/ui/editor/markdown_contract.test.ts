@@ -41,6 +41,7 @@ type SemBlock =
   | { type: 'paragraph'; inlines: SemInline[] }
   | { type: 'figure'; src: string; alt: string; id?: string }
   | { type: 'math'; tex: string }
+  | { type: 'structure'; smiles: string }
   | { type: 'quote'; blocks: SemBlock[] }
   | { type: 'code'; language: string | null; text: string }
   | { type: 'rule' }
@@ -115,6 +116,8 @@ function block(node: Node): SemBlock {
       return { type: 'paragraph', inlines: inlines(node) }
     case nodes.math_block:
       return { type: 'math', tex: node.attrs.tex as string }
+    case nodes.structure:
+      return { type: 'structure', smiles: node.attrs.smiles as string }
     case nodes.figure: {
       const id = /^fig:([A-Za-z0-9_-]+)$/.exec((node.attrs.title as string | null) ?? '')?.[1]
       const figure: SemBlock = { type: 'figure', src: node.attrs.src as string, alt: node.attrs.alt as string }

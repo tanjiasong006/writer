@@ -1,0 +1,23 @@
+{
+  "说明": "化学结构式（docs/decisions.md 第 22 节）：围栏代码块的语言（信息的第一个词，不区分大小写）是 smiles 时是结构式，内容去掉首尾空白；可以在引用与列表中。其他语言的代码块不变。",
+  "blocks": [
+    { "type": "paragraph", "inlines": [{ "text": "乙醇：" }] },
+    { "type": "structure", "smiles": "CCO" },
+    { "type": "structure", "smiles": "C1=CC=CC=C1" },
+    {
+      "type": "quote",
+      "blocks": [
+        { "type": "paragraph", "inlines": [{ "text": "引用中：" }] },
+        { "type": "structure", "smiles": "CC(=O)O" }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [{ "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "列表中：" }] }, { "type": "structure", "smiles": "C=C" }] }]
+    },
+    { "type": "paragraph", "inlines": [{ "text": "不是结构式：" }] },
+    { "type": "code", "language": "smiles-like", "text": "CCO" }
+  ]
+}

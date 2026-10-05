@@ -67,10 +67,12 @@ export function useExport(options: {
       const missing = result.value.missingImages.length
       const broken = result.value.brokenReferences.length
       const formulas = result.value.invalidFormulas?.length ?? 0
+      const structures = result.value.invalidStructures?.length ?? 0
       const problems = [
         missing > 0 ? `${missing} 张图片无法嵌入，已用文字占位` : null,
         broken > 0 ? `${broken} 处章节引用已失效，已按原来的文字输出` : null,
         formulas > 0 ? `${formulas} 个公式无法排版，已按原文输出` : null,
+        structures > 0 ? `${structures} 个化学结构式无法识别，已按原文输出` : null,
       ].filter((problem) => problem !== null)
       showNotice({
         message: problems.length > 0 ? `已导出 ${fileName}，其中 ${problems.join('；')}。` : `已导出 ${fileName}`,

@@ -315,6 +315,18 @@ export const schema = new Schema({
     },
 
     /**
+     * 化学结构式（docs/decisions.md 第 22 节）：Markdown 中语言为 `smiles` 的围栏代码块，显示为骨架式。
+     * 块级原子节点，smiles 是代码块的内容（去掉首尾空白）。
+     */
+    structure: {
+      group: 'block',
+      atom: true,
+      attrs: { smiles: { default: '', validate: 'string' } },
+      parseDOM: [{ tag: 'div[data-structure]', getAttrs: (dom) => ({ smiles: dom.getAttribute('data-structure') ?? '' }) }],
+      toDOM: (node): DOMOutputSpec => ['div', { class: 'structure-block', 'data-structure': node.attrs.smiles }, node.attrs.smiles],
+    },
+
+    /**
      * 脚注（Markdown 中的 `[^1]` 与章节末尾的 `[^1]: 内容`）：行内的原子节点，显示为上标的编号（按章节中的顺序，
      * 由 decoration 给出，不存进文档）。text 是脚注内容的文字；source 是载入时定义的 Markdown 原文
      * （可能带格式或多行），内容没有修改时原样写回，修改后按 text 写出。

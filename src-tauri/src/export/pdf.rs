@@ -33,7 +33,7 @@ use crate::render::chapter_reference::{broken_references, ref_text, ChapterTarge
 use crate::render::citations::Citations;
 use crate::render::elements::ElementTargets;
 use crate::render::markdown::{plain_text, Align, Block, Inline};
-use crate::render::{resolve_image, Document, Section};
+use crate::render::{resolve_image, Document, Section, StructureImage};
 
 /// Typst 字符串字面量（供公式模块使用）。
 pub(crate) fn string_literal(text: &str) -> String {
@@ -94,6 +94,7 @@ fn layout(
     writer.elements = ElementTargets::new(document);
     writer.citations = Citations::new(document);
     writer.report.broken_references = broken_references(document);
+    writer.structures = document.structures.clone();
     writer.preamble(document, book);
     for section in &document.sections {
         writer.section(section);
@@ -197,6 +198,7 @@ fn document_has_cjk(document: &Document) -> bool {
             Block::List { items, .. } => items.iter().any(|item| blocks_have_cjk(item)),
             Block::Quote(blocks) => blocks_have_cjk(blocks),
             Block::Code { text, .. } => text.chars().any(is_cjk),
+            Block::Structure { .. } => false,
             Block::Table { header, rows, .. } => {
                 header.iter().any(|c| inlines_have_cjk(c))
                     || rows.iter().flatten().any(|c| inlines_have_cjk(c))
@@ -283,6 +285,9 @@ struct Writer<'a> {
     /// 正文中的公式：LaTeX 原文与转换结果（转换失败为 None），按出现顺序，相同的公式只有一项。
     formulas: Vec<(String, Option<String>)>,
     formula_index: HashMap<String, usize>,
+    /// 化学结构式的图片（docs/decisions.md 第 22 节），按 SMILES；同一结构式只嵌入一次（images 中的序号）。
+    structures: HashMap<String, StructureImage>,
+    structure_index: HashMap<String, usize>,
 }
 
 impl<'a> Writer<'a> {
@@ -303,6 +308,8 @@ impl<'a> Writer<'a> {
             citations: Citations::default(),
             formulas: Vec::new(),
             formula_index: HashMap::new(),
+            structures: HashMap::new(),
+            structure_index: HashMap::new(),
         }
     }
 
@@ -628,6 +635,7 @@ impl<'a> Writer<'a> {
                 Some(language) => format!("#raw(block: true, lang: {}, {})", string(language), string(&breakable(text))),
                 None => format!("#raw(block: true, {})", string(&breakable(text))),
             },
+            Block::Structure { smiles } => self.structure(smiles),
             Block::Table { alignments, header, rows, caption } => {
                 // 表格标题在表格上方，与表格留在同一页；有编号时前面是编号并带标签。
                 let title = match (caption, &element) {
@@ -857,6 +865,32 @@ impl<'a> Writer<'a> {
         format!(
             // 不设最小宽度：极窄的长图宽度可以小于 1pt，高度上限优先（宽度由高度上限按比例反推）。
             "layout(size => image(\"/img/{index}.png\", format: \"{format}\", width: calc.max(0pt, calc.min({width:.2}pt, size.width, ({max_height}) * {ratio}))))",
+            ratio = width / height,
+        )
+    }
+}
+
+impl Writer<'_> {
+    /// 化学结构式（docs/decisions.md 第 22 节）：前端画好的图片，与没有图注的图片相同地居中排列，
+    /// 不放大，宽度不超过正文区。没有图片时以红色的 SMILES 原文输出并列入报告。
+    fn structure(&mut self, smiles: &str) -> String {
+        let Some(image) = self.structures.get(smiles) else {
+            self.report.invalid_structures.push(smiles.to_owned());
+            return format!("#align(center, text(fill: rgb(\"#b91c1c\"), raw({})))", string(smiles));
+        };
+        let (width, height) = (image.width_pt, image.height_pt);
+        let index = match self.structure_index.get(smiles) {
+            Some(&index) => index,
+            None => {
+                let index = self.images.len();
+                self.images.push(Bytes::new(image.png.clone()));
+                self.structure_index.insert(smiles.to_owned(), index);
+                index
+            }
+        };
+        let max_height = num(self.page.text_height_pt() - IMAGE_HEIGHT_SLACK);
+        format!(
+            "#figure(layout(size => image(\"/img/{index}.png\", format: \"png\", width: calc.max(0pt, calc.min({width:.2}pt, size.width, {max_height}pt * {ratio})))))",
             ratio = width / height,
         )
     }
@@ -2055,6 +2089,24 @@ mod tests {
         assert!(!text.contains('[') && !text.contains(']'), "{text}");
     }
 
+    /// 化学结构式（docs/decisions.md 第 22 节）：前端画好的图片按其尺寸居中嵌入，同一结构式只嵌入一次；
+    /// 没有图片的以原文输出并列入报告。
+    #[test]
+    fn structures_are_embedded_images_and_missing_ones_fall_back_to_smiles() {
+        let mut request = request("", &[("a", vec![1], "结构", "前\n\n```smiles\nCCO\n```\n\n```smiles\nCCO\n```\n\n```smiles\nC1CC(\n```\n\n后")]);
+        request.structures = vec![crate::render::tests::test_structure("CCO")];
+        let dir = project();
+        let (paged, report) = layout(&build(&request), dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        let placed = images(&paged);
+        assert_eq!(placed.len(), 2);
+        let (_, x, _, width, height) = placed[0];
+        assert!((width - 30.0).abs() < 0.1 && (height - 15.0).abs() < 0.1, "{placed:?}");
+        let text_width = paged.pages()[0].frame.width().to_pt() - 2.0 * MARGIN_PT;
+        assert!((x - MARGIN_PT - (text_width - width) / 2.0).abs() < 1.0, "centered: {placed:?}");
+        assert!(page_texts(&paged).concat().contains("C1CC("));
+        assert_eq!(report.invalid_structures, vec!["C1CC("]);
+    }
+
     fn three_chapters(title: &str) -> Document {
         build(&request(
             title,
@@ -2735,6 +2787,7 @@ fn write_sample_pdf() {
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
         references: Vec::new(),
+        structures: Vec::new(),
     };
     let (bytes, report) = export(&build(&request), &root, font_store(None), &sample_layout()).unwrap();
     assert!(report.missing_images.is_empty());

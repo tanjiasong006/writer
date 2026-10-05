@@ -39,6 +39,7 @@ import { useExternalChanges } from './use_external_changes.ts'
 import { useHistory } from './use_history.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
 import { appendImage } from '../editor/markdown.ts'
+import { documentStructureImages } from '../editor/structure_view.ts'
 import { embeddableImage } from './embeddable_image.ts'
 import { chapterRefLabels, citationRefLabels, combineRefLabels, elementRefLabels } from '../editor/chapter_ref_view.ts'
 import { useCitations } from './use_citations.ts'
@@ -109,7 +110,7 @@ const editingInfo = ref(false)
 const layoutDialog = ref<'export' | 'save' | null>(null)
 /** 排版设置中的样张：打开设置时捕获一次当前内容（对话框是模态的，期间内容不变）。 */
 const layoutPreview = computed(() =>
-  layoutDialog.value ? createPdfPreview(output, props.session.path, document.value) : null,
+  layoutDialog.value ? createPdfPreview(output, props.session.path, document.value, documentStructureImages) : null,
 )
 const reader = ref<InstanceType<typeof DocumentReader> | null>(null)
 
@@ -145,7 +146,7 @@ const {
   shell,
   title: () => document.value.title,
   run: (format, target) =>
-    exportDocument(output, props.session.path, document.value, props.session.pdfLayout, format, target),
+    exportDocument(output, props.session.path, document.value, props.session.pdfLayout, format, target, documentStructureImages),
   onError: (message) => (actionError.value = message),
 })
 

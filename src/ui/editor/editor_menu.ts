@@ -52,6 +52,7 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   // 化学式（docs/decisions.md 第 22 节）是内容为 \ce{…} 的公式，同样没有快捷键。
   chem: { label: '行内化学式…' },
   'chem-block': { label: '化学式块…' },
+  structure: { label: '化学结构式…' },
   'row-before': { label: '在上方插入行' },
   'row-after': { label: '在下方插入行' },
   'column-before': { label: '在左侧插入列' },
@@ -157,8 +158,11 @@ export function editorContextMenu(
   tableCaption: boolean | null = null,
   /** 选中了公式。 */
   math = false,
+  /** 选中了化学结构式。 */
+  structure = false,
 ): MenuEntry[] {
   if (math) return [{ id: 'math:edit', label: '编辑公式…' }, { separator: true }, { role: 'cut' }, { role: 'copy' }]
+  if (structure) return [{ id: 'structure:edit', label: '编辑结构式…' }, { separator: true }, { role: 'cut' }, { role: 'copy' }]
   if (chapterRef !== null) return chapterRefMenu(state, chapterRef)
   if (footnote) {
     return [{ id: 'footnote:edit', label: '编辑脚注…' }, { separator: true }, { role: 'cut' }, { role: 'copy' }]

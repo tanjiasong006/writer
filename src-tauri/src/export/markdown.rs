@@ -119,6 +119,8 @@ impl Writer<'_> {
                 let fence = "`".repeat(longest.max(2) + 1);
                 format!("{fence}{}\n{text}\n{fence}", language.as_deref().unwrap_or(""))
             }
+            // 化学结构式保留为 smiles 代码块（与正文相同，公式同样保留 LaTeX）。
+            Block::Structure { smiles } => format!("```smiles\n{smiles}\n```"),
             Block::Table { alignments, header, rows, caption } => {
                 let mut out = String::new();
                 if let (Some(caption), Some(target)) = (caption, &element) {
