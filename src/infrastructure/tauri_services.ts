@@ -20,14 +20,15 @@ export async function createTauriServices(): Promise<AppServices> {
 
 function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): DesktopShell {
   // macOS：标题栏与工具栏合一（tauri.conf.json 的 titleBarStyle: Overlay），命令同时出现在系统菜单栏中。
-  // 其他平台使用系统标题栏；应用内的工具栏与菜单提供全部命令。
+  // Windows：系统标题栏，其下是系统菜单栏。其他平台使用系统标题栏，没有菜单栏，命令靠工具栏、右键菜单与快捷键。
   const mac = /Mac/.test(navigator.platform)
+  const windows = /Win/.test(navigator.platform)
   const appName = appState.snapshot.appName
-  const menus = createTauriMenus(appName)
+  const menus = createTauriMenus(appName, windows ? 'windows' : 'mac')
   return {
     appName,
     windowStyle: mac ? 'unified' : 'standard',
-    setAppMenu: mac ? menus.setAppMenu : undefined,
+    setAppMenu: mac || windows ? menus.setAppMenu : undefined,
     popupMenu: menus.popupMenu,
 
     async pickNewProjectPath() {

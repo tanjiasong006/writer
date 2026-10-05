@@ -1,3 +1,4 @@
+import { getVersion } from '@tauri-apps/api/app'
 import { LogicalPosition } from '@tauri-apps/api/dpi'
 import {
   CheckMenuItem,
@@ -10,7 +11,7 @@ import {
 import type { AppMenu, MenuEntry } from '../application/desktop_shell.ts'
 
 /**
- * 系统菜单（macOS 菜单栏与右键菜单）。
+ * 系统菜单（macOS / Windows 菜单栏与右键菜单）。
  *
  * 菜单栏的结构只在第一次（或结构改变时）创建；之后同样结构的调用只更新可用 / 勾选状态，
  * 焦点每次移动都会调用，不能每次重建几十个系统菜单项。
@@ -18,7 +19,13 @@ import type { AppMenu, MenuEntry } from '../application/desktop_shell.ts'
  * 菜单栏更新与弹出菜单共用一个队列，严格串行：Tauri 的 popup 在等待主线程显示菜单期间占着菜单资源表，
  * 此时主线程上若在执行菜单栏的 set_enabled（同样要占资源表）就会互相等待、整个应用卡死
  * （右键章节会同时移动焦点、触发菜单栏更新，真实运行中复现过）。
+ *
+ * Windows：菜单栏在窗口标题栏下方，没有 macOS 的应用菜单与“窗口”菜单。菜单项不注册系统加速键，
+ * 快捷键只写在菜单文字的右侧（`\t` 之后），按键仍由工作区按同一份菜单响应（app_menu.ts 的 menuItemForKey）：
+ * WebView2 获得焦点时系统收不到这些按键，注册了也只会在少数情况下与工作区重复执行。
  */
+
+export type MenuPlatform = 'mac' | 'windows'
 
 type Item = MenuItem | CheckMenuItem | PredefinedMenuItem | Submenu
 
@@ -38,10 +45,27 @@ function isRole(entry: MenuEntry): entry is Extract<MenuEntry, { role: string }>
   return 'role' in entry
 }
 
+const WINDOWS_KEYS: Readonly<Record<string, string>> = {
+  CmdOrCtrl: 'Ctrl',
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+  ArrowLeft: '←',
+  ArrowRight: '→',
+}
+
+/** Windows 菜单项右侧显示的快捷键：`CmdOrCtrl+Shift+N` → `Ctrl+Shift+N`。 */
+export function windowsShortcutText(accelerator: string): string {
+  return accelerator
+    .split('+')
+    .map((part) => WINDOWS_KEYS[part] ?? (part.length === 1 ? part.toUpperCase() : part))
+    .join('+')
+}
+
 async function createEntries(
   entries: readonly MenuEntry[],
   onSelect: (id: string) => void,
   registry: Map<string, MenuItem | CheckMenuItem> | null,
+  platform: MenuPlatform,
 ): Promise<Item[]> {
   const items: Item[] = []
   for (const entry of entries) {
@@ -54,15 +78,16 @@ async function createEntries(
         await Submenu.new({
           text: entry.label,
           enabled: !entry.disabled,
-          items: await createEntries(entry.submenu, onSelect, registry),
+          items: await createEntries(entry.submenu, onSelect, registry, platform),
         }),
       )
     } else {
+      const windows = platform === 'windows' && entry.shortcut !== undefined
       const options: MenuItemOptions = {
         id: entry.id,
-        text: entry.label,
+        text: windows ? `${entry.label}\t${windowsShortcutText(entry.shortcut!)}` : entry.label,
         enabled: !entry.disabled,
-        accelerator: entry.shortcut,
+        accelerator: windows ? undefined : entry.shortcut,
         action: () => onSelect(entry.id),
       }
       const item =
@@ -95,7 +120,7 @@ function flatten(entries: readonly MenuEntry[], into: Map<string, { disabled: bo
   }
 }
 
-export function createTauriMenus(appName: string) {
+export function createTauriMenus(appName: string, platform: MenuPlatform = 'mac') {
   let queue: Promise<void> = Promise.resolve()
   let structure: string | null = null
   let registry = new Map<string, MenuItem | CheckMenuItem>()
@@ -103,6 +128,7 @@ export function createTauriMenus(appName: string) {
   let handler: (id: string) => void = () => {}
 
   async function build(menus: readonly AppMenu[]): Promise<void> {
+    if (platform === 'windows') return buildWindows(menus)
     const next = new Map<string, MenuItem | CheckMenuItem>()
     const select = (id: string) => handler(id)
     const app = await Submenu.new({
@@ -122,7 +148,7 @@ export function createTauriMenus(appName: string) {
     const submenus: Submenu[] = []
     let help: Submenu | null = null
     for (const menu of menus) {
-      const submenu = await Submenu.new({ text: menu.label, items: await createEntries(menu.items, select, next) })
+      const submenu = await Submenu.new({ text: menu.label, items: await createEntries(menu.items, select, next, platform) })
       // “帮助”按 macOS 惯例排在“窗口”之后，并作为系统的帮助菜单（带菜单搜索）。
       if (menu.label === '帮助') help = submenu
       else submenus.push(submenu)
@@ -140,6 +166,30 @@ export function createTauriMenus(appName: string) {
     await bar.setAsAppMenu()
     await windowMenu.setAsWindowsMenuForNSApp()
     if (help) await help.setAsHelpMenuForNSApp()
+    registry = next
+  }
+
+  /** Windows：菜单按原顺序排列，“帮助”在最后并带“关于”；关闭窗口由“文件”菜单提供（走关闭前的保存流程）。 */
+  async function buildWindows(menus: readonly AppMenu[]): Promise<void> {
+    const next = new Map<string, MenuItem | CheckMenuItem>()
+    const select = (id: string) => handler(id)
+    const submenus: Submenu[] = []
+    let help: Submenu | null = null
+    for (const menu of menus) {
+      const items = await createEntries(menu.items, select, next, platform)
+      if (menu.label === '帮助') {
+        items.push(
+          await PredefinedMenuItem.new({ item: 'Separator' }),
+          // Windows 上没有元数据的“关于”点击后什么也不显示。
+          await PredefinedMenuItem.new({ item: { About: { name: appName, version: await getVersion() } }, text: `关于 ${appName}` }),
+        )
+        help = await Submenu.new({ text: menu.label, items })
+      } else {
+        submenus.push(await Submenu.new({ text: menu.label, items }))
+      }
+    }
+    const bar = await Menu.new({ items: [...submenus, ...(help ? [help] : [])] })
+    await bar.setAsAppMenu()
     registry = next
   }
 
@@ -176,7 +226,7 @@ export function createTauriMenus(appName: string) {
     popupMenu(entries: readonly MenuEntry[], at: { x: number; y: number }): Promise<string | null> {
       const run = queue.then(async () => {
         let chosen: string | null = null
-        const menu = await Menu.new({ items: await createEntries(entries, (id) => (chosen = id), null) })
+        const menu = await Menu.new({ items: await createEntries(entries, (id) => (chosen = id), null, platform) })
         try {
           // macOS 上弹出菜单在关闭前一直阻塞；选择动作的事件可能稍晚于 popup 返回到达。
           await menu.popup(new LogicalPosition(at.x, at.y))

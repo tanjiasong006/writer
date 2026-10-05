@@ -18,6 +18,13 @@ test('默认展示参数翻译为 CSS 变量：字号用像素、间距用 em', 
   expect(Object.keys(vars).some((name) => name.startsWith('--doc-image-') && name !== '--doc-image-spacing')).toBe(false)
 })
 
+test('正文字体在 Windows 上先用微软雅黑而不是 SimSun；macOS 的宋体与已安装的思源宋体仍然优先', () => {
+  const order = (name: string) => FONT_STACKS.serif.indexOf(name)
+  expect(order('"Source Han Serif SC"')).toBeLessThan(order('"Microsoft YaHei"'))
+  expect(order('"Songti SC"')).toBeLessThan(order('"Microsoft YaHei"'))
+  expect(order('"Microsoft YaHei"')).toBeLessThan(order('SimSun'))
+})
+
 test('章节标题变量：第 depth 级章节用第 depth 级样式，第 3 级及更深共用第 3 级；正文没有标题变量', () => {
   expect(editorHeadingVars(1)).toEqual({ '--heading-font': 'var(--doc-h1-font)', '--heading-size': 'var(--doc-h1-size)' })
   expect(editorHeadingVars(5)['--heading-font']).toBe('var(--doc-h3-font)')

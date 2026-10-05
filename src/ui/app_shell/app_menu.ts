@@ -9,7 +9,7 @@ import { DOCUMENT_TEMPLATES, findTemplate, type TemplateId } from './document_te
 
 /**
  * 应用菜单栏（文件、编辑、格式、插入、表格、章节、显示）。快捷键的定义在 common/shortcuts.ts；
- * 菜单栏在 macOS 上由系统显示，没有系统菜单栏时工作区按同一份菜单响应快捷键（menuItemForKey）。
+ * 菜单栏在 macOS 与 Windows 上由系统显示；除 macOS 外，快捷键都由工作区按同一份菜单响应（menuItemForKey）。
  *
  * 可用状态按"当前焦点"决定，与 macOS 的响应链一致：格式命令只在正文获得焦点时可用，
  * 移动与删除章节只在章节树获得焦点时可用。于是同一个按键在同一时刻只有一种含义

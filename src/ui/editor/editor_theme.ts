@@ -14,9 +14,10 @@ type FontId = 'serif' | 'sans' | 'kai'
  * 按屏幕阅读挑选，不复用输出字体候选（docs/decisions.md 第 6 节）：可以使用本机字体，不承诺跨机器一致。
  */
 export const FONT_STACKS: Readonly<Record<FontId, string>> = {
+  // Windows 自带的中文衬线字体只有 SimSun 一类，屏幕上笔画细而发虚：没有装思源宋体时，宁可用微软雅黑显示正文。
   serif:
     '"Iowan Old Style", Charter, "Bitstream Charter", Georgia, "Source Han Serif SC", "Noto Serif CJK SC", ' +
-    '"Noto Serif SC", "Songti SC", STSong, SimSun, serif',
+    '"Noto Serif SC", "Songti SC", "Microsoft YaHei", STSong, SimSun, serif',
   sans:
     '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ' +
     '"Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC", "WenQuanYi Micro Hei", sans-serif',
