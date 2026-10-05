@@ -52,6 +52,7 @@ type SemBlock =
       header: SemInline[][]
       rows: SemInline[][][]
       caption?: { text: string; id?: string }
+      note?: string
     }
 
 const MARK_NAMES: Record<string, string> = { strong: 'strong', em: 'emphasis', strike: 'strike' }
@@ -148,11 +149,14 @@ function block(node: Node): SemBlock {
         if (index === 0) row.forEach((cell) => align.push((cell.attrs.align as string | null) ?? 'none'))
         rows.push(cells)
       })
-      const table: SemBlock = { type: 'table', align, header: rows[0] ?? [], rows: rows.slice(1) }
+      let table: SemBlock = { type: 'table', align, header: rows[0] ?? [], rows: rows.slice(1) }
       const caption = node.attrs.caption as string | null
-      if (caption === null) return table
-      const id = node.attrs.captionId as string | null
-      return { ...table, caption: id ? { text: caption, id } : { text: caption } }
+      if (caption !== null) {
+        const id = node.attrs.captionId as string | null
+        table = { ...table, caption: id ? { text: caption, id } : { text: caption } }
+      }
+      const note = node.attrs.note as string | null
+      return note === null ? table : { ...table, note }
     }
     default:
       throw new Error(`没有语义投影的节点：${node.type.name}`)

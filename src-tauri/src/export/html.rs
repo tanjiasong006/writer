@@ -196,7 +196,7 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                 format!("<pre><code{class}>{}</code></pre>\n", escape(text))
             }
             Block::Structure { smiles, conditions } => self.structure(smiles, conditions),
-            Block::Table { alignments, header, rows, caption } => {
+            Block::Table { alignments, header, rows, caption, note } => {
                 let caption = match (caption, &element) {
                     (Some(caption), Some(target)) => format!(
                         "<caption id=\"element-{}\">{}</caption>",
@@ -227,7 +227,8 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                         format!("<tr>{cells}</tr>\n")
                     })
                     .collect();
-                format!("<table>{caption}<thead><tr>{head}</tr></thead>\n<tbody>\n{body}</tbody></table>\n")
+                let note = note.as_deref().map(|note| format!("<p class=\"table-note\">{}</p>\n", escape(note))).unwrap_or_default();
+                format!("<table>{caption}<thead><tr>{head}</tr></thead>\n<tbody>\n{body}</tbody></table>\n{note}")
             }
             Block::Rule => "<hr/>\n".to_owned(),
         }
@@ -376,6 +377,7 @@ figure img, p img { max-width: 100%; height: auto; }
 figcaption, caption { color: #55555a; font-size: 0.9em; margin-top: 0.4em; }
 table { border-collapse: collapse; margin: 1.5em auto; border-top: 1.5px solid #333; border-bottom: 1.5px solid #333; }
 caption { caption-side: top; margin-bottom: 0.4em; }
+.table-note { color: #55555a; font-size: 0.9em; text-align: left; margin: -1em 0 1.5em; }
 th, td { padding: 0.35em 0.8em; }
 thead th { border-bottom: 1px solid #333; }
 hr { border: none; border-top: 1px solid #ccc; width: 30%; margin: 2em auto; }
@@ -392,7 +394,7 @@ a { color: #2f4b74; }
   body { background: #1e1e20; color: #e2e2e4; }
   pre { background: #2a2a2d; }
   a { color: #a8bcda; }
-  figcaption, caption, blockquote, .footnotes, header.cover .subtitle, header.cover .author { color: #a2a2a7; }
+  figcaption, caption, .table-note, blockquote, .footnotes, header.cover .subtitle, header.cover .author { color: #a2a2a7; }
   table, thead th { border-color: #aaa; }
 }
 "#;
@@ -499,7 +501,7 @@ mod tests {
             title: "论文 <A&B>".into(),
             chapters: vec![
                 chapter("a", vec![1], "绪论", "见[旧](writer:chapter/b)与[[1]](writer:cite/r)。脚注[^1]。\n\n[^1]: 注释 *斜*\n\n<script>x</script>"),
-                chapter("b", vec![2], "方法", "| 甲 |\n| - |\n| $x$ |\n\n![缺](../assets/none.png)\n\nm<sup>3</sup>/d，H<sub>2</sub>O"),
+                chapter("b", vec![2], "方法", "| 甲 |\n| - |\n| $x$ |\n\nTable-note: 注：<数据>\n\n![缺](../assets/none.png)\n\nm<sup>3</sup>/d，H<sub>2</sub>O"),
             ],
             references: vec![RenderReference { id: "r".into(), text: "甲. 书[M]. 2020.".into() }],
             ..Default::default()
@@ -512,6 +514,7 @@ mod tests {
         assert!(html.contains("<sup class=\"citation\"><a href=\"#cite-1\">[1]</a></sup>"));
         assert!(html.contains("href=\"#fn-1\"") && html.contains("<li id=\"fn-1\" value=\"1\" epub:type=\"footnote\">注释 <em>斜</em>"));
         assert!(html.contains("&lt;script&gt;x&lt;/script&gt;"));
+        assert!(html.contains("</table>\n<p class=\"table-note\">注：&lt;数据&gt;</p>"), "{html}");
         assert!(html.contains("m<sup>3</sup>/d，H<sub>2</sub>O"), "{html}");
         assert!(html.contains("<li id=\"cite-1\"><span class=\"cite-number\">[1]</span> 甲. 书[M]. 2020.</li>"));
         assert!(html.contains("<span class=\"math\"><svg"), "formula rendered as svg");

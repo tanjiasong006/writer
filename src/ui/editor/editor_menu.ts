@@ -10,7 +10,7 @@ import type { ChapterRefShow } from '../../domain/chapter_reference/chapter_refe
  * - 选中的图片：添加 / 编辑图注、剪切 / 拷贝（图片没有单独的尺寸或对齐设置）。
  * - 选中的章节引用：前往目标章节、显示格式（当前格式打勾）、更改目标、剪切 / 拷贝。
  * - 选中的脚注：编辑脚注（`footnote:edit`）、剪切 / 拷贝。
- * - 表格中：插入 / 删除行与列、删除表格，放在最前面。
+ * - 表格中：插入 / 删除行与列、删除表格，放在最前面；之后是添加 / 编辑表格标题（`table:caption`）与表注（`table:note`）。
  * - 代码块中：“代码语言”子菜单放在最前面（当前语言打勾）。
  * - 其余：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当前所在结构打勾）、插入表格与图片。
  *
@@ -154,8 +154,8 @@ export function editorContextMenu(
   codeLanguage: string | null = null,
   chapterRef: ChapterRefMenu | null = null,
   footnote = false,
-  /** 光标在表格中时表格是否有标题；不在表格中时为 null。 */
-  tableCaption: boolean | null = null,
+  /** 光标在表格中时表格是否有标题、表注；不在表格中时为 null。 */
+  table: { readonly caption: boolean; readonly note: boolean } | null = null,
   /** 选中了公式。 */
   math = false,
   /** 选中了化学结构式。 */
@@ -189,7 +189,8 @@ export function editorContextMenu(
       commandEntry('delete-column', state),
       commandEntry('delete-table', state),
       { separator: true },
-      { id: 'table:caption', label: tableCaption ? '编辑表格标题…' : '添加表格标题…' },
+      { id: 'table:caption', label: table?.caption ? '编辑表格标题…' : '添加表格标题…' },
+      { id: 'table:note', label: table?.note ? '编辑表注…' : '添加表注…' },
       { separator: true },
     )
   }

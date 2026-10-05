@@ -141,6 +141,48 @@ test('表格标题：右键菜单添加、单击标题编辑，清空即去掉�
   expect(editorView(wrapper).dom.querySelector('.table-caption')).toBeNull()
 })
 
+test('表注：右键菜单添加、显示在表格下方、单击编辑，清空即去掉表注', async () => {
+  const { services, wrapper } = await openDocument()
+  await wrapper.findAll('.chapter-tree__row')[2].trigger('click')
+  await flushPromises()
+  const view = editorView(wrapper)
+  view.focus()
+  let cell = -1
+  view.state.doc.descendants((node, pos) => {
+    if (cell < 0 && node.type.name === 'table_cell') cell = pos + 1
+    return cell < 0
+  })
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, cell)))
+  const popover = () => document.querySelector<HTMLTextAreaElement>('.text-popover__input')
+  const note = () => editorView(wrapper).dom.querySelector('.table-note')
+  const type = async (text: string) => {
+    popover()!.value = text
+    popover()!.dispatchEvent(new Event('input'))
+    popover()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushPromises()
+  }
+  expect(note()).toBeNull()
+  ;(wrapper.findComponent({ name: 'ChapterEditor' }).vm as unknown as { openMenuAtCaret(): Promise<void> }).openMenuAtCaret()
+  await flushPromises()
+  await button(wrapper, '添加表注…').trigger('click')
+  await flushPromises()
+  expect(popover()!.value).toBe('')
+  await type('注：数据来自问卷。')
+  expect(note()?.textContent).toBe('注：数据来自问卷。')
+  // 表注紧跟在表格之后，在下一段之前。
+  expect(note()!.previousElementSibling?.tagName).toBe('TABLE')
+  expect((await save(services)).get('b')).toBe(
+    'Table: 样本构成\n\n| 组 | 人数 |\n| --- | --- |\n| 甲 | 3 |\n\nTable-note: 注：数据来自问卷。\n\n![结果](../assets/结果.png "fig:r1")',
+  )
+
+  note()!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+  await flushPromises()
+  expect(popover()!.value).toBe('注：数据来自问卷。')
+  await type('')
+  expect(note()).toBeNull()
+  expect((await save(services)).get('b')!.includes('Table-note')).toBe(false)
+})
+
 test('全文阅读中同样显示图表编号', async () => {
   const { wrapper } = await openDocument()
   await button(wrapper, '全文阅读').trigger('click')
@@ -148,4 +190,23 @@ test('全文阅读中同样显示图表编号', async () => {
   const reader = wrapper.find('.document-reader')
   expect(reader.findAll('.editor-figure__caption-label').map((l) => l.text())).toEqual(['图 1-1', '图 2-1'])
   expect(reader.find('.table-caption').text()).toBe('表 2-1样本构成')
+})
+
+test('全文阅读中表注显示在表格下方', async () => {
+  const services = createMemoryServices()
+  const document = createDocument(
+    '论文',
+    [{ id: 'a', title: '方法', children: [] }],
+    new Map([['a', '| 组 | 人数 |\n| --- | --- |\n| 甲 | 3 |\n\nTable-note: 注：数据来自问卷。']]),
+  )
+  if (!document.ok) throw new Error('fixture')
+  services.storage.seed(PATH, document.document)
+  services.shell.lastProjectPath = PATH
+  const wrapper = await mountApp(services)
+  await flushPromises()
+  await button(wrapper, '全文阅读').trigger('click')
+  await flushPromises()
+  const note = wrapper.find('.document-reader .table-note')
+  expect(note.text()).toBe('注：数据来自问卷。')
+  expect(note.element.previousElementSibling?.tagName).toBe('TABLE')
 })

@@ -195,10 +195,13 @@ Table: 样本构成 {#tbl:p0q8m4c2}
 | 组别 | 人数 |
 | --- | --- |
 
+Table-note: 注：数据来自 2025 年问卷调查。
+
 如[图 2-1](writer:figure/k3x9a2b1)所示，见[表 2-1](writer:table/p0q8m4c2)。
 ```
 
 - 图的标识：图片 title 为 `fig:<id>`；表格标题：紧接在表格之前、原文以 `Table: ` 开头的段落，结尾可选 `{#tbl:<id>}`。
+- 表注：紧跟在表格之后、原文以 `Table-note: ` 开头的段落（每个表格最多一个，纯文字）；普通段落的段首 `Table-note:` 写作 `Table-note\:`。
 - `<id>` 只能是 ASCII 字母、数字、`-`、`_`；不符合时 title 是普通标题、`{#tbl:…}` 是标题文字的一部分。
 - 引用地址 `writer:figure/<id>`、`writer:table/<id>`，没有查询部分；id 不合法时是失效引用。编号不写入正文（链接文字是缓存）。
 

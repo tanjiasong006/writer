@@ -44,6 +44,16 @@ test('表格中：行列操作在最前；表头行不能在上方插入行或�
   expect(labels(inBody)).not.toContain('插入表格')
 })
 
+test('表格中：按表格是否已有标题、表注显示添加或编辑', () => {
+  const state = commandState(stateAt('| 甲 |\n| --- |\n| 1 |\n', 3))
+  expect(labels(editorContextMenu(state, null, null, null, false, { caption: false, note: false }))).toEqual(
+    expect.arrayContaining(['添加表格标题…', '添加表注…']),
+  )
+  expect(labels(editorContextMenu(state, null, null, null, false, { caption: true, note: true }))).toEqual(
+    expect.arrayContaining(['编辑表格标题…', '编辑表注…']),
+  )
+})
+
 test('选中图片：添加 / 编辑图注、剪切 / 拷贝，没有尺寸或对齐', () => {
   const state = commandState(stateAt('正文', 1))
   expect(labels(editorContextMenu(state, ''))).toEqual(['添加图注', '-', 'cut', 'copy'])

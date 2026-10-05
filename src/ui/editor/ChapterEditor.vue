@@ -20,6 +20,7 @@ import {
   setMath,
   setStructure,
   setTableCaption,
+  setTableNote,
   setElementId,
   selectedFootnote,
   setFootnoteText,
@@ -227,7 +228,8 @@ function sameCount(a: TextCount | null, b: TextCount | null): boolean {
 
 /**
  * 图表编号（docs/decisions.md 第 12 节）：有图注的图在图注前显示“图 2-1”（交给图片的节点视图），
- * 有标题的表格上方显示“表 2-1　标题”（单击编辑）。只是显示，不进入文档；按文档与起点缓存。
+ * 有标题的表格上方显示“表 2-1　标题”（单击编辑），有表注的表格下方显示表注（单击编辑）。
+ * 只是显示，不进入文档；按文档与起点缓存。
  */
 let elementCache: { readonly doc: EditorState['doc']; readonly start: ElementStart; readonly set: DecorationSet } | null = null
 
@@ -251,6 +253,22 @@ function elementDecorations(doc: EditorState['doc']): DecorationSet {
       )
     }
   }
+  doc.descendants((node, pos) => {
+    if (node.type !== nodes.table) return true
+    const note = ((node.attrs.note as string | null) ?? '').trim()
+    if (note !== '') {
+      // 紧跟在表格之后；同一位置还有下一个表格的标题时排在它前面（side 更小）。
+      decorations.push(
+        Decoration.widget(pos + node.nodeSize, () => tableNoteDOM(note, pos), {
+          side: -2,
+          key: `table-note:${pos}:${note}`,
+          ignoreSelection: true,
+          stopEvent: () => true,
+        }),
+      )
+    }
+    return false
+  })
   const set = decorations.length === 0 ? DecorationSet.empty : DecorationSet.create(doc, decorations)
   elementCache = { doc, start, set }
   return set
@@ -288,6 +306,16 @@ function tableCaptionDOM(label: string, caption: string, pos: number): HTMLEleme
   number.className = 'table-caption__label'
   number.textContent = label
   dom.append(number, caption)
+  return dom
+}
+
+function tableNoteDOM(note: string, pos: number): HTMLElement {
+  const dom = document.createElement('div')
+  dom.className = 'table-note'
+  dom.contentEditable = 'false'
+  dom.dataset.tableNotePos = String(pos)
+  dom.title = '单击编辑表注'
+  dom.textContent = note
   return dom
 }
 
@@ -561,7 +589,7 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
     inCode ? fenceLanguage(selection.$from.parent.attrs.params as string) : null,
     ref ? chapterRefMenu(ref.attrs.href as string) : null,
     selectedFootnote(view.state) !== null,
-    tableCaptionState(),
+    tableState(),
     selectedMath(view.state) !== null,
     selectedStructure(view.state) !== null,
   )
@@ -589,6 +617,10 @@ function runMenuItem(id: string): void {
     const pos = tableAtSelection()
     if (pos !== null) editTableCaption(pos)
   }
+  else if (id === 'table:note') {
+    const pos = tableAtSelection()
+    if (pos !== null) editTableNote(pos)
+  }
   else if (id === 'footnote:edit' && view) {
     const note = selectedFootnote(view.state)
     if (note) editFootnote(note.pos)
@@ -603,11 +635,13 @@ function runMenuItem(id: string): void {
   }
 }
 
-/** 光标在表格中时表格是否有标题（右键菜单中“添加 / 编辑表格标题…”）；不在表格中时为 null。 */
-function tableCaptionState(): boolean | null {
+/** 光标在表格中时表格是否有标题、表注（右键菜单中“添加 / 编辑表格标题…”“添加 / 编辑表注…”）；不在表格中时为 null。 */
+function tableState(): { caption: boolean; note: boolean } | null {
   const pos = tableAtSelection()
   if (pos === null || !view) return null
-  return ((view.state.doc.nodeAt(pos)?.attrs.caption as string | null) ?? '').trim() !== ''
+  const attrs = view.state.doc.nodeAt(pos)?.attrs
+  const has = (value: unknown) => ((value as string | null) ?? '').trim() !== ''
+  return { caption: has(attrs?.caption), note: has(attrs?.note) }
 }
 
 /** 选中引用的右键菜单内容：目标的完整名称与当前格式。 */
@@ -696,8 +730,10 @@ function imageFiles(data: DataTransfer | null): File[] {
  */
 const footnoteEditor = shallowRef<{
   readonly chapterId: ChapterId
-  /** 编辑的对象：脚注（已有脚注的位置，新脚注为 null）或表格标题（表格的位置）。 */
-  readonly target: { readonly kind: 'footnote'; readonly pos: number | null } | { readonly kind: 'table-caption'; readonly pos: number }
+  /** 编辑的对象：脚注（已有脚注的位置，新脚注为 null）或表格标题 / 表注（表格的位置）。 */
+  readonly target:
+    | { readonly kind: 'footnote'; readonly pos: number | null }
+    | { readonly kind: 'table-caption' | 'table-note'; readonly pos: number }
   readonly label: string
   readonly placeholder: string
   readonly text: string
@@ -753,6 +789,25 @@ function editTableCaption(pos: number): void {
   }
 }
 
+/** 编辑 pos 处表格的表注（没有表注时添加）。表注出现在导出的表格下方。 */
+function editTableNote(pos: number): void {
+  if (!view) return
+  const node = view.state.doc.nodeAt(pos)
+  if (node?.type !== nodes.table) return
+  const note = view.dom.querySelector(`[data-table-note-pos="${pos}"]`)
+  const dom = note ?? view.nodeDOM(pos)
+  const rect = dom instanceof Element ? dom.getBoundingClientRect() : view.coordsAtPos(pos + 1)
+  footnoteEditor.value = {
+    chapterId: currentId,
+    target: { kind: 'table-note', pos },
+    label: '表注',
+    placeholder: '注：……',
+    text: (node.attrs.note as string | null) ?? '',
+    // 没有表注时浮层出现在表格下方（表注将出现的位置）。
+    anchor: { x: rect.left, y: note ? rect.top + 24 : rect.bottom },
+  }
+}
+
 /** 光标所在的表格的位置；不在表格中时为 null。 */
 function tableAtSelection(): number | null {
   if (!view) return null
@@ -770,6 +825,8 @@ function commitFootnote(text: string): void {
   const { target } = editing
   if (target.kind === 'table-caption') {
     setTableCaption(target.pos, text === '' ? null : text)(view.state, view.dispatch)
+  } else if (target.kind === 'table-note') {
+    setTableNote(target.pos, text === '' ? null : text)(view.state, view.dispatch)
   } else if (target.pos === null) {
     if (text !== '') insertFootnote(text)(view.state, view.dispatch)
   } else if (text === '') {
@@ -938,6 +995,12 @@ function onFootnoteClick(event: MouseEvent): void {
   if (tableCaption && event.detail === 1) {
     event.preventDefault()
     editTableCaption(Number(tableCaption.dataset.tableCaptionPos))
+    return
+  }
+  const tableNote = event.target.closest<HTMLElement>('[data-table-note-pos]')
+  if (tableNote && event.detail === 1) {
+    event.preventDefault()
+    editTableNote(Number(tableNote.dataset.tableNotePos))
     return
   }
   if (event.detail !== 2) return
@@ -1414,12 +1477,14 @@ defineExpose({
   display: none;
 }
 
-/* 表格标题（表格上方，单击编辑）。 */
-.chapter-editor__body :deep(.table-caption) {
+/* 表格标题（表格上方）与表注（表格下方），单击编辑。 */
+.chapter-editor__body :deep(.table-caption),
+.chapter-editor__body :deep(.table-note) {
   cursor: pointer;
 }
 
-.chapter-editor__body :deep(.table-caption:hover) {
+.chapter-editor__body :deep(.table-caption:hover),
+.chapter-editor__body :deep(.table-note:hover) {
   color: var(--color-doc-text);
 }
 

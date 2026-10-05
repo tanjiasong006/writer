@@ -38,6 +38,8 @@ pub enum Block {
         rows: Vec<Vec<Vec<Inline>>>,
         /// 表格标题：紧接在表格之前、原文以 `Table: ` 开头的段落（docs/decisions.md 第 12 节）。
         caption: Option<Caption>,
+        /// 表注：紧跟在表格之后、原文以 `Table-note: ` 开头的段落的文字（docs/decisions.md 第 12 节）。
+        note: Option<String>,
     },
     Rule,
 }
@@ -220,12 +222,28 @@ thread_local! {
     static FOOTNOTES: RefCell<HashMap<String, Vec<Inline>>> = RefCell::new(HashMap::new());
 }
 
+/// 段落原文开头的表格记号：`Table: `（表格标题）或 `Table-note: `（表注）。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TableMark {
+    None,
+    Caption,
+    Note,
+}
+
 thread_local! {
-    /// 按顺序记录每个段落的原文是否以 `Table: ` 开头（由 HeadingsAsText 在产生段落开始时记下）。
-    static CAPTION_CANDIDATES: RefCell<VecDeque<bool>> = const { RefCell::new(VecDeque::new()) };
+    /// 按顺序记录每个段落原文开头的表格记号（由 HeadingsAsText 在产生段落开始时记下）。
+    static TABLE_MARKS: RefCell<VecDeque<TableMark>> = const { RefCell::new(VecDeque::new()) };
 }
 
 const CAPTION_PREFIX: &str = "Table: ";
+const NOTE_PREFIX: &str = "Table-note: ";
+
+/// 表注段落 → 表注的文字：去掉 `Table-note: `。
+fn table_note(inlines: &[Inline]) -> String {
+    let text = plain_text(inlines);
+    let text = text.trim();
+    text.strip_prefix(NOTE_PREFIX.trim_end()).unwrap_or(text).trim().to_owned()
+}
 
 /// 表格标题段落 → 标题：去掉 `Table: `，结尾的 `{#tbl:<id>}` 是标识。
 fn table_caption(inlines: &[Inline]) -> Caption {
@@ -261,7 +279,7 @@ pub fn parse(markdown: &str) -> Vec<Block> {
     }
     .peekable();
     FOOTNOTES.with(|footnotes| footnotes.borrow_mut().clear());
-    CAPTION_CANDIDATES.with(|queue| queue.borrow_mut().clear());
+    TABLE_MARKS.with(|queue| queue.borrow_mut().clear());
     let mut parsed = blocks(&mut events, &|_| false, 0);
     let definitions = FOOTNOTES.with(|footnotes| std::mem::take(&mut *footnotes.borrow_mut()));
     for block in &mut parsed {
@@ -366,9 +384,16 @@ impl<'a> Iterator for HeadingsAsText<'a> {
         }
         let (event, range) = self.inner.next()?;
         if matches!(event, Event::Start(Tag::Paragraph)) {
-            // 表格标题按原文判断（`Table\: …` 转义后不是标题）。
-            let candidate = self.source[range.clone()].trim_start().starts_with(CAPTION_PREFIX);
-            CAPTION_CANDIDATES.with(|queue| queue.borrow_mut().push_back(candidate));
+            // 表格标题与表注按原文判断（`Table\: …`、`Table-note\: …` 转义后不是）。
+            let source = self.source[range.clone()].trim_start();
+            let mark = if source.starts_with(CAPTION_PREFIX) {
+                TableMark::Caption
+            } else if source.starts_with(NOTE_PREFIX) {
+                TableMark::Note
+            } else {
+                TableMark::None
+            };
+            TABLE_MARKS.with(|queue| queue.borrow_mut().push_back(mark));
         }
         if !matches!(event, Event::Start(Tag::Heading { .. })) {
             return Some(event);
@@ -385,7 +410,7 @@ impl<'a> Iterator for HeadingsAsText<'a> {
             self.queued.push_back(Event::Text(line.into()));
         }
         self.queued.push_back(Event::End(TagEnd::Paragraph));
-        CAPTION_CANDIDATES.with(|queue| queue.borrow_mut().push_back(false));
+        TABLE_MARKS.with(|queue| queue.borrow_mut().push_back(TableMark::None));
         Some(Event::Start(Tag::Paragraph))
     }
 }
@@ -447,9 +472,16 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
             Event::End(end) if stop(&end) => break,
             Event::Start(Tag::Paragraph) => {
                 flush(&mut pending, &mut out);
-                let candidate = CAPTION_CANDIDATES.with(|queue| queue.borrow_mut().pop_front()).unwrap_or(false);
-                out.push(Block::Paragraph(inlines(events, TagEnd::Paragraph)));
-                caption_at = candidate.then_some(out.len() - 1);
+                let mark = TABLE_MARKS.with(|queue| queue.borrow_mut().pop_front()).unwrap_or(TableMark::None);
+                let content = inlines(events, TagEnd::Paragraph);
+                // 表注：紧跟在表格之后（之间没有其他块）的 `Table-note: ` 段落。
+                if let (TableMark::Note, Some(Block::Table { note: note @ None, .. })) = (mark, out.last_mut()) {
+                    *note = Some(table_note(&content));
+                    caption_at = None;
+                    continue;
+                }
+                out.push(Block::Paragraph(content));
+                caption_at = (mark == TableMark::Caption).then_some(out.len() - 1);
             }
             Event::Start(Tag::BlockQuote(_) | Tag::List(_)) if depth >= MAX_NESTING => {
                 flush(&mut pending, &mut out);
@@ -580,6 +612,7 @@ fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
         header,
         rows,
         caption: None,
+        note: None,
     }
 }
 
@@ -1008,6 +1041,7 @@ mod tests {
                     vec![vec![text("实验")], vec![Inline::Strong(vec![text("32")])]],
                 ],
                 caption: None,
+                note: None,
             }]
         );
     }
@@ -1029,6 +1063,27 @@ mod tests {
         assert_eq!(parse("Table: 只是文字").len(), 1);
         // 标题不在正文中重复出现。
         assert_eq!(parse("Table: 甲\n\n| a |\n| - |").len(), 1);
+    }
+
+    #[test]
+    fn table_note_is_the_paragraph_after_the_table_in_the_source() {
+        let note = |markdown: &str| match parse(markdown).first() {
+            Some(Block::Table { note, .. }) => note.clone(),
+            _ => None,
+        };
+        assert_eq!(note("| a |\n| - |\n\nTable-note: 注：*数据*来自问卷。"), Some("注：数据来自问卷。".into()));
+        // 表注不在正文中重复出现；每个表格只有一个表注，之后的同样段落是普通段落。
+        assert_eq!(parse("| a |\n| - |\n\nTable-note: 甲").len(), 1);
+        assert_eq!(parse("| a |\n| - |\n\nTable-note: 甲\n\nTable-note: 乙").len(), 2);
+        // 转义后不是表注；之间隔着其他块、或前面不是表格时，段落保留。
+        assert_eq!(note("| a |\n| - |\n\nTable-note\\: 文字"), None);
+        assert_eq!(note("| a |\n| - |\n\n---\n\nTable-note: 甲"), None);
+        assert_eq!(parse("Table-note: 只是文字").len(), 1);
+        // 标题与表注可以同时存在；表注之后紧接着下一个表格的标题。
+        let blocks = parse("Table: 甲\n\n| a |\n| - |\n\nTable-note: 注\n\nTable: 乙\n\n| b |\n| - |");
+        assert_eq!(blocks.len(), 2);
+        assert!(matches!(&blocks[0], Block::Table { caption: Some(c), note: Some(n), .. } if c.text == "甲" && n == "注"));
+        assert!(matches!(&blocks[1], Block::Table { caption: Some(c), note: None, .. } if c.text == "乙"));
     }
 
     #[test]

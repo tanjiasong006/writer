@@ -150,7 +150,7 @@ fn block(block: &Block) -> Value {
             "start": start,
             "items": items.iter().map(|item| list_item(item)).collect::<Vec<_>>(),
         }),
-        Block::Table { alignments, header, rows, caption } => {
+        Block::Table { alignments, header, rows, caption, note } => {
             let mut table = json!({
             "type": "table",
             "align": alignments.iter().map(|a| match a {
@@ -167,6 +167,9 @@ fn block(block: &Block) -> Value {
                     Some(id) => json!({ "text": caption.text, "id": id }),
                     None => json!({ "text": caption.text }),
                 };
+            }
+            if let Some(note) = note {
+                table["note"] = json!(note);
             }
             table
         }

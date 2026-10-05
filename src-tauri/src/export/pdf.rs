@@ -199,9 +199,10 @@ fn document_has_cjk(document: &Document) -> bool {
             Block::Quote(blocks) => blocks_have_cjk(blocks),
             Block::Code { text, .. } => text.chars().any(is_cjk),
             Block::Structure { .. } => false,
-            Block::Table { header, rows, .. } => {
+            Block::Table { header, rows, note, .. } => {
                 header.iter().any(|c| inlines_have_cjk(c))
                     || rows.iter().flatten().any(|c| inlines_have_cjk(c))
+                    || note.as_deref().is_some_and(|note| note.chars().any(is_cjk))
             }
             Block::Rule => false,
         })
@@ -636,7 +637,7 @@ impl<'a> Writer<'a> {
                 None => format!("#raw(block: true, {})", string(&breakable(text))),
             },
             Block::Structure { smiles, conditions } => self.structure(smiles, conditions),
-            Block::Table { alignments, header, rows, caption } => {
+            Block::Table { alignments, header, rows, caption, note } => {
                 // 表格标题在表格上方，与表格留在同一页；有编号时前面是编号并带标签。
                 let title = match (caption, &element) {
                     (Some(caption), Some(target)) => {
@@ -648,14 +649,14 @@ impl<'a> Writer<'a> {
                     }
                     _ => String::new(),
                 };
-                let table = self.table(alignments, header, rows);
+                let table = self.table(alignments, header, rows, note.as_deref());
                 format!("{title}{table}")
             }
             Block::Rule => "#align(center, line(length: 30%, stroke: 0.5pt + luma(160)))".to_owned(),
         }
     }
 
-    fn table(&mut self, alignments: &[Align], header: &Vec<Vec<Inline>>, rows: &[Vec<Vec<Inline>>]) -> String {
+    fn table(&mut self, alignments: &[Align], header: &Vec<Vec<Inline>>, rows: &[Vec<Vec<Inline>>], note: Option<&str>) -> String {
         {
             {
                 // 三线表 / 网格表（无图片时列宽随内容；含图片时各列等宽，见下）。
@@ -702,15 +703,32 @@ impl<'a> Writer<'a> {
                     TableStyle::ThreeLine => format!(", stroke: writer-three-line({})", rows.len()),
                     TableStyle::Grid => String::new(),
                 };
-                if !with_images {
+                if !with_images && note.is_none() {
                     return format!("#table(columns: {columns}, align: ({align},){stroke}, table.header({head}), {cells})");
                 }
-                format!(
-                    "#layout(size => {{\n\
-                     let columns = (1fr,) * {columns}\n\
-                     let writer-table-head = measure(block(width: size.width, table(columns: columns, align: ({align},), table.header({head})))).height\n\
-                     table(columns: columns, align: ({align},){stroke}, table.header({head}), {cells})\n}})"
-                )
+                let table = |footer: &str| {
+                    format!("table(columns: columns, align: ({align},){stroke}, table.header({head}), {cells}{footer})")
+                };
+                let mut lines = vec![if with_images {
+                    format!("let columns = (1fr,) * {columns}")
+                } else {
+                    format!("let columns = {columns}")
+                }];
+                if with_images {
+                    lines.push(format!(
+                        "let writer-table-head = measure(block(width: size.width, table(columns: columns, align: ({align},), table.header({head})))).height"
+                    ));
+                }
+                // 表注是不重复的表脚：在表格下方，与最后一行留在同一页。与表格标题一样按容器的全宽折行；
+                // 外面是零宽的 box，表注不参与列宽的计算（否则会撑宽随内容的列），高度照常占用。
+                let footer = note.map(|note| {
+                    format!(
+                        ", table.footer(repeat: false, table.cell(colspan: {columns}, align: left, stroke: none, inset: (x: 0pt, top: 0.5em, bottom: 0pt), box(width: 0pt, block(width: size.width, text(..writer-caption, fill: luma(100))[#{}]))))",
+                        string(note)
+                    )
+                });
+                lines.push(table(footer.as_deref().unwrap_or("")));
+                format!("#layout(size => {{\n{}\n}})", lines.join("\n"))
             }
         }
     }
@@ -2602,6 +2620,56 @@ mod tests {
     }
 
     #[test]
+    fn table_note_stays_on_the_page_of_the_last_row() {
+        let dir = project();
+        // 行数跨过分页处：无论表格在哪里结束，表注都与最后一行在同一页，只出现一次。
+        for count in 20..=45 {
+            let mut markdown = String::from("| 序号 | 内容 |\n| --- | --- |\n");
+            for i in 1..=count {
+                markdown.push_str(&format!("| R{i} | 内容 |\n"));
+            }
+            markdown.push_str("\nTable-note: 注：表注文字。");
+            let document = build(&request("", &[("a", vec![1], "表", &markdown)]));
+            let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
+            let page_of = |needle: &str| -> Vec<usize> {
+                placed(&paged)
+                    .into_iter()
+                    .filter_map(|p| match p {
+                        Placed::Text { page, text, .. } if text.contains(needle) => Some(page),
+                        _ => None,
+                    })
+                    .collect()
+            };
+            let last = page_of(&format!("R{count}"));
+            let note = page_of("表注文字");
+            assert_eq!(note.len(), 1, "{count}");
+            assert_eq!(note, last, "{count} rows");
+            assert_inside_text_area(&paged);
+        }
+    }
+
+    #[test]
+    fn table_note_does_not_widen_the_columns() {
+        let dir = project();
+        let x_of = |markdown: &str| {
+            let document = build(&request("", &[("a", vec![1], "表", markdown)]));
+            let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout::default()).unwrap();
+            placed(&paged)
+                .into_iter()
+                .find_map(|p| match p {
+                    Placed::Text { x, text, .. } if text.contains("乙") => Some(x),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        // 第二列右对齐：列变宽时“乙”会右移。
+        let table = "| 甲 | 乙 |\n| - | -: |\n| 1 | 2 |";
+        let plain = x_of(table);
+        let noted = x_of(&format!("{table}\n\nTable-note: {}", "很长的表注文字".repeat(20)));
+        assert!((plain - noted).abs() < 0.5, "{plain} vs {noted}");
+    }
+
+    #[test]
     fn extremely_narrow_images_keep_the_height_limit() {
         let dir = project();
         write_image(&dir.path().join("assets/细.png"), 10, 10000, ImageFormat::Png);
@@ -2807,7 +2875,7 @@ fn write_sample_pdf() {
         author: "Writer 团队".into(),
         chapters: vec![
             chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n上下标：处理规模 5000 m<sup>3</sup>/d，H<sub>2</sub>O 与 NH<sub>4</sub><sup>+</sup>，**容积负荷 1.2 kg/(m<sup>3</sup>·d)**。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二\n\n注入测试：\"]#panic(\"x\")[ $ x $ #strong[不应加粗]\n\n章节引用：详见[旧](writer:chapter/c)与第[旧](writer:chapter/b?show=number)节。"),
-            chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
+            chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\nTable: 样本构成\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |\n\nTable-note: 注：数据来自 2025 年问卷调查，实验组含 2 名中途退出者；样本数为最终纳入分析的人数。\n\n表格之后的正文段落。"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
         references: Vec::new(),

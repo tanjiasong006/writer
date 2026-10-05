@@ -401,6 +401,27 @@ tokenizer.core.ruler.push('writer_table_caption', (state) => {
   }
 })
 
+/**
+ * 表注（docs/decisions.md 第 12 节）：原文以 `Table-note: ` 开头、紧跟在表格之后（之间没有其他块）的段落成为表格的表注。
+ * 与表格标题相同，按原文判断：转义的 `Table-note\:` 是普通段落。
+ */
+const NOTE_PREFIX = 'Table-note: '
+
+tokenizer.core.ruler.push('writer_table_note', (state) => {
+  const tokens = state.tokens
+  let table: Token | null = null
+  for (let i = 0; i + 3 < tokens.length; i++) {
+    if (tokens[i].type === 'table_open') table = tokens[i]
+    const [close, open, inline, end] = tokens.slice(i, i + 4)
+    if (close.type !== 'table_close' || open.type !== 'paragraph_open' || end.type !== 'paragraph_close') continue
+    // 每个表格只有一个表注：之后再以 `Table-note: ` 开头的段落是普通段落（与 Rust 渲染器相同）。
+    if (!inline.content.startsWith(NOTE_PREFIX) || !table || (table.meta as { note?: string } | null)?.note !== undefined) continue
+    const note = inlinePlainText(inline.children ?? []).trim().replace(/^Table-note:\s*/, '')
+    table.meta = { ...(table.meta as object | null), note }
+    tokens.splice(i + 1, 3)
+  }
+})
+
 /** 只含一个行间公式的段落是公式块（与 Rust 的 Block::as_math 相同）。 */
 tokenizer.core.ruler.push('writer_math_block', (state) => {
   const tokens = state.tokens
@@ -614,7 +635,7 @@ const parser = new MarkdownParser(schema, tokenizer, {
   hr: { node: 'horizontal_rule' },
   table: {
     block: 'table',
-    getAttrs: (token) => (token.meta as { caption: string; captionId: string | null } | null) ?? {},
+    getAttrs: (token) => (token.meta as { caption?: string; captionId?: string | null; note?: string } | null) ?? {},
   },
   thead: { ignore: true },
   tbody: { ignore: true },
@@ -676,6 +697,8 @@ function escapeLineStart(escaped: string): string {
   return escaped
     // 段首的 `Table: ` 会让紧随其后的表格把这一段当作标题。
     .replace(/^Table:/, 'Table\\:')
+    // 段首的 `Table-note: ` 会让紧挨着的前一个表格把这一段当作表注。
+    .replace(/^Table-note:/, 'Table-note\\:')
     .replace(/^(\d+)([.)])(?=\s|$)/, '$1\\$2')
     .replace(/^\+(?=\s|$)/, '\\+')
     .replace(/^=/, '\\=')
@@ -762,6 +785,12 @@ function serializeTable(state: MarkdownSerializerState, node: Node): void {
     state.ensureNewLine()
   }
   state.closeBlock(node)
+  // 表注紧跟在表格之后；没有文字的表注不写出。
+  const note = node.attrs.note as string | null
+  if (note !== null && note.trim() !== '') {
+    state.write(`${NOTE_PREFIX}${state.esc(note.trim())}`)
+    state.closeBlock(node)
+  }
 }
 
 /** 单元格内容按段落序列化，再转义竖线（GFM 在行内解析之前处理 \|，代码中同样适用）。 */

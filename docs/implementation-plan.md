@@ -1049,6 +1049,16 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   导出图片按 SMILES 与条件对应（`RenderStructure` 带条件，Rust `StructureKey`）。验证：画法、浮层、编辑器插入、Markdown 读写与转义、
   合并 Markdown 的往返、PDF 按条件对应图片；Storybook 中目视检查了正文与浮层，浏览器画出的反应式 PNG 经 PDF 导出检查了页面效果。
 
+#### P2-10 表注（完成，2026-10-05）
+
+- 规则见 decisions 第 12 节（表注），格式见 project-format 4.2。编辑器：schema table 的 `note`；`markdown.ts`
+  （`writer_table_note` 规则读、`serializeTable` 写，段首 `Table-note:` 转义）；`setTableNote`；表格下方的 widget
+  （单击 / 右键“添加 / 编辑表注…”，`TextPopover`）；全文阅读显示表注。
+- Rust：`Block::Table.note`；Word（TableNote 样式、最后一行与表注同页）、PDF（不重复的表脚，先测量表格宽度再限制表注宽度）、
+  HTML / EPUB、Markdown 导出。
+- 验证：Rust 解析、共享 fixture `table-notes`、菜单、工作区端到端（添加、单击编辑、清空、保存的正文、全文阅读）、
+  Word（样式、位置、keepNext 只在最后一行）、PDF（20–45 行跨过分页处时表注总与最后一行同页、长表注不撑宽列）、HTML / Markdown 导出。
+
 ### 发布准备（非功能）
 
 1. 手动验收清单在正式包中全部走一遍（需要真实桌面环境与 Word / WPS，known-risks #5）。

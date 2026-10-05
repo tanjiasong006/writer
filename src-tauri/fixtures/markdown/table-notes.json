@@ -1,0 +1,24 @@
+{
+  "说明": "表注（docs/decisions.md 第 12 节）：紧跟在表格之后、原文以 Table-note: 开头的段落是表格的表注（纯文字），每个表格最多一个。转义的 Table-note\\:、表注之后的同样段落、前面不是表格的段落是普通段落。",
+  "blocks": [
+    {
+      "type": "table",
+      "align": ["none", "none"],
+      "header": [[{ "text": "组别" }], [{ "text": "人数" }]],
+      "rows": [[[{ "text": "对照" }], [{ "text": "30" }]]],
+      "caption": { "text": "样本构成" },
+      "note": "注：数据来自 2025 年问卷。"
+    },
+    {
+      "type": "table",
+      "align": ["none"],
+      "header": [[{ "text": "甲" }]],
+      "rows": [],
+      "note": "没有标题的表格也可以有表注"
+    },
+    { "type": "paragraph", "inlines": [{ "text": "Table-note: 每个表格只有一个表注，之后的是普通段落" }] },
+    { "type": "table", "align": ["none"], "header": [[{ "text": "丙" }]], "rows": [] },
+    { "type": "paragraph", "inlines": [{ "text": "Table-note: 转义后是普通段落" }] },
+    { "type": "paragraph", "inlines": [{ "text": "Table-note: 前面不是表格的段落是文字" }] }
+  ]
+}

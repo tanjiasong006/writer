@@ -35,18 +35,28 @@ export function renderChapterBody(
       figure: (node) => staticImageDOM(node, resolveImage, nextLabel(node)),
       table: (node) => {
         const label = nextLabel(node)
+        const note = ((node.attrs.note as string | null) ?? '').trim()
         const table = document.createElement('table')
         const body = document.createElement('tbody')
         table.append(body)
-        if (label === null) return { dom: table, contentDOM: body }
+        if (label === null && note === '') return { dom: table, contentDOM: body }
         const wrapper = document.createElement('div')
-        const title = document.createElement('div')
-        title.className = 'table-caption'
-        const number = document.createElement('span')
-        number.className = 'table-caption__label'
-        number.textContent = label
-        title.append(number, caption(node))
-        wrapper.append(title, table)
+        if (label !== null) {
+          const title = document.createElement('div')
+          title.className = 'table-caption'
+          const number = document.createElement('span')
+          number.className = 'table-caption__label'
+          number.textContent = label
+          title.append(number, caption(node))
+          wrapper.append(title)
+        }
+        wrapper.append(table)
+        if (note !== '') {
+          const below = document.createElement('div')
+          below.className = 'table-note'
+          below.textContent = note
+          wrapper.append(below)
+        }
         return { dom: wrapper, contentDOM: body }
       },
       image: (node) => staticImageDOM(node, resolveImage),

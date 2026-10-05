@@ -367,6 +367,17 @@ export function setTableCaption(pos: number, caption: string | null): Command {
   }
 }
 
+/** 设置 pos 处表格的表注（null 去掉表注）。 */
+export function setTableNote(pos: number, note: string | null): Command {
+  return (state, dispatch) => {
+    const node = state.doc.nodeAt(pos)
+    if (node?.type !== nodes.table) return false
+    if (node.attrs.note === note) return true
+    if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, note }))
+    return true
+  }
+}
+
 /**
  * 给章节中第 index 个有编号的图（或表）设置被引用时的标识（docs/decisions.md 第 12 节）：
  * 图写在图片的 title（`fig:<id>`），表写在表格标题的标识。已有标识时不改变。

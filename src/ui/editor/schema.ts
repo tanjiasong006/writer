@@ -196,12 +196,14 @@ export const schema = new Schema({
     /**
      * 表格标题（docs/decisions.md 第 12 节）：Markdown 中是紧接在表格之前、以 `Table: ` 开头的段落，
      * captionId 是被引用时的标识（`{#tbl:<id>}`）。caption 为 null 表示没有标题。
+     * 表注（note）是紧跟在表格之后、以 `Table-note: ` 开头的段落；null 表示没有表注。
      */
     table: {
       ...table.table,
       attrs: {
         caption: { default: null, validate: 'string|null' },
         captionId: { default: null, validate: 'string|null' },
+        note: { default: null, validate: 'string|null' },
       },
     },
     // 单元格只有一行行内内容（是文本块），gapcursor 会把"两个单元格之间"当成可放光标的位置，

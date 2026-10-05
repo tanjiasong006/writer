@@ -80,8 +80,9 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
   `insertChapterRef(chapterId, href)`；⌘ + 单击与右键菜单“前往”发出 `open-chapter`，跳转由上层完成，`revealStart` 把光标放在正文开头。
 - 脚注（docs/decisions.md 第 11 节）是行内原子节点 `footnote`（text 为内容文字，source 为载入时定义的原文）。
   Markdown 中写成 `[^n]` 加章节末尾的定义；写出时按顺序重新编号，内容未修改时写回原文。编号与章末列表只是显示。
-- 图表（docs/decisions.md 第 12 节）：图的标识在 figure 的 title（`fig:<id>`），表格标题与标识是 table 的 caption / captionId。
-  编号由上层给出的 `elementStart` 计算，只以 decoration 显示（图注前的编号、表格上方的标题），不进入文档；
+- 图表（docs/decisions.md 第 12 节）：图的标识在 figure 的 title（`fig:<id>`），表格标题与标识是 table 的 caption / captionId，
+  表注是 table 的 note（Markdown 中是表格之后的 `Table-note: ` 段落）。
+  编号由上层给出的 `elementStart` 计算，只以 decoration 显示（图注前的编号、表格上方的标题、表格下方的表注），不进入文档；
   图表引用与章节引用共用 `chapter_ref` 节点，`refLabel` 给出文字。
 - 查找（`findQuery`）只以 decoration 高亮匹配，不改变文档；当前匹配就是选区。替换是普通正文事务（进入撤销历史）；
   全文替换时其他章节在各自缓存的 EditorState 上修改（进入该章节自己的撤销历史），新正文以 change 发出。

@@ -413,6 +413,7 @@ impl Writer<'_> {
                 header,
                 rows,
                 caption,
+                note,
             } => {
                 // 表格标题在表格上方（Caption 样式），与表格留在同一页；有编号时前面是编号并带书签。
                 if let (Some(caption), Some(target)) = (caption, &element) {
@@ -420,7 +421,7 @@ impl Writer<'_> {
                     let p = self.caption_paragraph(&text, target, context).keep_next(true);
                     self.items.push(Item::Paragraph(p));
                 }
-                self.table(alignments, header, rows)
+                self.table(alignments, header, rows, note.as_deref())
             }
             Block::Rule => self
                 .items
@@ -516,7 +517,8 @@ impl Writer<'_> {
         }
     }
 
-    fn table(&mut self, alignments: &[Align], header: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>]) {
+    /// 表格；有表注时表注紧随其后（TableNote 样式），最后一行与表注保持在同一页。
+    fn table(&mut self, alignments: &[Align], header: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>], note: Option<&str>) {
         let columns = header
             .len()
             .max(rows.iter().map(Vec::len).max().unwrap_or(0))
@@ -550,8 +552,9 @@ impl Writer<'_> {
             bold: true,
             ..RunStyle::default()
         };
+        // 最后一行的段落“与下段同页”，表注不会单独落到下一页。
         let make_row =
-            |writer: &mut Self, cells: &[Vec<Inline>], style: RunStyle, is_header: bool| {
+            |writer: &mut Self, cells: &[Vec<Inline>], style: RunStyle, is_header: bool, keep_next: bool| {
                 let cells = (0..columns)
                     .map(|i| {
                         let mut p = Paragraph::new().style("TableText");
@@ -562,7 +565,7 @@ impl Writer<'_> {
                         };
                         let inlines = cells.get(i).map_or(&[][..], Vec::as_slice);
                         let bounds = if is_header { head_bounds } else { body_bounds };
-                        let p = writer.inlines(p, inlines, style, bounds);
+                        let p = writer.inlines(p, inlines, style, bounds).keep_next(keep_next);
                         let cell = TableCell::new()
                             .add_paragraph(p)
                             .width(width, WidthType::Dxa);
@@ -588,9 +591,10 @@ impl Writer<'_> {
                     TableRow::new(cells)
                 }
             };
-        let mut table_rows = vec![make_row(self, header, bold, true)];
-        for row in rows {
-            table_rows.push(make_row(self, row, RunStyle::default(), false));
+        let keep_last = note.is_some();
+        let mut table_rows = vec![make_row(self, header, bold, true, keep_last && rows.is_empty())];
+        for (i, row) in rows.iter().enumerate() {
+            table_rows.push(make_row(self, row, RunStyle::default(), false, keep_last && i + 1 == rows.len()));
         }
         // 三线表：顶线与底线 1 磅，无竖线与内部横线（与 PDF 默认一致）。
         let rule = |position| {
@@ -608,6 +612,11 @@ impl Writer<'_> {
                     .set(rule(TableBorderPosition::Bottom)),
             );
         self.items.push(Item::Table(table));
+        if let Some(note) = note {
+            self.items.push(Item::Paragraph(
+                Paragraph::new().style("TableNote").add_run(Run::new().add_text(xml_safe(note))),
+            ));
+        }
         // 紧跟的段落与表格之间留出间距。
         self.items.push(Item::Paragraph(Paragraph::new()));
     }
@@ -1127,6 +1136,17 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
                 .size(half_points(theme.caption.size))
                 .color(META_COLOR)
                 .align(AlignmentType::Center),
+        )
+        .add_style(
+            // 表注：表格下方左对齐，与图注相同的字体、字号与颜色。
+            Style::new("TableNote", StyleType::Paragraph)
+                .name("Table Note")
+                .based_on("Normal")
+                .fonts(fonts(theme.caption.font))
+                .size(half_points(theme.caption.size))
+                .color(META_COLOR)
+                .align(AlignmentType::Left)
+                .line_spacing(LineSpacing::new().before(60)),
         );
 
     for level in 1..=MAX_HEADING {
@@ -2026,6 +2046,29 @@ mod tests {
     }
 
     #[test]
+    fn table_note_follows_the_table_and_keeps_the_last_row_with_it() {
+        let dir = project();
+        let (bytes, _) = export_ok(
+            &dir,
+            &[("a", vec![1], "表", "| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n\nTable-note: 注：数据来自问卷。")],
+        );
+        let xml = part(&bytes, "word/document.xml");
+        // 表注紧跟在表格之后，使用 TableNote 样式。
+        let table_end = xml.find("</w:tbl>").unwrap();
+        let note = xml.find(r#"<w:pStyle w:val="TableNote" />"#).expect("table note");
+        assert!(note > table_end && !xml[table_end..note].contains("<w:t"), "{xml}");
+        assert!(xml[note..].contains("注：数据来自问卷。"));
+        // 只有最后一行（两个单元格）与表注保持在同一页。
+        let rows: Vec<&str> = xml[..table_end].split("<w:tr>").skip(1).collect();
+        assert_eq!(rows.len(), 3);
+        assert!(rows[2].matches("<w:keepNext />").count() == 2, "{}", rows[2]);
+        assert!(!rows[1].contains("<w:keepNext />"));
+        let styles = part(&bytes, "word/styles.xml");
+        let style = style_xml(&styles, "TableNote");
+        assert!(style.contains(r#"<w:sz w:val="20" />"#) && style.contains(r#"<w:jc w:val="left" />"#), "{style}");
+    }
+
+    #[test]
     fn many_chapters() {
         let dir = project();
         let owned: Vec<(String, Vec<u32>, String, String)> = (1..=500)
@@ -2093,7 +2136,7 @@ fn write_sample_docx() {
         author: "示例作者".into(),
         chapters: vec![
             chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n上下标：处理规模 5000 m<sup>3</sup>/d，H<sub>2</sub>O 与 NH<sub>4</sub><sup>+</sup>，**容积负荷 1.2 kg/(m<sup>3</sup>·d)**。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二"),
-            chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
+            chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\nTable: 样本构成\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |\n\nTable-note: 注：数据来自 2025 年问卷调查，实验组含 2 名中途退出者；样本数为最终纳入分析的人数。\n\n表格之后的正文段落。"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.jpg)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],
         references: Vec::new(),

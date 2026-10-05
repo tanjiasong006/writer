@@ -125,7 +125,7 @@ impl Writer<'_> {
                 let fence = if info.contains('`') { "~~~" } else { "```" };
                 format!("{fence}{info}\n{smiles}\n{fence}")
             }
-            Block::Table { alignments, header, rows, caption } => {
+            Block::Table { alignments, header, rows, caption, note } => {
                 let mut out = String::new();
                 if let (Some(caption), Some(target)) = (caption, &element) {
                     out.push_str(&format!("**{}**\n\n", escape(&format!("{}{ELEMENT_SEPARATOR}{}", target.label, caption.text))));
@@ -150,6 +150,10 @@ impl Writer<'_> {
                 for row in rows {
                     out.push('\n');
                     out.push_str(&line((0..columns).map(|i| cell(self, row, i)).collect()));
+                }
+                // 表注是表格之后的一段文字。
+                if let Some(note) = note {
+                    out.push_str(&format!("\n\n{}", escape_line_start(&escape(note))));
                 }
                 out
             }
@@ -320,7 +324,7 @@ mod tests {
         image::RgbImage::new(4, 2).save(dir.path().join("assets/a.png")).unwrap();
         let chapters = vec![
             RenderChapter { id: "a".into(), number: vec![1], title: "绪论".into(), markdown: "见[旧](writer:chapter/b)与[旧](writer:figure/f)，文献[[x]](writer:cite/r)。注[^1]\n\n[^1]: 甲\n\n![流程](../assets/a.png \"fig:f\")\n\n> - 引用中的列表\n\n$$x^2$$".into() },
-            RenderChapter { id: "b".into(), number: vec![1, 1], title: "背景".into(), markdown: "价格 $5 与 *强调*。注[^1]\n\n[^1]: 乙\n\nm<sup>3</sup>/d，H<sub>2</sub>O，\\<sup>".into() },
+            RenderChapter { id: "b".into(), number: vec![1, 1], title: "背景".into(), markdown: "价格 $5 与 *强调*。注[^1]\n\n[^1]: 乙\n\nm<sup>3</sup>/d，H<sub>2</sub>O，\\<sup>\n\n| 甲 |\n| - |\n\nTable-note: 1. 注*".into() },
         ];
         let request = RenderRequest {
             title: "论文".into(),
@@ -336,6 +340,8 @@ mod tests {
         assert!(text.contains("$$\nx^2\n$$"));
         assert!(text.contains("### 1.1 背景\n\n价格 \\$5 与 *强调*。注[^2]"), "{text}");
         assert!(text.contains("m<sup>3</sup>/d，H<sub>2</sub>O，\\<sup\\>"), "{text}");
+        // 表注是表格之后的一段文字，按普通段落转义。
+        assert!(text.contains("| 甲 |\n| --- |\n\n\\1. 注\\*"), "{text}");
         assert!(text.contains("## 参考文献\n\n\\[1\\] 甲. 书\\[M\\]."), "{text}");
         assert!(text.ends_with("[^1]: 甲\n\n[^2]: 乙\n"), "{text}");
         assert_eq!(export.images.len(), 1);

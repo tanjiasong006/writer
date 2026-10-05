@@ -242,6 +242,18 @@
   user-select: none;
 }
 
+/* 表注：在表格下方左对齐，与表格标题相同的字号与颜色。 */
+.document-body .table-note {
+  margin: 0.4em 0 1em;
+  color: var(--color-doc-muted);
+  font-family: var(--doc-caption-font);
+  font-size: var(--doc-caption-size);
+  line-height: 1.5;
+  text-align: left;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* 上标 / 下标：与脚注、文献引用的编号同样大小；行高为 0，不撑高所在的行。 */
 .document-body sup,
 .document-body sub {

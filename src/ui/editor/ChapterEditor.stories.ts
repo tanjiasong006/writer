@@ -295,7 +295,7 @@ export const SuperscriptAndSubscript: Story = {
   },
 }
 
-/** 图表编号：有图注的图在图注前显示“图 2-1”，有标题的表格上方显示“表 2-1　标题”（单击编辑，右键可添加）。 */
+/** 图表编号与表注：有图注的图在图注前显示“图 2-1”，有标题的表格上方显示“表 2-1　标题”，表注在表格下方（都可单击编辑，右键可添加）。 */
 export const FiguresAndTables: Story = {
   args: {
     chapterId: 'elements',
@@ -313,7 +313,9 @@ export const FiguresAndTables: Story = {
       '研究流程见[图 2-1](writer:figure/flow)，样本构成见[表 2-1](writer:table/sample)。\n\n' +
       '![研究流程](missing-flow.png "fig:flow")\n\n' +
       'Table: 样本构成 {#tbl:sample}\n\n| 组别 | 人数 |\n| --- | --- |\n| 对照 | 30 |\n| 实验 | 32 |\n\n' +
-      '| 没有标题的表格 |\n| --- |\n| 不编号 |\n',
+      'Table-note: 注：数据来自 2025 年问卷调查，实验组含 2 名中途退出者。\n\n' +
+      '| 没有标题的表格 |\n| --- |\n| 不编号 |\n\n' +
+      'Table-note: 没有标题的表格也可以有表注。\n\n表格之后的正文段落。\n',
   },
 }
 
