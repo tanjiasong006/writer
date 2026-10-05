@@ -427,22 +427,76 @@ tokenizer.core.ruler.push('writer_structure', (state) => {
     if (token.type !== 'fence' || !isStructureFence(token.info)) continue
     token.type = 'structure'
     token.content = token.content.trim()
+    // markdown-it 保留信息的原文（输出 HTML 时才处理转义与字符实体）；与 pulldown-cmark 相同地先处理。
+    token.info = tokenizer.utils.unescapeAll(token.info)
   }
 })
 
-/** 结构式的围栏：内容中有反引号时用更长的围栏。 */
-function structureFence(smiles: string): string {
-  const longest = Math.max(2, ...[...smiles.matchAll(/`+/g)].map((match) => match[0].length))
-  return '`'.repeat(longest + 1)
+/** 反应式的箭头与条件（docs/decisions.md 第 22 节）。arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。 */
+export interface StructureConditions {
+  readonly arrow: string
+  readonly above: string
+  readonly below: string
 }
 
-/** 正文中全部化学结构式的 SMILES（去重，按出现顺序）：导出前画出它们的图片。 */
-export function structureSources(markdown: string): readonly string[] {
-  const sources = new Set<string>()
-  for (const token of flattenTokens(tokenizer.parse(markdown, {}))) {
-    if (token.type === 'structure' && token.content !== '') sources.add(token.content)
+export const NO_CONDITIONS: StructureConditions = { arrow: '', above: '', below: '' }
+
+/** 箭头的写法：→ 写作空（也接受 `->`），其他不认识的写法也是 →。 */
+export function normalizeArrow(arrow: string): string {
+  const value = arrow.trim()
+  return value === '<=>' || value === '=' ? value : ''
+}
+
+/**
+ * 代码块信息中 smiles 之后的属性：`key="value"`，值中不含双引号（与 Rust 的 render::markdown 相同）。
+ * 认识 arrow、above、below（不区分大小写），其他忽略；条件去掉首尾空白。
+ */
+export function parseStructureInfo(info: string): StructureConditions {
+  const rest = info.trim().replace(/^\S+/, '')
+  let conditions = NO_CONDITIONS
+  for (const match of rest.matchAll(/([A-Za-z]+)="([^"]*)"/g)) {
+    const key = match[1].toLowerCase()
+    if (key === 'arrow') conditions = { ...conditions, arrow: normalizeArrow(match[2]) }
+    else if (key === 'above' || key === 'below') conditions = { ...conditions, [key]: match[2].trim() }
   }
-  return [...sources]
+  return conditions
+}
+
+/**
+ * 写出的代码块信息：`smiles` 与非空的属性。值中的双引号换成全角，换行换成空格；Markdown 会在信息中处理
+ * 反斜杠转义与字符实体，因此 `\` 与 `&` 前加反斜杠。
+ */
+function structureInfo(conditions: StructureConditions): string {
+  const value = (text: string) => text.replace(/"/g, '＂').replace(/\s+/g, ' ').trim().replace(/[\\&]/g, '\\$&')
+  const parts = ['smiles']
+  const arrow = normalizeArrow(conditions.arrow)
+  if (arrow !== '') parts.push(`arrow="${arrow}"`)
+  if (conditions.above.trim() !== '') parts.push(`above="${value(conditions.above)}"`)
+  if (conditions.below.trim() !== '') parts.push(`below="${value(conditions.below)}"`)
+  return parts.join(' ')
+}
+
+/** 结构式的围栏：信息中有反引号时用 ~~~（反引号围栏的信息中不能有反引号），内容中有同样的字符时用更长的围栏。 */
+function structureFence(smiles: string, info: string): string {
+  const char = info.includes('`') ? '~' : '`'
+  const runs = [...smiles.matchAll(char === '`' ? /`+/g : /~+/g)].map((match) => match[0].length)
+  return char.repeat(Math.max(2, ...runs) + 1)
+}
+
+/** 正文中的一个结构式：SMILES 与反应式的条件。 */
+export interface StructureSource extends StructureConditions {
+  readonly smiles: string
+}
+
+/** 正文中全部化学结构式（去重，按出现顺序）：导出前画出它们的图片。 */
+export function structureSources(markdown: string): readonly StructureSource[] {
+  const sources = new Map<string, StructureSource>()
+  for (const token of flattenTokens(tokenizer.parse(markdown, {}))) {
+    if (token.type !== 'structure' || token.content === '') continue
+    const source = { smiles: token.content, ...parseStructureInfo(token.info) }
+    sources.set(JSON.stringify([source.smiles, source.arrow, source.above, source.below]), source)
+  }
+  return [...sources.values()]
 }
 
 function flattenTokens(tokens: readonly Token[]): Token[] {
@@ -556,7 +610,7 @@ const parser = new MarkdownParser(schema, tokenizer, {
   },
   code_block: { block: 'code_block', noCloseToken: true },
   fence: { block: 'code_block', getAttrs: (token) => ({ params: token.info.trim() }), noCloseToken: true },
-  structure: { node: 'structure', getAttrs: (token) => ({ smiles: token.content }) },
+  structure: { node: 'structure', getAttrs: (token) => ({ smiles: token.content, ...parseStructureInfo(token.info) }) },
   hr: { node: 'horizontal_rule' },
   table: {
     block: 'table',
@@ -762,8 +816,9 @@ const serializer = new MarkdownSerializer(
     // 逐行写出，在引用与列表中每行都带上前缀。
     structure(state, node) {
       const smiles = (node.attrs.smiles as string).trim()
-      const fence = structureFence(smiles)
-      state.write(`${fence}smiles`)
+      const info = structureInfo(node.attrs as unknown as StructureConditions)
+      const fence = structureFence(smiles, info)
+      state.write(`${fence}${info}`)
       state.ensureNewLine()
       state.text(smiles, false)
       state.ensureNewLine()

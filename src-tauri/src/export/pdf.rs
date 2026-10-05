@@ -32,8 +32,8 @@ use super::{math, ExportError, ExportReport};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::citations::Citations;
 use crate::render::elements::ElementTargets;
-use crate::render::markdown::{plain_text, Align, Block, Inline};
-use crate::render::{resolve_image, Document, Section, StructureImage};
+use crate::render::markdown::{plain_text, Align, Block, Inline, StructureConditions};
+use crate::render::{resolve_image, Document, Section, StructureImage, StructureKey};
 
 /// Typst 字符串字面量（供公式模块使用）。
 pub(crate) fn string_literal(text: &str) -> String {
@@ -286,8 +286,8 @@ struct Writer<'a> {
     formulas: Vec<(String, Option<String>)>,
     formula_index: HashMap<String, usize>,
     /// 化学结构式的图片（docs/decisions.md 第 22 节），按 SMILES；同一结构式只嵌入一次（images 中的序号）。
-    structures: HashMap<String, StructureImage>,
-    structure_index: HashMap<String, usize>,
+    structures: HashMap<StructureKey, StructureImage>,
+    structure_index: HashMap<StructureKey, usize>,
 }
 
 impl<'a> Writer<'a> {
@@ -635,7 +635,7 @@ impl<'a> Writer<'a> {
                 Some(language) => format!("#raw(block: true, lang: {}, {})", string(language), string(&breakable(text))),
                 None => format!("#raw(block: true, {})", string(&breakable(text))),
             },
-            Block::Structure { smiles } => self.structure(smiles),
+            Block::Structure { smiles, conditions } => self.structure(smiles, conditions),
             Block::Table { alignments, header, rows, caption } => {
                 // 表格标题在表格上方，与表格留在同一页；有编号时前面是编号并带标签。
                 let title = match (caption, &element) {
@@ -873,18 +873,19 @@ impl<'a> Writer<'a> {
 impl Writer<'_> {
     /// 化学结构式（docs/decisions.md 第 22 节）：前端画好的图片，与没有图注的图片相同地居中排列，
     /// 不放大，宽度不超过正文区。没有图片时以红色的 SMILES 原文输出并列入报告。
-    fn structure(&mut self, smiles: &str) -> String {
-        let Some(image) = self.structures.get(smiles) else {
+    fn structure(&mut self, smiles: &str, conditions: &StructureConditions) -> String {
+        let key = (smiles.to_owned(), conditions.clone());
+        let Some(image) = self.structures.get(&key) else {
             self.report.invalid_structures.push(smiles.to_owned());
             return format!("#align(center, text(fill: rgb(\"#b91c1c\"), raw({})))", string(smiles));
         };
         let (width, height) = (image.width_pt, image.height_pt);
-        let index = match self.structure_index.get(smiles) {
+        let index = match self.structure_index.get(&key) {
             Some(&index) => index,
             None => {
                 let index = self.images.len();
                 self.images.push(Bytes::new(image.png.clone()));
-                self.structure_index.insert(smiles.to_owned(), index);
+                self.structure_index.insert(key, index);
                 index
             }
         };
@@ -2105,6 +2106,29 @@ mod tests {
         assert!((x - MARGIN_PT - (text_width - width) / 2.0).abs() < 1.0, "centered: {placed:?}");
         assert!(page_texts(&paged).concat().contains("C1CC("));
         assert_eq!(report.invalid_structures, vec!["C1CC("]);
+    }
+
+    /// 反应式的图片按 SMILES 与条件对应：条件不同的同一 SMILES 没有图片时按原文输出。
+    #[test]
+    fn reaction_images_match_their_conditions() {
+        use crate::render::markdown::StructureConditions;
+        let mut request = request("", &[("a", vec![1], "反应", "```smiles arrow=\"<=>\" above=\"催化剂\"\nN#N.[H][H]>>N\n```\n\n```smiles\nN#N.[H][H]>>N\n```")]);
+        let mut image = crate::render::tests::test_structure("N#N.[H][H]>>N");
+        image.conditions = StructureConditions { arrow: "<=>".into(), above: "催化剂".into(), below: String::new() };
+        request.structures = vec![image];
+        let dir = project();
+        let (paged, report) = layout(&build(&request), dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        assert_eq!(images(&paged).len(), 1);
+        assert_eq!(report.invalid_structures, vec!["N#N.[H][H]>>N"]);
+    }
+
+    /// 前端传入的图片带有反应式的条件（与 RenderStructure 的 JSON 形状一致）。
+    #[test]
+    fn structure_conditions_deserialize_from_frontend_json() {
+        let json = r#"{"smiles":"C>>C","arrow":"=","above":"光","below":"","png":"","width":1,"height":2}"#;
+        let structure: crate::render::RenderStructure = serde_json::from_str(json).unwrap();
+        assert_eq!(structure.conditions.arrow, "=");
+        assert_eq!(structure.conditions.above, "光");
     }
 
     fn three_chapters(title: &str) -> Document {

@@ -85,3 +85,26 @@ test('全文阅读中同样画出结构式', () => {
   const fragment = renderChapterBody('```smiles\nCCO\n```\n', () => null, NO_CHAPTER_REFS)
   expect(fragment.querySelector('.structure-block svg')).not.toBeNull()
 })
+
+test('插入反应式：写名称、选择箭头、填写条件，写出为带信息的 smiles 代码块', async () => {
+  const { wrapper, view } = mountEditor('正文')
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
+  ;(wrapper.vm as unknown as { runCommand(c: string): void }).runCommand('structure')
+  await flushPromises()
+  ;(document.querySelectorAll('.structure-popover [role="tab"]')[1] as HTMLElement).click()
+  await flushPromises()
+  const inputs = document.querySelectorAll<HTMLInputElement>('.structure-popover__input')
+  const set = (input: HTMLInputElement, value: string) => {
+    input.value = value
+    input.dispatchEvent(new Event('input'))
+  }
+  set(inputs[0], '氮气 + 氢气')
+  set(inputs[1], '氨')
+  ;(document.querySelector('.structure-popover [role="radio"][aria-label="可逆"]') as HTMLElement).click()
+  set(document.querySelector<HTMLInputElement>('input[aria-label="上方条件"]')!, '催化剂')
+  await flushPromises()
+  inputs[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  await flushPromises()
+  expect(lastChange(wrapper)).toBe('正文\n\n```smiles arrow="<=>" above="催化剂"\nN#N.[H][H]>>N\n```')
+  expect(view.dom.querySelector('.structure-block svg')).not.toBeNull()
+})

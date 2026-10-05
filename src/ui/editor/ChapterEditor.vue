@@ -36,7 +36,7 @@ import { nodes } from './schema.ts'
 import PopupMenu, { type MenuAnchor } from '../common/PopupMenu.vue'
 import TextPopover from './TextPopover.vue'
 import MathPopover from './MathPopover.vue'
-import StructurePopover from './StructurePopover.vue'
+import StructurePopover, { type StructureValue } from './StructurePopover.vue'
 import { structureNodeView } from './structure_view.ts'
 import { chemContent, chemTex } from './chem.ts'
 import { mathNodeView } from './math_view.ts'
@@ -855,14 +855,15 @@ const structureEditor = shallowRef<{
   readonly chapterId: ChapterId
   /** 已有结构式的位置；新结构式为 null。 */
   readonly pos: number | null
-  readonly smiles: string
+  readonly value: StructureValue
   readonly anchor: { readonly x: number; readonly y: number }
 } | null>(null)
 
 function startNewStructure(): void {
-  if (!view || !insertStructure('C')(view.state)) return
+  if (!view || !insertStructure({ smiles: 'C' })(view.state)) return
   const caret = view.coordsAtPos(view.state.selection.to)
-  structureEditor.value = { chapterId: currentId, pos: null, smiles: '', anchor: { x: caret.left, y: caret.bottom } }
+  const value = { smiles: '', arrow: '', above: '', below: '' }
+  structureEditor.value = { chapterId: currentId, pos: null, value, anchor: { x: caret.left, y: caret.bottom } }
 }
 
 function editStructure(pos: number): void {
@@ -871,21 +872,22 @@ function editStructure(pos: number): void {
   if (node?.type !== nodes.structure) return
   const dom = view.nodeDOM(pos)
   const rect = dom instanceof Element ? dom.getBoundingClientRect() : view.coordsAtPos(pos)
-  structureEditor.value = { chapterId: currentId, pos, smiles: node.attrs.smiles as string, anchor: { x: rect.left, y: rect.bottom } }
+  const { smiles, arrow, above, below } = node.attrs as StructureValue
+  structureEditor.value = { chapterId: currentId, pos, value: { smiles, arrow, above, below }, anchor: { x: rect.left, y: rect.bottom } }
 }
 
-function commitStructure(smiles: string): void {
+function commitStructure(value: StructureValue): void {
   const editing = structureEditor.value
   structureEditor.value = null
   if (!view || !editing || editing.chapterId !== currentId) return
-  const value = smiles.trim()
+  const empty = value.smiles.trim() === ''
   if (editing.pos === null) {
-    if (value !== '') insertStructure(value)(view.state, view.dispatch)
-  } else if (value === '') {
+    if (!empty) insertStructure({ ...value, smiles: value.smiles.trim() })(view.state, view.dispatch)
+  } else if (empty) {
     const node = view.state.doc.nodeAt(editing.pos)
     if (node) view.dispatch(view.state.tr.delete(editing.pos, editing.pos + node.nodeSize))
   } else {
-    setStructure(editing.pos, smiles)(view.state, view.dispatch)
+    setStructure(editing.pos, value)(view.state, view.dispatch)
   }
   focus()
 }
@@ -1185,7 +1187,10 @@ defineExpose({
     <StructurePopover
       v-if="structureEditor"
       :anchor="structureEditor.anchor"
-      :smiles="structureEditor.smiles"
+      :smiles="structureEditor.value.smiles"
+      :arrow="structureEditor.value.arrow"
+      :above="structureEditor.value.above"
+      :below="structureEditor.value.below"
       @commit="commitStructure"
       @cancel="cancelStructure"
     />

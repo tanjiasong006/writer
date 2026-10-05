@@ -1,5 +1,5 @@
 {
-  "说明": "化学结构式（docs/decisions.md 第 22 节）：围栏代码块的语言（信息的第一个词，不区分大小写）是 smiles 时是结构式，内容去掉首尾空白；可以在引用与列表中。其他语言的代码块不变。",
+  "说明": "化学结构式（docs/decisions.md 第 22 节）：围栏代码块的语言（信息的第一个词，不区分大小写）是 smiles 时是结构式，内容去掉首尾空白；可以在引用与列表中。其他语言的代码块不变。反应式的箭头与条件在信息中：smiles 之后的 key=\"value\"（arrow、above、below，不区分大小写，其他忽略；条件去掉首尾空白；箭头 -> 与不认识的写法都是空），信息中的反斜杠转义照常处理。",
   "blocks": [
     { "type": "paragraph", "inlines": [{ "text": "乙醇：" }] },
     { "type": "structure", "smiles": "CCO" },
@@ -18,6 +18,10 @@
       "items": [{ "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "列表中：" }] }, { "type": "structure", "smiles": "C=C" }] }]
     },
     { "type": "paragraph", "inlines": [{ "text": "不是结构式：" }] },
-    { "type": "code", "language": "smiles-like", "text": "CCO" }
+    { "type": "code", "language": "smiles-like", "text": "CCO" },
+    { "type": "paragraph", "inlines": [{ "text": "反应式：" }] },
+    { "type": "structure", "smiles": "N#N.[H][H]>>N", "arrow": "<=>", "above": "催化剂", "below": "高温、高压" },
+    { "type": "structure", "smiles": "CCO.CC(=O)O>OS(=O)(=O)O>CCOC(C)=O.O", "arrow": "=", "above": "浓硫酸 & \\ `△`", "below": "加热" },
+    { "type": "structure", "smiles": "CC.ClCl>>CCCl.Cl", "above": "光照" }
   ]
 }

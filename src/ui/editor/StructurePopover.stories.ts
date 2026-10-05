@@ -29,3 +29,20 @@ export const Editing: Story = { args: { smiles: 'CC(=O)OC1=CC=CC=C1C(=O)O' } }
 
 /** 无法识别的 SMILES：预览以红色原文显示。 */
 export const Invalid: Story = { args: { smiles: 'C1CC(' } }
+
+/** 反应式：反应物与产物写名称或 SMILES，箭头与上下的条件。 */
+export const Reaction: Story = {
+  args: { smiles: 'CCO.CC(=O)O>>CCOC(C)=O.O', arrow: '<=>', above: '浓硫酸', below: '△' },
+}
+
+/** 反应式中输入名称：下方列出匹配。 */
+export const ReactionSuggestions: Story = {
+  args: { smiles: 'CCO>>C=C.O', above: '浓硫酸' },
+  play: ({ canvasElement }) => {
+    const input = canvasElement.ownerDocument.querySelector<HTMLInputElement>('.structure-popover__input')
+    if (!input) return
+    input.value = '乙醇 + 乙'
+    input.dispatchEvent(new Event('input'))
+  },
+}
+

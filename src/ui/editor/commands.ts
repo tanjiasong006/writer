@@ -419,9 +419,17 @@ export function setMath(pos: number, tex: string): Command {
   }
 }
 
+/** 结构式的内容：SMILES 与反应式的箭头、条件。 */
+export interface StructureAttrs {
+  readonly smiles: string
+  readonly arrow?: string
+  readonly above?: string
+  readonly below?: string
+}
+
 /** 化学结构式（docs/decisions.md 第 22 节）：与公式块相同的插入规则，光标放在其后的段落中。 */
-export function insertStructure(smiles: string): Command {
-  const block = nodes.structure.create({ smiles })
+export function insertStructure(attrs: StructureAttrs): Command {
+  const block = nodes.structure.create(attrs)
   return insertBlock(block, (tr, start) => {
     const after = start + block.nodeSize
     if (tr.doc.resolve(after).nodeAfter?.type !== nodes.paragraph) tr.insert(after, nodes.paragraph.create())
@@ -429,13 +437,14 @@ export function insertStructure(smiles: string): Command {
   })
 }
 
-/** 修改 pos 处结构式的 SMILES。 */
-export function setStructure(pos: number, smiles: string): Command {
+/** 修改 pos 处结构式的 SMILES 与条件（没有给出的条件清空）。 */
+export function setStructure(pos: number, attrs: StructureAttrs): Command {
   return (state, dispatch) => {
     const node = state.doc.nodeAt(pos)
     if (node?.type !== nodes.structure) return false
-    if (node.attrs.smiles === smiles) return true
-    if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, smiles }))
+    const next = { smiles: attrs.smiles, arrow: attrs.arrow ?? '', above: attrs.above ?? '', below: attrs.below ?? '' }
+    if (Object.entries(next).every(([key, value]) => node.attrs[key] === value)) return true
+    if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...next }))
     return true
   }
 }
@@ -595,7 +604,7 @@ export function commandState(state: EditorState): CommandState {
     'math-block': plain(insertMathBlock('x')),
     chem: plain(insertMath('x')),
     'chem-block': plain(insertMathBlock('x')),
-    structure: plain(insertStructure('C')),
+    structure: plain(insertStructure({ smiles: 'C' })),
     'row-before': plain(rowBefore),
     'row-after': plain(rowAfter),
     'column-before': plain(columnBefore),

@@ -120,7 +120,11 @@ impl Writer<'_> {
                 format!("{fence}{}\n{text}\n{fence}", language.as_deref().unwrap_or(""))
             }
             // 化学结构式保留为 smiles 代码块（与正文相同，公式同样保留 LaTeX）。
-            Block::Structure { smiles } => format!("```smiles\n{smiles}\n```"),
+            Block::Structure { smiles, conditions } => {
+                let info = conditions.info();
+                let fence = if info.contains('`') { "~~~" } else { "```" };
+                format!("{fence}{info}\n{smiles}\n{fence}")
+            }
             Block::Table { alignments, header, rows, caption } => {
                 let mut out = String::new();
                 if let (Some(caption), Some(target)) = (caption, &element) {
@@ -284,6 +288,30 @@ pub fn export(document: &Document, root: &Path, assets: &str) -> MarkdownExport 
 mod tests {
     use super::*;
     use crate::render::{build, RenderChapter, RenderReference, RenderRequest};
+
+    /// 结构式保留为 smiles 代码块，反应式的条件写回信息，再次解析得到相同的结构式（docs/decisions.md 第 22 节）。
+    #[test]
+    fn structures_keep_their_fences_and_conditions() {
+        use crate::render::markdown::{parse, Block, StructureConditions};
+        let dir = tempfile::TempDir::new().unwrap();
+        let markdown = "```smiles\nCCO\n```\n\n~~~smiles arrow=\"<=>\" above=\"浓 \\\\ \\& `x`\" below=\"△\"\nCCO>>C=C.O\n~~~";
+        let request = RenderRequest {
+            chapters: vec![RenderChapter { id: "a".into(), number: vec![1], title: "结构".into(), markdown: markdown.into() }],
+            ..Default::default()
+        };
+        let text = export(&build(&request), dir.path(), "assets").text;
+        assert!(text.contains("```smiles\nCCO\n```"), "{text}");
+        let conditions = StructureConditions { arrow: "<=>".into(), above: "浓 \\ & `x`".into(), below: "△".into() };
+        let reparsed: Vec<Block> = parse(&text).into_iter().filter(|block| matches!(block, Block::Structure { .. })).collect();
+        assert_eq!(
+            reparsed,
+            vec![
+                Block::Structure { smiles: "CCO".into(), conditions: StructureConditions::default() },
+                Block::Structure { smiles: "CCO>>C=C.O".into(), conditions },
+            ],
+            "{text}"
+        );
+    }
 
     #[test]
     fn merged_markdown_resolves_writer_conventions() {

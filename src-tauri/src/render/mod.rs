@@ -38,12 +38,18 @@ pub struct RenderRequest {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct RenderStructure {
     pub smiles: String,
+    /// 反应式的箭头与条件（与正文中的代码块信息相同时才使用这张图片）。
+    #[serde(flatten)]
+    pub conditions: markdown::StructureConditions,
     /// PNG 的 base64。
     pub png: String,
     /// 显示尺寸（磅）。
     pub width: f64,
     pub height: f64,
 }
+
+/// 查找结构式图片的键：SMILES 与反应式的条件。
+pub type StructureKey = (String, markdown::StructureConditions);
 
 /// 结构式的图片：PNG 与显示尺寸（磅）。
 #[derive(Debug, Clone, PartialEq)]
@@ -78,8 +84,8 @@ pub struct Document {
     pub sections: Vec<Section>,
     /// 参考文献条目（全部，含未被引用的）；输出时只列出被引用的，按引用顺序编号。
     pub references: Vec<RenderReference>,
-    /// 结构式的图片，按 SMILES 查找；无法解码或尺寸异常的不在其中。
-    pub structures: std::collections::HashMap<String, StructureImage>,
+    /// 结构式的图片，按 SMILES 与条件查找；无法解码或尺寸异常的不在其中。
+    pub structures: std::collections::HashMap<StructureKey, StructureImage>,
 }
 
 
@@ -108,7 +114,8 @@ pub fn build(request: &RenderRequest) -> Document {
                 let png = base64::engine::general_purpose::STANDARD.decode(structure.png.as_bytes()).ok()?;
                 let valid = |size: f64| size.is_finite() && size > 0.0 && size < 10_000.0;
                 (png.starts_with(b"\x89PNG") && valid(structure.width) && valid(structure.height)).then(|| {
-                    (structure.smiles.trim().to_owned(), StructureImage { png, width_pt: structure.width, height_pt: structure.height })
+                    let key = (structure.smiles.trim().to_owned(), structure.conditions.clone());
+                    (key, StructureImage { png, width_pt: structure.width, height_pt: structure.height })
                 })
             })
             .collect(),
@@ -219,6 +226,7 @@ pub(crate) mod tests {
         image::RgbImage::from_pixel(40, 20, image::Rgb([0, 0, 0])).write_to(&mut png, image::ImageFormat::Png).unwrap();
         RenderStructure {
             smiles: smiles.into(),
+            conditions: Default::default(),
             png: base64::engine::general_purpose::STANDARD.encode(png.into_inner()),
             width: 30.0,
             height: 15.0,
@@ -235,9 +243,10 @@ pub(crate) mod tests {
             structures: vec![test_structure(" CCO "), broken, no_size],
             ..Default::default()
         });
-        assert_eq!(document.structures.keys().collect::<Vec<_>>(), vec!["CCO"]);
-        assert_eq!(document.structures["CCO"].width_pt, 30.0);
-        assert!(document.structures["CCO"].png.starts_with(b"\x89PNG"));
+        let key = ("CCO".to_owned(), markdown::StructureConditions::default());
+        assert_eq!(document.structures.keys().collect::<Vec<_>>(), vec![&key]);
+        assert_eq!(document.structures[&key].width_pt, 30.0);
+        assert!(document.structures[&key].png.starts_with(b"\x89PNG"));
     }
 
     /// 与前端 application/document_output.ts 的 RenderRequest 形状一致。

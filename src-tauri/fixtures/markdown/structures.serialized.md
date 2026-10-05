@@ -25,3 +25,17 @@ C1=CC=CC=C1
 ```smiles-like
 CCO
 ```
+
+反应式：
+
+```smiles arrow="<=>" above="催化剂" below="高温、高压"
+N#N.[H][H]>>N
+```
+
+~~~smiles arrow="=" above="浓硫酸 \& \\ `△`" below="加热"
+CCO.CC(=O)O>OS(=O)(=O)O>CCOC(C)=O.O
+~~~
+
+```smiles above="光照"
+CC.ClCl>>CCCl.Cl
+```

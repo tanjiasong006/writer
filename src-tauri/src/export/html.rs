@@ -13,8 +13,8 @@ use super::{math, ExportReport};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::citations::Citations;
 use crate::render::elements::ElementTargets;
-use crate::render::markdown::{Align, Block, Inline};
-use crate::render::{resolve_image, Document, Section, StructureImage};
+use crate::render::markdown::{Align, Block, Inline, StructureConditions};
+use crate::render::{resolve_image, Document, Section, StructureImage, StructureKey};
 
 /// 图表编号与图注之间的分隔（与 Word / PDF 相同）。
 const ELEMENT_SEPARATOR: &str = "\u{3000}";
@@ -38,8 +38,8 @@ pub struct HtmlWriter<'a, S: ImageSink, L: Locator> {
     elements: ElementTargets,
     citations: Citations,
     /// 化学结构式的图片（docs/decisions.md 第 22 节）与已输出的地址（同一结构式只输出一次）。
-    structures: HashMap<String, StructureImage>,
-    structure_urls: HashMap<String, String>,
+    structures: HashMap<StructureKey, StructureImage>,
+    structure_urls: HashMap<StructureKey, String>,
     /// 每个章节的序号（锚点名）。
     section_index: HashMap<String, usize>,
     pub report: ExportReport,
@@ -195,7 +195,7 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                 let class = language.as_deref().map(|l| format!(" class=\"language-{}\"", escape(l))).unwrap_or_default();
                 format!("<pre><code{class}>{}</code></pre>\n", escape(text))
             }
-            Block::Structure { smiles } => self.structure(smiles),
+            Block::Structure { smiles, conditions } => self.structure(smiles, conditions),
             Block::Table { alignments, header, rows, caption } => {
                 let caption = match (caption, &element) {
                     (Some(caption), Some(target)) => format!(
@@ -234,17 +234,18 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
     }
 
     /// 化学结构式：前端画好的图片，按其显示尺寸（宽度不超过正文）；没有图片时是红色的 SMILES 原文并列入报告。
-    fn structure(&mut self, smiles: &str) -> String {
-        let Some(image) = self.structures.get(smiles) else {
+    fn structure(&mut self, smiles: &str, conditions: &StructureConditions) -> String {
+        let key = (smiles.to_owned(), conditions.clone());
+        let Some(image) = self.structures.get(&key) else {
             self.report.invalid_structures.push(smiles.to_owned());
             return format!("<figure class=\"structure\"><code class=\"structure-invalid\">{}</code></figure>\n", escape(smiles));
         };
         let width = image.width_pt;
-        let url = match self.structure_urls.get(smiles) {
+        let url = match self.structure_urls.get(&key) {
             Some(url) => url.clone(),
             None => {
                 let url = self.images.image(image.png.clone(), false);
-                self.structure_urls.insert(smiles.to_owned(), url.clone());
+                self.structure_urls.insert(key, url.clone());
                 url
             }
         };

@@ -33,8 +33,8 @@ use super::{ExportError, ExportReport};
 use crate::render::citations::Citations;
 use crate::render::elements::{ElementTarget, ElementTargets};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
-use crate::render::markdown::{Align, Block, Inline};
-use crate::render::{resolve_image, Document, Section, StructureImage};
+use crate::render::markdown::{Align, Block, Inline, StructureConditions};
+use crate::render::{resolve_image, Document, Section, StructureImage, StructureKey};
 
 /// A4，单位 twip（1/20 磅）。
 const PAGE_WIDTH: u32 = 11906;
@@ -286,7 +286,7 @@ struct Writer<'a> {
     /// 文献引用的编号（docs/decisions.md 第 13 节）。
     citations: Citations,
     /// 化学结构式的图片（docs/decisions.md 第 22 节）。
-    structures: &'a HashMap<String, StructureImage>,
+    structures: &'a HashMap<StructureKey, StructureImage>,
     next_numbering: usize,
     numberings: Vec<Numbering>,
     items: Vec<Item>,
@@ -407,7 +407,7 @@ impl Writer<'_> {
                     .shading(Shading::new().shd_type(ShdType::Clear).fill(CODE_FILL));
                 self.items.push(Item::Paragraph(p));
             }
-            Block::Structure { smiles } => self.structure(smiles, context),
+            Block::Structure { smiles, conditions } => self.structure(smiles, conditions, context),
             Block::Table {
                 alignments,
                 header,
@@ -633,12 +633,12 @@ impl Writer<'_> {
 
     /// 化学结构式（docs/decisions.md 第 22 节）：前端画好的图片，与没有图注的图片相同地居中，前后留出间距；
     /// 不放大，宽度不超过正文区。没有图片时以红色的 SMILES 原文输出并列入报告。
-    fn structure(&mut self, smiles: &str, context: BlockContext) {
+    fn structure(&mut self, smiles: &str, conditions: &StructureConditions, context: BlockContext) {
         let spacing = twips(self.theme.image_spacing * self.theme.body.size);
         let p = self
             .indent(Paragraph::new().align(AlignmentType::Center), context)
             .line_spacing(LineSpacing::new().before(spacing).after(spacing));
-        let run = match self.structures.get(smiles).and_then(|image| png_size(&image.png).map(|size| (image, size))) {
+        let run = match self.structures.get(&(smiles.to_owned(), conditions.clone())).and_then(|image| png_size(&image.png).map(|size| (image, size))) {
             Some((image, (width_px, height_px))) => {
                 let bounds = Bounds { width: content_width_pt(context, 0), height: f64::from(TEXT_HEIGHT) / 20.0 - IMAGE_HEIGHT_SLACK };
                 let (width, height) = display_size_pt((image.width_pt, image.height_pt), bounds);

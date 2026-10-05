@@ -1043,6 +1043,11 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   Story `StructurePopover/*`、`ChapterEditor/Structures`，Storybook（Chrome）中目视检查了浮层、正文显示与导出 PNG，
   并把浏览器画出的 PNG 交给 PDF 导出检查了页面效果。未检查深色外观、Tauri WebView（WKWebView / WebView2）中的栅格化，
   以及 Word / WPS 中的实际效果。
+- 反应式（2026-10-05）：`markdown.ts` 的 `parseStructureInfo` / `normalizeArrow` 与写出（Rust `StructureConditions`，共享 fixture `structures`）；
+  schema `structure` 增加 `arrow` / `above` / `below`；`structure_view.ts` 拼合各分子的绘图、“＋”、箭头（→ ⇌ ＝）与条件文字，
+  库中的无机小分子写成化学式；`StructurePopover.vue` 的“反应式”（名称或 SMILES 以 + 分隔、匹配列表、箭头、条件）；
+  导出图片按 SMILES 与条件对应（`RenderStructure` 带条件，Rust `StructureKey`）。验证：画法、浮层、编辑器插入、Markdown 读写与转义、
+  合并 Markdown 的往返、PDF 按条件对应图片；Storybook 中目视检查了正文与浮层，浏览器画出的反应式 PNG 经 PDF 导出检查了页面效果。
 
 ### 发布准备（非功能）
 

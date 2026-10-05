@@ -8,9 +8,25 @@ export interface Molecule {
   readonly names: readonly string[]
   readonly english: string
   readonly smiles: string
+  /** 无机小分子写成化学式（如 H2O），不画骨架；数字显示为下标。 */
+  readonly formula?: string
 }
 
 export const MOLECULES: readonly Molecule[] = [
+  // 常见的无机小分子（反应式中的反应物、产物与试剂）
+  { names: ['水'], english: 'water', smiles: 'O', formula: 'H2O' },
+  { names: ['氢气'], english: 'hydrogen', smiles: '[H][H]', formula: 'H2' },
+  { names: ['氧气'], english: 'oxygen', smiles: 'O=O', formula: 'O2' },
+  { names: ['氮气'], english: 'nitrogen', smiles: 'N#N', formula: 'N2' },
+  { names: ['氯气'], english: 'chlorine', smiles: 'ClCl', formula: 'Cl2' },
+  { names: ['溴', '液溴'], english: 'bromine', smiles: 'BrBr', formula: 'Br2' },
+  { names: ['氨', '氨气'], english: 'ammonia', smiles: 'N', formula: 'NH3' },
+  { names: ['氯化氢', '盐酸'], english: 'hydrogen chloride', smiles: 'Cl', formula: 'HCl' },
+  { names: ['溴化氢'], english: 'hydrogen bromide', smiles: 'Br', formula: 'HBr' },
+  { names: ['二氧化碳'], english: 'carbon dioxide', smiles: 'O=C=O', formula: 'CO2' },
+  { names: ['过氧化氢', '双氧水'], english: 'hydrogen peroxide', smiles: 'OO', formula: 'H2O2' },
+  { names: ['硫酸', '浓硫酸'], english: 'sulfuric acid', smiles: 'OS(=O)(=O)O', formula: 'H2SO4' },
+  { names: ['硝酸', '浓硝酸'], english: 'nitric acid', smiles: 'O[N+](=O)[O-]', formula: 'HNO3' },
   // 烃
   { names: ['甲烷'], english: 'methane', smiles: 'C' },
   { names: ['乙烷'], english: 'ethane', smiles: 'CC' },
@@ -126,4 +142,51 @@ export function searchMolecules(query: string): readonly Molecule[] {
 export function moleculeBySmiles(smiles: string): Molecule | null {
   const text = smiles.trim()
   return MOLECULES.find((molecule) => molecule.smiles === text) ?? null
+}
+
+/** 名称（中文名称、别名或英文名称，不区分大小写）恰好是库中某个分子时返回它。 */
+export function moleculeByName(name: string): Molecule | null {
+  const text = name.trim().toLowerCase()
+  if (text === '') return null
+  return MOLECULES.find((molecule) => molecule.english === text || molecule.names.some((item) => item.toLowerCase() === text)) ?? null
+}
+
+/**
+ * 反应式的一侧（反应物或产物）在浮层中的写法：分子的名称或 SMILES，以“+”分隔（方括号中的 + 是电荷，不分隔）。
+ * 例如“乙醇 + 乙酸”。
+ */
+export function splitTerms(text: string): string[] {
+  const terms: string[] = []
+  let depth = 0
+  let current = ''
+  for (const char of text) {
+    if (char === '[') depth++
+    else if (char === ']') depth = Math.max(0, depth - 1)
+    if ((char === '+' || char === '＋') && depth === 0) {
+      terms.push(current)
+      current = ''
+    } else current += char
+  }
+  terms.push(current)
+  return terms.map((term) => term.trim()).filter((term) => term !== '')
+}
+
+/** 一项的 SMILES：库中的名称换成它的 SMILES，其他当作 SMILES。 */
+export function termSmiles(term: string): string {
+  return moleculeByName(term)?.smiles ?? term.trim()
+}
+
+/** 一侧的写法 → SMILES（各分子以 . 相连）。 */
+export function sideSmiles(text: string): string {
+  return splitTerms(text).map(termSmiles).join('.')
+}
+
+/** 一侧的 SMILES → 浮层中的写法：库中有的分子写名称。 */
+export function sideText(smiles: string): string {
+  return smiles
+    .split('.')
+    .map((molecule) => molecule.trim())
+    .filter((molecule) => molecule !== '')
+    .map((molecule) => moleculeBySmiles(molecule)?.names[0] ?? molecule)
+    .join(' + ')
 }

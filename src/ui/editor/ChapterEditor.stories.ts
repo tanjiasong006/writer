@@ -355,6 +355,10 @@ export const Structures: Story = {
       '```smiles\nCCO\n```\n\n' +
       '```smiles\nCC(=O)O\n```\n\n' +
       '```smiles\nCCOC(C)=O\n```\n\n' +
+      '酯化反应、合成氨与乙烯的加成：\n\n' +
+      '```smiles arrow="<=>" above="浓硫酸" below="△"\nCCO.CC(=O)O>>CCOC(C)=O.O\n```\n\n' +
+      '```smiles arrow="<=>" above="催化剂" below="高温、高压"\nN#N.[H][H]>>N\n```\n\n' +
+      '```smiles\nC=C.BrBr>>BrCCBr\n```\n\n' +
       '阿司匹林与咖啡因：\n\n' +
       '```smiles\nCC(=O)OC1=CC=CC=C1C(=O)O\n```\n\n' +
       '```smiles\nCN1C=NC2=C1C(=O)N(C)C(=O)N2C\n```\n\n' +

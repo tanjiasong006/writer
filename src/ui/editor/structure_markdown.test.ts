@@ -31,7 +31,29 @@ test('写出为 ```smiles 围栏；未修改的章节原样写回', () => {
   expect(serializeChapter(edited, tilde.format)).toBe('```smiles\nC=C\n```\n')
 })
 
-test('导出前收集正文中全部结构式的 SMILES（去重，按出现顺序）', () => {
-  expect(structureSources('```smiles\nCCO\n```\n\n- 项\n\n  ```smiles\n  C\n  ```\n\n```smiles\nCCO\n```\n\n```\nCC\n```')).toEqual(['CCO', 'C'])
+test('导出前收集正文中全部结构式（SMILES 与条件都相同的去重，按出现顺序）', () => {
+  const plain = (smiles: string) => ({ smiles, arrow: '', above: '', below: '' })
+  const markdown = '```smiles\nCCO\n```\n\n- 项\n\n  ```smiles\n  C\n  ```\n\n```smiles\nCCO\n```\n\n```smiles above="光照"\nCCO\n```\n\n```\nCC\n```'
+  expect(structureSources(markdown)).toEqual([plain('CCO'), plain('C'), { ...plain('CCO'), above: '光照' }])
   expect(structureSources('没有结构式')).toEqual([])
+})
+
+test('反应式的箭头与条件：读写代码块信息；未修改的原样写回，修改后按统一风格写出', () => {
+  const source = '```smiles arrow="<=>" above="催化剂" below="高温、高压"\nN#N.[H][H]>>N\n```\n'
+  const parsed = parseChapter(source)
+  expect(parsed.doc.child(0).attrs).toEqual({ smiles: 'N#N.[H][H]>>N', arrow: '<=>', above: '催化剂', below: '高温、高压' })
+  expect(serializeChapter(parsed.doc, parsed.format)).toBe(source)
+  const edited = parsed.doc.type.create(null, [
+    nodes.structure.create({ smiles: 'CCO>>C=C.O', arrow: '->', above: '浓硫酸 "&" \\ x', below: '' }),
+  ])
+  const written = serializeChapter(edited, parsed.format)
+  expect(written).toBe('```smiles above="浓硫酸 ＂\\&＂ \\\\ x"\nCCO>>C=C.O\n```\n')
+  expect(parseChapter(written).doc.child(0).attrs).toEqual({ smiles: 'CCO>>C=C.O', arrow: '', above: '浓硫酸 ＂&＂ \\ x', below: '' })
+})
+
+test('条件中有反引号时用 ~~~ 围栏', () => {
+  const doc = parseMarkdown('x').type.create(null, [nodes.structure.create({ smiles: 'C>>C', above: '`a`' })])
+  const written = serializeChapter(doc, parseChapter('').format)
+  expect(written).toBe('~~~smiles above="`a`"\nC>>C\n~~~\n')
+  expect(parseChapter(written).doc.child(0).attrs.above).toBe('`a`')
 })

@@ -26,10 +26,11 @@ pub enum Block {
         language: Option<String>,
         text: String,
     },
-    /// 化学结构式（docs/decisions.md 第 22 节）：语言为 `smiles` 的围栏代码块，smiles 是去掉首尾空白的内容。
-    /// 图片由前端画好随请求传入（`render::Document::structures`）。
+    /// 化学结构式（docs/decisions.md 第 22 节）：语言为 `smiles` 的围栏代码块，smiles 是去掉首尾空白的内容；
+    /// 反应式的箭头与条件来自代码块信息（`StructureConditions`）。图片由前端画好随请求传入（`render::Document::structures`）。
     Structure {
         smiles: String,
+        conditions: StructureConditions,
     },
     Table {
         alignments: Vec<Align>,
@@ -39,6 +40,80 @@ pub enum Block {
         caption: Option<Caption>,
     },
     Rule,
+}
+
+/// 反应式的箭头与条件（docs/decisions.md 第 22 节）：arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Deserialize)]
+#[serde(default)]
+pub struct StructureConditions {
+    pub arrow: String,
+    pub above: String,
+    pub below: String,
+}
+
+impl StructureConditions {
+    /// 代码块信息中第一个词之后的属性 `key="value"`（值中不含双引号）：认识 arrow、above、below（不区分大小写），
+    /// 其他忽略；条件去掉首尾空白。与编辑器的 parseStructureInfo 相同。
+    pub fn parse(info: &str) -> Self {
+        let info = info.trim();
+        let rest = &info[info.find(char::is_whitespace).unwrap_or(info.len())..];
+        let chars: Vec<char> = rest.chars().collect();
+        let mut conditions = StructureConditions::default();
+        let mut i = 0;
+        while i < chars.len() {
+            if !chars[i].is_ascii_alphabetic() {
+                i += 1;
+                continue;
+            }
+            let mut j = i;
+            while j < chars.len() && chars[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            let quoted = chars.get(j) == Some(&'=') && chars.get(j + 1) == Some(&'"');
+            let close = if quoted { chars[j + 2..].iter().position(|&c| c == '"').map(|k| j + 2 + k) } else { None };
+            let Some(close) = close else {
+                i += 1;
+                continue;
+            };
+            let key: String = chars[i..j].iter().collect::<String>().to_ascii_lowercase();
+            let value: String = chars[j + 2..close].iter().collect();
+            match key.as_str() {
+                "arrow" => conditions.arrow = normalize_arrow(&value),
+                "above" => conditions.above = value.trim().to_owned(),
+                "below" => conditions.below = value.trim().to_owned(),
+                _ => {}
+            }
+            i = close + 1;
+        }
+        conditions
+    }
+
+    /// 写回代码块信息：`smiles` 与非空的属性（与编辑器写出的相同）。
+    pub fn info(&self) -> String {
+        let value = |text: &str| {
+            text.replace('"', "＂").split_whitespace().collect::<Vec<_>>().join(" ").replace('\\', "\\\\").replace('&', "\\&")
+        };
+        let mut info = String::from("smiles");
+        let arrow = normalize_arrow(&self.arrow);
+        if !arrow.is_empty() {
+            info.push_str(&format!(" arrow=\"{arrow}\""));
+        }
+        if !self.above.trim().is_empty() {
+            info.push_str(&format!(" above=\"{}\"", value(&self.above)));
+        }
+        if !self.below.trim().is_empty() {
+            info.push_str(&format!(" below=\"{}\"", value(&self.below)));
+        }
+        info
+    }
+}
+
+/// 箭头：`<=>` 与 `=` 保留，其他（含 `->`）都是 → 并写作空。
+fn normalize_arrow(arrow: &str) -> String {
+    match arrow.trim() {
+        value @ ("<=>" | "=") => value.to_owned(),
+        _ => String::new(),
+    }
 }
 
 /// 表格标题：文字与可选的标识（`{#tbl:<id>}`）。
@@ -261,7 +336,7 @@ fn block_text(block: &Block) -> String {
         Block::List { items, .. } => items.iter().flatten().map(block_text).collect::<Vec<_>>().join(" "),
         Block::Quote(blocks) => blocks.iter().map(block_text).collect::<Vec<_>>().join(" "),
         Block::Code { text, .. } => text.clone(),
-        Block::Structure { smiles } => smiles.clone(),
+        Block::Structure { smiles, .. } => smiles.clone(),
         Block::Table { header, rows, .. } => header
             .iter()
             .chain(rows.iter().flatten())
@@ -390,15 +465,15 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
             }
             Event::Start(Tag::CodeBlock(kind)) => {
                 flush(&mut pending, &mut out);
-                let language = match kind {
+                let (language, info) = match kind {
                     CodeBlockKind::Fenced(info) => {
-                        info.split_whitespace().next().map(str::to_owned)
+                        (info.split_whitespace().next().map(str::to_owned), info.to_string())
                     }
-                    CodeBlockKind::Indented => None,
+                    CodeBlockKind::Indented => (None, String::new()),
                 };
                 let mut text = raw_text(events, TagEnd::CodeBlock);
                 if language.as_deref().is_some_and(|language| language.eq_ignore_ascii_case("smiles")) {
-                    out.push(Block::Structure { smiles: text.trim().to_owned() });
+                    out.push(Block::Structure { smiles: text.trim().to_owned(), conditions: StructureConditions::parse(&info) });
                     continue;
                 }
                 if text.ends_with('\n') {
@@ -902,8 +977,8 @@ mod tests {
         assert_eq!(
             parse("```smiles\n  CCO \n```\n\n~~~SMILES x\nC=C\n~~~\n\n```js\nCCO\n```"),
             vec![
-                Block::Structure { smiles: "CCO".into() },
-                Block::Structure { smiles: "C=C".into() },
+                Block::Structure { smiles: "CCO".into(), conditions: StructureConditions::default() },
+                Block::Structure { smiles: "C=C".into(), conditions: StructureConditions::default() },
                 Block::Code { language: Some("js".into()), text: "CCO".into() },
             ]
         );

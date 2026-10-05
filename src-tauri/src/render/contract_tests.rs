@@ -134,7 +134,15 @@ fn block(block: &Block) -> Value {
         Block::Code { language, text } => {
             json!({ "type": "code", "language": language, "text": text })
         }
-        Block::Structure { smiles } => json!({ "type": "structure", "smiles": smiles }),
+        Block::Structure { smiles, conditions } => {
+            let mut structure = json!({ "type": "structure", "smiles": smiles });
+            for (key, value) in [("arrow", &conditions.arrow), ("above", &conditions.above), ("below", &conditions.below)] {
+                if !value.is_empty() {
+                    structure[key] = json!(value);
+                }
+            }
+            structure
+        }
         Block::Rule => json!({ "type": "rule" }),
         Block::List { ordered, start, items } => json!({
             "type": "list",
