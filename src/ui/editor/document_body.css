@@ -300,9 +300,16 @@
   color: var(--color-doc-text);
 }
 
-/* 公式（math_view.ts，KaTeX）：行内公式随正文字号；公式块居中，与前后段落留出间距，过宽时横向滚动。 */
+/*
+ * 公式（math_view.ts，KaTeX）：公式块居中，与前后段落留出间距，过宽时横向滚动。
+ * KaTeX 默认把公式放大到 1.21em，夹在正文中显得突兀；行内公式缩到与正文西文字母大小相近。
+ */
 .document-body .math-inline {
   white-space: nowrap;
+}
+
+.document-body .math-inline .katex {
+  font-size: 1.05em;
 }
 
 .document-body .math-block {
