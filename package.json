@@ -11,7 +11,8 @@
     "typecheck": "vue-tsc --noEmit",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "build:windows": "PATH=/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:$PATH tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
