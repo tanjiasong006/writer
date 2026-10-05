@@ -381,7 +381,15 @@ onMounted(() => {
       math: mathNodeView,
       math_block: mathNodeView,
     },
-    attributes: { class: 'chapter-editor__content document-body', role: 'textbox', 'aria-multiline': 'true', 'aria-label': '正文' },
+    attributes: {
+      class: 'chapter-editor__content document-body',
+      role: 'textbox',
+      'aria-multiline': 'true',
+      'aria-label': '正文',
+      // 不做拼写检查与自动纠正（decisions.md 第 2 节）。
+      spellcheck: 'false',
+      autocorrect: 'off',
+    },
   })
   showState(state)
   reportStats()

@@ -83,6 +83,12 @@ test('嵌套与有序任务在正文位置变化后仍修改正确项目，切�
   expect(wrapper.emitted('change')?.at(-1)).toEqual(['b', '- [x] 另一章节\n'])
 })
 
+test('正文关闭拼写检查与自动纠正', () => {
+  const view = viewOf(mountEditor({ chapterId: 'a', content: 'Hello' }))
+  expect(view.dom.getAttribute('spellcheck')).toBe('false')
+  expect(view.dom.getAttribute('autocorrect')).toBe('off')
+})
+
 test('显示章节编号与标题，正文按结构进入编辑器', () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '引言**正文**', number: '2.1', title: '实验设计' })
   expect(wrapper.find('.chapter-editor__heading').text()).toBe('2.1实验设计')
