@@ -2,7 +2,8 @@
 //! 与编辑器（另一套实现）的一致性由共享语义 fixture 约束（docs/decisions.md 第 8 节）。
 //!
 //! 正文不支持标题与 HTML（docs/decisions.md 第 8 节），与编辑器的方言一致：
-//! 原始 HTML 一律作为普通文本；Markdown 标题作为普通段落，文字是标题的原文（见 HeadingsAsText）。
+//! 原始 HTML 一律作为普通文本（唯一的例外是上下标标签，见 InlineRun）；Markdown 标题作为普通段落，
+//! 文字是标题的原文（见 HeadingsAsText）。
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -56,6 +57,10 @@ pub enum Inline {
     Strong(Vec<Inline>),
     Emphasis(Vec<Inline>),
     Strike(Vec<Inline>),
+    /// 上标 / 下标（`<sup>…</sup>`、`<sub>…</sub>`，docs/decisions.md 第 21 节）。
+    /// 其中不再有上下标：嵌套时以外层为准，内层只保留内容。
+    Superscript(Vec<Inline>),
+    Subscript(Vec<Inline>),
     Code(String),
     Link {
         url: String,
@@ -219,6 +224,8 @@ fn resolve_inlines(inlines: &mut Vec<Inline>, definitions: &HashMap<String, Vec<
             Inline::Strong(children)
             | Inline::Emphasis(children)
             | Inline::Strike(children)
+            | Inline::Superscript(children)
+            | Inline::Subscript(children)
             | Inline::Link { children, .. } => resolve_inlines(children, definitions),
             _ => {}
         }
@@ -345,12 +352,12 @@ fn atx_heading_text(line: &str) -> Option<String> {
 /// 紧凑列表项中的行内内容没有 Paragraph 包裹，这里把连续的行内事件收成一个段落。
 fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> Vec<Block> {
     let mut out = Vec::new();
-    let mut pending: Vec<Inline> = Vec::new();
+    let mut pending = InlineRun::default();
     // 原文以 `Table: ` 开头的段落的位置：紧接着（之间没有其他块）是表格时成为表格的标题。
     let mut caption_at: Option<usize> = None;
-    let flush = |pending: &mut Vec<Inline>, out: &mut Vec<Block>| {
+    let flush = |pending: &mut InlineRun, out: &mut Vec<Block>| {
         if !pending.is_empty() {
-            out.push(Block::Paragraph(normalize(std::mem::take(pending))));
+            out.push(Block::Paragraph(std::mem::take(pending).finish()));
         }
     };
 
@@ -431,16 +438,7 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
                         .or_insert(content);
                 });
             }
-            Event::Start(tag) => {
-                if let Some(inline) = inline_from_start(tag, events) {
-                    pending.push(inline);
-                }
-            }
-            other => {
-                if let Some(inline) = inline_from_leaf(other) {
-                    pending.push(inline);
-                }
-            }
+            other => pending.push_event(other, events),
         }
     }
     flush(&mut pending, &mut out);
@@ -502,20 +500,108 @@ fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
 
 /// 读取行内内容直到指定结束标记。
 fn inlines(events: &mut Events, end: TagEnd) -> Vec<Inline> {
-    let mut out = Vec::new();
+    let mut run = InlineRun::default();
     while let Some(event) = events.next() {
         match event {
             Event::End(e) if e == end => break,
+            event => run.push_event(event, events),
+        }
+    }
+    run.finish()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Script {
+    Super,
+    Sub,
+}
+
+impl Script {
+    /// 恰好是 `<sup>` / `</sup>` / `<sub>` / `</sub>`（小写、没有属性与空白）时返回种类与是否为结束标签。
+    fn tag(html: &str) -> Option<(Script, bool)> {
+        match html {
+            "<sup>" => Some((Script::Super, false)),
+            "</sup>" => Some((Script::Super, true)),
+            "<sub>" => Some((Script::Sub, false)),
+            "</sub>" => Some((Script::Sub, true)),
+            _ => None,
+        }
+    }
+
+    fn wrap(self, children: Vec<Inline>) -> Inline {
+        let children = without_scripts(normalize(children));
+        match self {
+            Script::Super => Inline::Superscript(children),
+            Script::Sub => Inline::Subscript(children),
+        }
+    }
+}
+
+/// 一层行内内容（段落、强调、链接……之内）的收集。
+///
+/// 上下标（docs/decisions.md 第 21 节）：同一层中，结束标签与它之前最近的、尚未配对的同类开始标签配对，
+/// 两者之间未配对的标签都是文字；配不上的标签是文字（与其他原始 HTML 相同）。
+/// 编辑器（ui/editor/markdown.ts 的 writer_scripts）按同一规则配对。
+#[derive(Default)]
+struct InlineRun {
+    out: Vec<Inline>,
+    /// 尚未配对的开始标签：种类与它（作为文字）在 out 中的位置。
+    open: Vec<(Script, usize)>,
+}
+
+impl InlineRun {
+    fn push_event(&mut self, event: Event, events: &mut Events) {
+        match event {
+            Event::InlineHtml(html) => match Script::tag(&html) {
+                Some((script, false)) => {
+                    self.open.push((script, self.out.len()));
+                    self.out.push(Inline::Text(html.into_string()));
+                }
+                Some((script, true)) => match self.open.iter().rposition(|(s, _)| *s == script) {
+                    Some(index) => {
+                        let at = self.open[index].1;
+                        self.open.truncate(index);
+                        let children = self.out.split_off(at + 1);
+                        self.out.pop();
+                        self.out.push(script.wrap(children));
+                    }
+                    None => self.out.push(Inline::Text(html.into_string())),
+                },
+                None => self.out.push(Inline::Text(html.into_string())),
+            },
             Event::Start(tag) => {
                 if let Some(inline) = inline_from_start(tag, events) {
-                    out.push(inline);
+                    self.out.push(inline);
                 }
             }
             other => {
                 if let Some(inline) = inline_from_leaf(other) {
-                    out.push(inline);
+                    self.out.push(inline);
                 }
             }
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.out.is_empty()
+    }
+
+    fn finish(self) -> Vec<Inline> {
+        normalize(self.out)
+    }
+}
+
+/// 去掉上下标之中的上下标（只保留内容）。
+fn without_scripts(inlines: Vec<Inline>) -> Vec<Inline> {
+    let mut out = Vec::with_capacity(inlines.len());
+    for inline in inlines {
+        match inline {
+            Inline::Superscript(children) | Inline::Subscript(children) => out.extend(without_scripts(children)),
+            Inline::Strong(children) => out.push(Inline::Strong(without_scripts(children))),
+            Inline::Emphasis(children) => out.push(Inline::Emphasis(without_scripts(children))),
+            Inline::Strike(children) => out.push(Inline::Strike(without_scripts(children))),
+            Inline::Link { url, children } => out.push(Inline::Link { url, children: without_scripts(children) }),
+            other => out.push(other),
         }
     }
     normalize(out)
@@ -561,7 +647,7 @@ fn inline_from_start(tag: Tag, events: &mut Events) -> Option<Inline> {
                 .map(str::to_owned),
         },
         other => {
-            // 未启用的扩展（上下标等）：保留其中的文字。
+            // 未启用的扩展（pulldown-cmark 自己的 ^上标^ / ~下标~ 等）：保留其中的文字。
             let end = other.to_end();
             return Some(Inline::Text(plain_text(&inlines(events, end))));
         }
@@ -677,9 +763,11 @@ pub fn plain_text(inlines: &[Inline]) -> String {
         match inline {
             Inline::Text(t) | Inline::Code(t) => text.push_str(t),
             Inline::Math { tex, .. } => text.push_str(tex),
-            Inline::Strong(c) | Inline::Emphasis(c) | Inline::Strike(c) => {
-                text.push_str(&plain_text(c))
-            }
+            Inline::Strong(c)
+            | Inline::Emphasis(c)
+            | Inline::Strike(c)
+            | Inline::Superscript(c)
+            | Inline::Subscript(c) => text.push_str(&plain_text(c)),
             Inline::Link { children, .. } => text.push_str(&plain_text(children)),
             Inline::Image { alt, .. } => text.push_str(alt),
             Inline::ChapterRef { cached, .. }
@@ -887,6 +975,52 @@ mod tests {
                 Block::Paragraph(vec![text("<script>alert(1)</script>")]),
                 Block::Paragraph(vec![text("行内 <b>粗</b>")]),
             ]
+        );
+    }
+
+    #[test]
+    fn superscript_and_subscript_tags() {
+        let sup = |children: Vec<Inline>| Inline::Superscript(children);
+        let sub = |children: Vec<Inline>| Inline::Subscript(children);
+        assert_eq!(
+            parse("50 m<sup>3</sup>/d，H<sub>2</sub>O，10<sup>**-3**</sup>"),
+            vec![Block::Paragraph(vec![
+                text("50 m"),
+                sup(vec![text("3")]),
+                text("/d，H"),
+                sub(vec![text("2")]),
+                text("O，10"),
+                sup(vec![Inline::Strong(vec![text("-3")])]),
+            ])]
+        );
+        // 紧凑列表项（没有段落包裹）与表格中同样有效。
+        assert_eq!(
+            parse("- x<sup>2</sup>"),
+            vec![Block::List {
+                ordered: false,
+                start: 1,
+                items: vec![vec![Block::Paragraph(vec![text("x"), sup(vec![text("2")])])]],
+            }]
+        );
+        // 配不上的、大写的、带属性的、转义的标签都是文字。
+        for source in ["a<sup>b c</sub>", "<SUP>d</SUP>", "<sup class=\"x\">e</sup>", "<sup >e</sup>", "f</sup>"] {
+            assert_eq!(parse(source), vec![Block::Paragraph(vec![text(source)])], "{source}");
+        }
+        assert_eq!(parse("\\<sup>f</sup>"), vec![Block::Paragraph(vec![text("<sup>f</sup>")])]);
+        // 只与同一层中的标签配对：跨越强调边界的不配对。
+        assert_eq!(
+            parse("<sup>*a</sup>*"),
+            vec![Block::Paragraph(vec![text("<sup>"), Inline::Emphasis(vec![text("a</sup>")])])]
+        );
+        // 交错时结束标签与最近的同类开始标签配对，中间未配对的是文字。
+        assert_eq!(
+            parse("<sup>a<sub>b</sup>c</sub>"),
+            vec![Block::Paragraph(vec![sup(vec![text("a<sub>b")]), text("c</sub>")])]
+        );
+        // 嵌套时以外层为准。
+        assert_eq!(
+            parse("<sup>a<sub>b</sub>*<sup>c</sup>*</sup>"),
+            vec![Block::Paragraph(vec![sup(vec![text("ab"), Inline::Emphasis(vec![text("c")])])])]
         );
     }
 

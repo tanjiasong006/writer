@@ -23,7 +23,7 @@ import { addRowAfter, goToNextCell, isInTable, nextCell, selectionCell, tableEdi
 import { dropCursor } from 'prosemirror-dropcursor'
 import { GapCursor, gapCursor } from 'prosemirror-gapcursor'
 import { isEmptyDocument, nodes, schema } from './schema.ts'
-import { toggleBold, toggleCode, toggleItalic, undo as undoCommand } from './commands.ts'
+import { exitMarksForward, toggleBold, toggleCode, toggleItalic, undo as undoCommand } from './commands.ts'
 import { SHORTCUTS, matchesShortcut, proseMirrorKey } from '../common/shortcuts.ts'
 import { parseMarkdown, serializeChapter } from './markdown.ts'
 import { drawCaret } from './caret.ts'
@@ -250,6 +250,8 @@ const editingKeymap = keymap({
   'Shift-Enter': chainCommands(exitCode, insertHardBreak),
   ArrowDown: chainCommands(arrowOutOfCode('down'), arrowOutOfTable('down')),
   ArrowUp: chainCommands(arrowOutOfCode('up'), arrowOutOfTable('up')),
+  // 在粗体、上下标等格式的末尾按 →：先离开格式（之后输入普通文字），再按一次才移动光标。
+  ArrowRight: exitMarksForward,
   Tab: unlessAfterEscape(
     chainCommands(goToNextCell(1), addRowFromLastCell, sinkListItem(nodes.list_item), indentInCode, keepFocus),
   ),

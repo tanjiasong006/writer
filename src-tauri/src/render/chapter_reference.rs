@@ -231,6 +231,8 @@ fn broken_in_inlines(inlines: &[Inline], targets: &Targets, out: &mut Vec<String
             Inline::Strong(children)
             | Inline::Emphasis(children)
             | Inline::Strike(children)
+            | Inline::Superscript(children)
+            | Inline::Subscript(children)
             | Inline::Link { children, .. } => broken_in_inlines(children, targets, out),
             _ => {}
         }

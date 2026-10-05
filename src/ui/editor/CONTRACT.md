@@ -53,6 +53,9 @@ props.content ──stateFor──▶ EditorState ──▶ EditorView
   焦点不会意外移出正文；先按 Esc 再按 Tab / Shift+Tab 时焦点按浏览器默认方式离开正文。
 - 正文不支持标题与 HTML：Markdown 标题与原始 HTML 都是文字（标题是原文文字的段落，如“## 研究背景”），
   输入 `# ` 不产生标题；与 Rust 导出的规则相同，由共享 fixture 约束（decisions 第 8 节）。
+  唯一的例外是上下标的 `<sup>` / `<sub>`：是互斥的 mark `sup` / `sub`，配对规则与 Rust 相同（decisions 第 21 节）。
+- 光标在粗体、斜体、删除线、上下标、行内代码的末尾时，→ 先离开格式（只改 storedMarks，光标不动），再按一次才移动；
+  自绘光标的高度随之后输入的文字（`caret.ts` 的 caretCoords）。
 - 独占一段的 Markdown 图片在编辑器中是块级原子节点 figure，与文字同处一段、在表格单元格中的是行内图片 image。
   光标不能停在 figure 旁边，文字（包括输入法）只会进入前后的段落。Markdown 不变：figure 写成与只含这张图片的段落相同的文字；
   编辑使段落只剩一张（不带链接的）图片时，它成为 figure，与 Rust 内容解析的独立图片判断一致；
@@ -99,7 +102,7 @@ Vitest 用 `await expect(output).toMatchFileSnapshot(path)` 验证实际 `serial
 预期语义单独审查，不随 golden 自动改写。具体流程见 decisions 第 8 节。
 共享资产放在 `src-tauri/fixtures/`，使用中立 JSON 块树作为预期语义，双方测试各自投影后比较；
 用例组织与语义格式见 decisions 第 8 节“实施”一项；它们不成为产品模型或运行时协议。
-至少覆盖 figure / 行内图片、图注、表格、列表、标题（作为文字）、中文强调、HTML、换行与章节引用；
+至少覆盖 figure / 行内图片、图注、表格、列表、标题（作为文字）、中文强调、HTML、上下标、换行与章节引用；
 比较预期内容与结构，不要求内部节点类型或 Markdown 字节完全相同。
 这些验证在移除预览后继续保留，不引入自定义 Vue SFC 加载器，也无需运行时串联 TS 与 Rust。
 

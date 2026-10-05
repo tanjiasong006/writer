@@ -348,8 +348,8 @@ describe('往返', () => {
   test('随机文档：写出后再次解析，结构与文字不变', () => {
     const random = seededRandom(20260928)
     const pick = <T,>(items: readonly T[]): T => items[Math.floor(random() * items.length)]
-    const pieces = ['中文', 'abc', ' ', '*', '_', '`', '[', ']', '\\', '#', '-', '1.', '1)', '+', '=', '|', '<a>', '&amp;', '!', '~', '>', '“', '”', '，', '    ', 'http://x.y', '](', '---']
-    const markSets: ReadonlyArray<ReadonlyArray<'strong' | 'em' | 'strike' | 'code' | 'link'>> = [[], ['strong'], ['em'], ['strong', 'em'], ['code'], ['strike'], ['link']]
+    const pieces = ['中文', 'abc', ' ', '*', '_', '`', '[', ']', '\\', '#', '-', '1.', '1)', '+', '=', '|', '<a>', '<sup>', '</sub>', '&amp;', '!', '~', '>', '“', '”', '，', '    ', 'http://x.y', '](', '---']
+    const markSets: ReadonlyArray<ReadonlyArray<'strong' | 'em' | 'strike' | 'sup' | 'sub' | 'code' | 'link'>> = [[], ['strong'], ['em'], ['strong', 'em'], ['code'], ['strike'], ['link'], ['sup'], ['sub'], ['sup', 'strong'], ['sub', 'em'], ['sup', 'code']]
 
     const inline = (allowBreak: boolean): Node[] => {
       const out: Node[] = []
@@ -538,6 +538,66 @@ describe('章节引用', () => {
     expect(parsed.toJSON()).toEqual(
       doc
         .create(null, p.create(null, [text('见'), ref('writer:chapter/a?show=number', '2.1'), text('与'), ref('writer:chapter/b', '3 结果')]))
+        .toJSON(),
+    )
+  })
+})
+
+describe('上标与下标', () => {
+  test('<sup> / <sub> 是上下标，紧挨文字也生效；配不上的、大写的、带属性的、转义的标签是文字', () => {
+    expect(parseMarkdown('50 m<sup>3</sup>/d，H<sub>2</sub>O').toJSON()).toEqual(
+      doc.create(null, p.create(null, [text('50 m'), text('3', 'sup'), text('/d，H'), text('2', 'sub'), text('O')])).toJSON(),
+    )
+    for (const source of ['a<sup>b c</sub>', '<SUP>d</SUP>', '<sup class="x">e</sup>', '<sup >e</sup>', 'f</sup>']) {
+      expect(parseMarkdown(source).toJSON()).toEqual(doc.create(null, p.create(null, text(source))).toJSON())
+    }
+    expect(parseMarkdown('\\<sup>f</sup>').textContent).toBe('<sup>f</sup>')
+  })
+
+  test('只与同一层中的标签配对；嵌套时以外层为准', () => {
+    expect(parseMarkdown('<sup>*a</sup>*').toJSON()).toEqual(
+      doc.create(null, p.create(null, [text('<sup>'), text('a</sup>', 'em')])).toJSON(),
+    )
+    expect(parseMarkdown('<sup>a<sub>b</sup>c</sub>').toJSON()).toEqual(
+      doc.create(null, p.create(null, [text('a<sub>b', 'sup'), text('c</sub>')])).toJSON(),
+    )
+    expect(parseMarkdown('<sup>a<sub>b</sub>*<sup>c</sup>*</sup>').toJSON()).toEqual(
+      doc.create(null, p.create(null, [text('ab', 'sup'), text('c', 'sup', 'em')])).toJSON(),
+    )
+  })
+
+  test('图片描述、脚注、章节引用中的上下标只取文字（与导出相同）', () => {
+    expect(parseMarkdown('![面积 m<sup>2</sup>](a.png)').child(0).attrs.alt).toBe('面积 m2')
+    let footnote = ''
+    parseMarkdown('注[^1]\n\n[^1]: 单位 m<sup>3</sup>').descendants((node) => {
+      if (node.type === nodes.footnote) footnote = node.attrs.text as string
+    })
+    expect(footnote).toBe('单位 m3')
+  })
+
+  test('写出：标签写在强调之外，强调与上下标同时出现时格式不丢失', () => {
+    expect(expectStable(doc.create(null, p.create(null, [text('x'), text('n', 'sup', 'em'), text('。')])))).toBe('x<sup>*n*</sup>。\n')
+    // 粗体跨过上标：在上标处分成两段粗体，紧挨中文时同样能读回。
+    expect(expectStable(doc.create(null, p.create(null, [text('是'), text('m', 'strong'), text('3', 'strong', 'sup'), text('的')])))).toBe(
+      '是**m**<sup>**3**</sup>的\n',
+    )
+    // 标签外侧是标点：内侧是标点的强调可以紧挨标签。
+    expect(expectStable(doc.create(null, p.create(null, [text('x'), text('“n”', 'sup', 'strong'), text('y')])))).toBe('x<sup>**“n”**</sup>y\n')
+    // 文字中的标签写成转义的文字。
+    expect(expectStable(doc.create(null, p.create(null, text('<sup>a</sup>'))))).toBe('\\<sup>a\\</sup>\n')
+  })
+
+  test('粘贴的 HTML：<sup> / <sub> 与 vertical-align 是上下标，编辑器中的脚注编号仍是脚注', () => {
+    const html = document.createElement('div')
+    html.innerHTML =
+      '<p>m<sup>3</sup>、H<sub>2</sub>O、x<span style="vertical-align: super">n</span>、注<sup class="footnote-ref" data-footnote="内容"></sup></p>'
+    const parsed = PMDOMParser.fromSchema(schema).parse(html)
+    expect(parsed.toJSON()).toEqual(
+      doc
+        .create(null, p.create(null, [
+          text('m'), text('3', 'sup'), text('、H'), text('2', 'sub'), text('O、x'), text('n', 'sup'), text('、注'),
+          nodes.footnote.create({ text: '内容' }),
+        ]))
         .toJSON(),
     )
   })

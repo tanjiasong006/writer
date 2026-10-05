@@ -15,9 +15,10 @@ import { tableNodes } from 'prosemirror-tables'
  *
  * 只包含正文持久化格式（Markdown，docs/decisions.md 第 2 节）能表达、且导出
  * （Rust pulldown-cmark）能渲染的结构：段落、引用、列表（含任务列表标记）、代码块、
- * 分隔线、表格、图片（独占一段的 figure 与行内图片）、硬换行、章节引用，以及粗体、斜体、删除线、行内代码、链接。
+ * 分隔线、表格、图片（独占一段的 figure 与行内图片）、硬换行、章节引用，以及粗体、斜体、删除线、上标、下标、行内代码、链接。
  * 不能用 Markdown 表达的结构（合并单元格、单元格内多段落等）不进入 schema。
- * 正文不支持标题与 HTML（docs/decisions.md 第 8 节）：结构由章节树表达，Markdown 中的标题与 HTML 都是文字。
+ * 正文不支持标题与 HTML（docs/decisions.md 第 8 节）：结构由章节树表达，Markdown 中的标题与 HTML 都是文字
+ * （唯一的例外是上下标的 `<sup>` / `<sub>`）。
  */
 
 type Align = 'left' | 'center' | 'right'
@@ -370,6 +371,27 @@ export const schema = new Schema({
         { 'data-href': mark.attrs.href, title: mark.attrs.title ?? mark.attrs.href },
         0,
       ],
+    },
+
+    /**
+     * 上标 / 下标（docs/decisions.md 第 21 节）：Markdown 中是 `<sup>…</sup>`、`<sub>…</sub>`。
+     * 两者互斥（同一段文字只能是其中一种），设置一种时替换另一种。排在强调之前：写出时标签在强调之外
+     * （`<sup>*n*</sup>`），标签两侧没有定界规则，强调的 * 紧挨标签时总能生效。
+     * 解析 DOM 时 mark 的规则先于节点：编辑器中的脚注编号（sup[data-footnote]）留给脚注节点。
+     */
+    sup: {
+      excludes: 'sup sub',
+      parseDOM: [
+        { tag: 'sup', getAttrs: (dom) => !dom.hasAttribute('data-footnote') && null },
+        { style: 'vertical-align=super' },
+      ],
+      toDOM: (): DOMOutputSpec => ['sup', 0],
+    },
+
+    sub: {
+      excludes: 'sup sub',
+      parseDOM: [{ tag: 'sub' }, { style: 'vertical-align=sub' }],
+      toDOM: (): DOMOutputSpec => ['sub', 0],
     },
 
     strong: {

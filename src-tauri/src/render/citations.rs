@@ -72,6 +72,8 @@ fn inlines(content: &[Inline], visit: &mut dyn FnMut(&str)) {
             Inline::Strong(children)
             | Inline::Emphasis(children)
             | Inline::Strike(children)
+            | Inline::Superscript(children)
+            | Inline::Subscript(children)
             | Inline::Link { children, .. }
             | Inline::Footnote(children) => inlines(children, visit),
             _ => {}

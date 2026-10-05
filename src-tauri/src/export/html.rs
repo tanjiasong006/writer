@@ -271,6 +271,8 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                 Inline::Strong(children) => out.push_str(&format!("<strong>{}</strong>", self.inlines(children))),
                 Inline::Emphasis(children) => out.push_str(&format!("<em>{}</em>", self.inlines(children))),
                 Inline::Strike(children) => out.push_str(&format!("<del>{}</del>", self.inlines(children))),
+                Inline::Superscript(children) => out.push_str(&format!("<sup>{}</sup>", self.inlines(children))),
+                Inline::Subscript(children) => out.push_str(&format!("<sub>{}</sub>", self.inlines(children))),
                 Inline::Code(code) => out.push_str(&format!("<code>{}</code>", escape(code))),
                 Inline::Link { url, children } => {
                     let content = self.inlines(children);
@@ -468,7 +470,7 @@ mod tests {
             title: "论文 <A&B>".into(),
             chapters: vec![
                 chapter("a", vec![1], "绪论", "见[旧](writer:chapter/b)与[[1]](writer:cite/r)。脚注[^1]。\n\n[^1]: 注释 *斜*\n\n<script>x</script>"),
-                chapter("b", vec![2], "方法", "| 甲 |\n| - |\n| $x$ |\n\n![缺](../assets/none.png)"),
+                chapter("b", vec![2], "方法", "| 甲 |\n| - |\n| $x$ |\n\n![缺](../assets/none.png)\n\nm<sup>3</sup>/d，H<sub>2</sub>O"),
             ],
             references: vec![RenderReference { id: "r".into(), text: "甲. 书[M]. 2020.".into() }],
             ..Default::default()
@@ -481,6 +483,7 @@ mod tests {
         assert!(html.contains("<sup class=\"citation\"><a href=\"#cite-1\">[1]</a></sup>"));
         assert!(html.contains("href=\"#fn-1\"") && html.contains("<li id=\"fn-1\" value=\"1\" epub:type=\"footnote\">注释 <em>斜</em>"));
         assert!(html.contains("&lt;script&gt;x&lt;/script&gt;"));
+        assert!(html.contains("m<sup>3</sup>/d，H<sub>2</sub>O"), "{html}");
         assert!(html.contains("<li id=\"cite-1\"><span class=\"cite-number\">[1]</span> 甲. 书[M]. 2020.</li>"));
         assert!(html.contains("<span class=\"math\"><svg"), "formula rendered as svg");
         assert_eq!(report.missing_images, vec!["../assets/none.png"]);

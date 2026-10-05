@@ -27,6 +27,9 @@ export const COMMAND_LABELS: Readonly<Record<EditorCommand, { readonly label: st
   bold: { label: '粗体', shortcut: SHORTCUTS.bold },
   italic: { label: '斜体', shortcut: SHORTCUTS.italic },
   strike: { label: '删除线', shortcut: SHORTCUTS.strike },
+  // 上下标没有自然的“⌘ + 单键”（Word 的 ⌘= / ⇧⌘= 与缩放冲突或用两个修饰键），使用频率也低，只在格式菜单中。
+  superscript: { label: '上标' },
+  subscript: { label: '下标' },
   code: { label: '行内代码', shortcut: SHORTCUTS.inlineCode },
   'bullet-list': { label: '无序列表' },
   'ordered-list': { label: '有序列表' },

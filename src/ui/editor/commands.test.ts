@@ -7,6 +7,9 @@ import {
   insertImage,
   insertTable,
   toggleBold,
+  exitMarksForward,
+  toggleSubscript,
+  toggleSuperscript,
   toggleBulletList,
   toggleCodeBlock,
   toggleItalic,
@@ -62,6 +65,44 @@ describe('行内格式', () => {
     expect(markdown(bold)).toBe('引言**正文**\n')
     expect(markdown(run(bold, toggleBold))).toBe('引言正文\n')
     expect(markdown(run(stateOf('引言正文', { select: '引言' }), toggleItalic))).toBe('*引言*正文\n')
+  })
+
+  test('上标 / 下标：选区加上与去掉格式；两者互斥，设置一种时替换另一种', () => {
+    const sup = run(stateOf('m3/d', { select: '3' }), toggleSuperscript)
+    expect(markdown(sup)).toBe('m<sup>3</sup>/d\n')
+    expect(commandState(sup).superscript.active).toBe(true)
+    expect(commandState(sup).subscript.active).toBe(false)
+    const sub = run(sup, toggleSubscript)
+    expect(markdown(sub)).toBe('m<sub>3</sub>/d\n')
+    expect(commandState(sub).superscript.active).toBe(false)
+    expect(markdown(run(sub, toggleSubscript))).toBe('m3/d\n')
+    // 没有选区时设置之后输入的格式。
+    const typing = run(stateOf('H', { cursorAfter: 'H' }), toggleSubscript)
+    expect(markdown(typing.apply(typing.tr.insertText('2')))).toBe('H<sub>2</sub>\n')
+    // 代码块中不能设置。
+    expect(commandState(stateOf('```\nx\n```', { cursorAfter: 'x' })).superscript.enabled).toBe(false)
+  })
+
+  test('在格式末尾按 → 离开格式：光标不动，之后输入普通文字；再按一次才移动光标', () => {
+    const type = (state: EditorState, value: string) => state.apply(state.tr.insertText(value))
+    // 段尾的上标。
+    const end = stateOf('m<sup>3</sup>', { cursorAfter: '3' })
+    const left = run(end, exitMarksForward)
+    expect(left.selection.head).toBe(end.selection.head)
+    expect(commandState(left).superscript.active).toBe(false)
+    expect(markdown(type(left, '/d'))).toBe('m<sup>3</sup>/d\n')
+    expect(exitMarksForward(left)).toBe(false)
+    // 段落中间的粗体、下标、斜体。
+    expect(markdown(type(run(stateOf('是**重要**的', { cursorAfter: '重要' }), exitMarksForward), '而'))).toBe('是**重要**而的\n')
+    expect(markdown(type(run(stateOf('H<sub>2</sub>O', { cursorAfter: '2' }), exitMarksForward), 'x'))).toBe('H<sub>2</sub>xO\n')
+    // 后面的文字也有的格式保留：粗体中的上标末尾只离开上标。
+    const nested = run(stateOf('**m<sup>3</sup>/d**', { cursorAfter: '3' }), exitMarksForward)
+    expect(markdown(type(nested, 'x'))).toBe('**m**<sup>**3**</sup>**x/d**\n')
+    // 不在格式末尾（格式中间、普通文字中、刚设置了格式还没有输入）时 → 照常移动。
+    expect(exitMarksForward(stateOf('**重要**', { cursorAfter: '重' }))).toBe(false)
+    expect(exitMarksForward(stateOf('普通文字', { cursorAfter: '普通' }))).toBe(false)
+    const toggled = run(stateOf('m', { cursorAfter: 'm' }), toggleSuperscript)
+    expect(commandState(run(toggled, exitMarksForward)).superscript.active).toBe(false)
   })
 
   test('没有选区时设置之后输入的格式', () => {

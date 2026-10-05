@@ -37,6 +37,8 @@ export type EditorCommand =
   | 'bold'
   | 'italic'
   | 'strike'
+  | 'superscript'
+  | 'subscript'
   | 'code'
   | 'bullet-list'
   | 'ordered-list'
@@ -92,7 +94,28 @@ function markActive(state: EditorState, type: (typeof marks)[string]): boolean {
 export const toggleBold: Command = toggleMark(marks.strong)
 export const toggleItalic: Command = toggleMark(marks.em)
 export const toggleStrike: Command = toggleMark(marks.strike)
+/** 上标与下标互斥（schema 中的 excludes）：对下标文字设置上标时替换为上标，反之亦然。 */
+export const toggleSuperscript: Command = toggleMark(marks.sup)
+export const toggleSubscript: Command = toggleMark(marks.sub)
 export const toggleCode: Command = toggleMark(marks.code)
+
+/** 可以在末尾按 → 离开的文字格式（格式菜单中的各项）。 */
+const EXITABLE_MARKS = [marks.strong, marks.em, marks.strike, marks.sup, marks.sub, marks.code]
+
+/**
+ * 光标在粗体、斜体、上下标等格式的末尾时按 →：不移动光标，之后输入的文字不再带这些格式（后面的文字也有的格式保留）。
+ * 已经离开（或光标不在格式末尾）时不处理，→ 照常移动光标。移动光标后格式照常由所在位置决定。
+ */
+export const exitMarksForward: Command = (state, dispatch) => {
+  const { $cursor } = state.selection as TextSelection
+  if (!$cursor) return false
+  const typing = state.storedMarks ?? $cursor.marks()
+  const after = $cursor.nodeAfter?.marks ?? []
+  const leaving = typing.filter((mark) => EXITABLE_MARKS.includes(mark.type) && !mark.isInSet(after))
+  if (leaving.length === 0) return false
+  if (dispatch) dispatch(state.tr.setStoredMarks(typing.filter((mark) => !leaving.includes(mark))))
+  return true
+}
 
 /** 撤销：刚由输入规则转换（如 "- " 变成列表）时回到转换前的文字，与快捷键相同。 */
 export const undo: Command = chainCommands(undoInputRule, historyUndo)
@@ -490,6 +513,8 @@ export const editorCommands: Readonly<
   bold: toggleBold,
   italic: toggleItalic,
   strike: toggleStrike,
+  superscript: toggleSuperscript,
+  subscript: toggleSubscript,
   code: toggleCode,
   'bullet-list': toggleBulletList,
   'ordered-list': toggleOrderedList,
@@ -521,6 +546,8 @@ export function commandState(state: EditorState): CommandState {
     bold: { enabled: can(toggleBold), active: markActive(state, marks.strong) },
     italic: { enabled: can(toggleItalic), active: markActive(state, marks.em) },
     strike: { enabled: can(toggleStrike), active: markActive(state, marks.strike) },
+    superscript: { enabled: can(toggleSuperscript), active: markActive(state, marks.sup) },
+    subscript: { enabled: can(toggleSubscript), active: markActive(state, marks.sub) },
     code: { enabled: can(toggleCode), active: markActive(state, marks.code) },
     'bullet-list': { enabled: can(toggleBulletList), active: list?.node.type === nodes.bullet_list && !task },
     'ordered-list': { enabled: can(toggleOrderedList), active: list?.node.type === nodes.ordered_list && !task },

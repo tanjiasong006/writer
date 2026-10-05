@@ -1,0 +1,65 @@
+{
+  "blocks": [
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "流量 50 m" },
+        { "text": "3", "marks": ["sup"] },
+        { "text": "/d，水 H" },
+        { "text": "2", "marks": ["sub"] },
+        { "text": "O，10" },
+        { "text": "-3", "marks": ["sup"] },
+        { "text": "，x" },
+        { "text": "n", "marks": ["emphasis", "sup"] },
+        { "text": "。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "强调中：" },
+        { "text": "x", "marks": ["strong"] },
+        { "text": "2", "marks": ["strong", "sup"] },
+        { "text": " 与是**m" },
+        { "text": "3", "marks": ["sup"] },
+        { "text": "**的。" }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [{ "text": "abc", "marks": ["sup"] }, { "text": " 嵌套时以外层为准。" }]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [{ "text": "<sup>" }, { "text": "a</sup>", "marks": ["emphasis"] }, { "text": " 跨越强调的不配对。" }]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [{ "text": "a<sub>b", "marks": ["sup"] }, { "text": "c</sub> 交错时与最近的配对。" }]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [{ "text": "a</sup>、<SUP>b</SUP>、<sup class=\"x\">c</sup>、<sup>d</sup> 是文字。" }]
+    },
+    {
+      "type": "table",
+      "align": ["none", "none"],
+      "header": [[{ "text": "单位" }], [{ "text": "值" }]],
+      "rows": [[[{ "text": "m" }, { "text": "2", "marks": ["sup"] }], [{ "text": "1" }]]]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [{ "task": null, "blocks": [{ "type": "paragraph", "inlines": [{ "text": "x" }, { "text": "i", "marks": ["sub"] }] }] }]
+    },
+    { "type": "figure", "src": "a.png", "alt": "面积 m2" },
+    {
+      "type": "paragraph",
+      "inlines": [
+        { "text": "链接中的 x", "marks": ["link:https://example.com"] },
+        { "text": "2", "marks": ["link:https://example.com", "sup"] }
+      ]
+    }
+  ]
+}

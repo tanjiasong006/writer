@@ -774,6 +774,15 @@ impl<'a> Writer<'a> {
                 Inline::Strike(children) => {
                     out.push_str(&format!("#strike[{}]", self.inlines(children, container)))
                 }
+                // 上下标：与文献引用相同，不用字体自带的上下标字形（中文字体大多没有，同一段中会不一致）。
+                Inline::Superscript(children) => out.push_str(&format!(
+                    "#super(typographic: false)[{}]",
+                    self.inlines(children, container)
+                )),
+                Inline::Subscript(children) => out.push_str(&format!(
+                    "#sub(typographic: false)[{}]",
+                    self.inlines(children, container)
+                )),
                 Inline::Code(code) => out.push_str(&format!("#raw({})", string(&breakable(code)))),
                 Inline::Link { url, children } => {
                     let content = self.inlines(children, container);
@@ -930,7 +939,11 @@ fn page_furniture(layout: &PdfLayout, title: &str) -> String {
 fn has_image(inlines: &[Inline]) -> bool {
     inlines.iter().any(|inline| match inline {
         Inline::Image { .. } => true,
-        Inline::Strong(c) | Inline::Emphasis(c) | Inline::Strike(c) => has_image(c),
+        Inline::Strong(c)
+        | Inline::Emphasis(c)
+        | Inline::Strike(c)
+        | Inline::Superscript(c)
+        | Inline::Subscript(c) => has_image(c),
         Inline::Link { children, .. } => has_image(children),
         _ => false,
     })
@@ -1537,7 +1550,7 @@ mod tests {
             400,
             ImageFormat::Png,
         );
-        let markdown = "**粗体**、*斜体*、~~删除~~、`code`、[链接](https://example.com)\n\n\
+        let markdown = "**粗体**、*斜体*、~~删除~~、`code`、[链接](https://example.com)、m<sup>3</sup>、H<sub>2</sub>O\n\n\
                         - 甲\n  1. 子一\n  2. 子二\n- 乙\n\n3. 三\n4. 四\n\n> 引用\n> > 嵌套\n\n\
                         ```rust\nfn main() {}\n```\n\n| 组别 | 数 |\n| :-: | --: |\n| 对照 | 30 |\n\n---\n\n\
                         ![示意图](../assets/图.png)\n\n![丢失](../assets/无.png)\n\n## 小节\n\n中文段落\n折行。";
@@ -1937,6 +1950,16 @@ mod tests {
         assert!(!text.contains("未引用"));
         assert_eq!(internal_links(&paged), 3);
         assert_eq!(report.broken_references, vec!["[旧]"]);
+    }
+
+    #[test]
+    fn superscript_and_subscript_are_typeset_in_place() {
+        let document = build(&request("", &[("a", vec![1], "绪论", "流量 50 m<sup>3</sup>/d，H<sub>2</sub>O，x<sup>*n*</sup>。")]));
+        let dir = project();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        let text = page_texts(&paged).concat();
+        assert!(text.contains("流量 50 m3/d，H2O，xn。"), "{text}");
+        assert!(!text.contains("<sup>"), "{text}");
     }
 
     #[test]
@@ -2672,7 +2695,7 @@ fn write_sample_pdf() {
         subtitle: "长文档写作与输出示例".into(),
         author: "Writer 团队".into(),
         chapters: vec![
-            chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二\n\n注入测试：\"]#panic(\"x\")[ $ x $ #strong[不应加粗]\n\n章节引用：详见[旧](writer:chapter/c)与第[旧](writer:chapter/b?show=number)节。"),
+            chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n上下标：处理规模 5000 m<sup>3</sup>/d，H<sub>2</sub>O 与 NH<sub>4</sub><sup>+</sup>，**容积负荷 1.2 kg/(m<sup>3</sup>·d)**。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二\n\n注入测试：\"]#panic(\"x\")[ $ x $ #strong[不应加粗]\n\n章节引用：详见[旧](writer:chapter/c)与第[旧](writer:chapter/b?show=number)节。"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.png)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],

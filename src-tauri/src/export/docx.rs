@@ -295,6 +295,8 @@ struct RunStyle {
     italic: bool,
     strike: bool,
     code: bool,
+    superscript: bool,
+    subscript: bool,
 }
 
 /// 块所处的上下文：列表层级与引用层级决定缩进。
@@ -763,6 +765,25 @@ impl Writer<'_> {
                     },
                     bounds,
                 ),
+                // 上下标：Word 的“上标 / 下标”文字格式（w:vertAlign）。
+                Inline::Superscript(children) => self.inlines(
+                    p,
+                    children,
+                    RunStyle {
+                        superscript: true,
+                        ..style
+                    },
+                    bounds,
+                ),
+                Inline::Subscript(children) => self.inlines(
+                    p,
+                    children,
+                    RunStyle {
+                        subscript: true,
+                        ..style
+                    },
+                    bounds,
+                ),
                 Inline::Code(code) => p.add_run(styled(
                     Run::new().add_text(xml_safe(code)),
                     RunStyle {
@@ -819,6 +840,11 @@ fn styled(mut run: Run, style: RunStyle) -> Run {
     }
     if style.strike {
         run = run.strike();
+    }
+    if style.superscript {
+        run.run_property = run.run_property.vert_align(VertAlignType::SuperScript);
+    } else if style.subscript {
+        run.run_property = run.run_property.vert_align(VertAlignType::SubScript);
     }
     if style.code {
         run = run
@@ -1223,7 +1249,11 @@ fn text_bounds(width: f64) -> Bounds {
 fn has_image(inlines: &[Inline]) -> bool {
     inlines.iter().any(|inline| match inline {
         Inline::Image { .. } => true,
-        Inline::Strong(c) | Inline::Emphasis(c) | Inline::Strike(c) => has_image(c),
+        Inline::Strong(c)
+        | Inline::Emphasis(c)
+        | Inline::Strike(c)
+        | Inline::Superscript(c)
+        | Inline::Subscript(c) => has_image(c),
         Inline::Link { children, .. } => has_image(children),
         _ => false,
     })
@@ -1515,7 +1545,7 @@ mod tests {
     #[test]
     fn inline_styles_lists_quotes_code_tables() {
         let dir = project();
-        let markdown = "**粗**、*斜*、~~删~~、`code`、[链接](https://example.com)\n\n\
+        let markdown = "**粗**、*斜*、~~删~~、`code`、[链接](https://example.com)、m<sup>3</sup>、H<sub>2</sub>O\n\n\
                         - 甲\n  1. 子一\n  2. 子二\n- 乙\n\n\
                         3. 三\n4. 四\n\n\
                         > 引用\n\n\
@@ -1524,6 +1554,8 @@ mod tests {
         let (bytes, _) = export_ok(&dir, &[("a", vec![1], "章", markdown)]);
         let xml = part(&bytes, "word/document.xml");
         assert!(xml.contains("<w:b />") && xml.contains("<w:i />") && xml.contains("<w:strike />"));
+        assert!(xml.contains(r#"<w:vertAlign w:val="superscript" />"#));
+        assert!(xml.contains(r#"<w:vertAlign w:val="subscript" />"#));
         assert!(xml.contains("<w:hyperlink"));
         assert!(xml.contains(r#"<w:numId w:val="10" />"#), "bullet list");
         assert!(xml.contains(r#"<w:ilvl w:val="1" />"#), "nested list level");
@@ -2009,7 +2041,7 @@ fn write_sample_docx() {
         subtitle: "长文档写作与输出".into(),
         author: "示例作者".into(),
         chapters: vec![
-            chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二"),
+            chapter("a", vec![1], "绪论", "长文档写作需要**清晰的结构**与*稳定的输出*。中文段落\n折行不会产生多余空格。\n\n上下标：处理规模 5000 m<sup>3</sup>/d，H<sub>2</sub>O 与 NH<sub>4</sub><sup>+</sup>，**容积负荷 1.2 kg/(m<sup>3</sup>·d)**。\n\n- 章节组织\n- 自动编号\n  1. 子项一\n  2. 子项二"),
             chapter("b", vec![1, 1], "研究背景", "> 引用：方法决定结果。\n\n| 组别 | 样本数 |\n| --- | --: |\n| 对照组 | 30 |\n| 实验组 | 32 |"),
             chapter("c", vec![2], "方法", "![示意图](../assets/示意图.jpg)\n\n![曲线（竖长图）](../assets/曲线.png)\n\n```\nfn main() {\n    println!(\"你好\");\n}\n```\n\n## 正文小标题\n\n访问 [官网](https://example.com)。\n\n1. 第一步\n2. 第二步"),
         ],

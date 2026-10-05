@@ -329,6 +329,8 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
         editorItem('bold', { checkable: true }),
         editorItem('italic', { checkable: true }),
         editorItem('strike', { checkable: true }),
+        editorItem('superscript', { checkable: true }),
+        editorItem('subscript', { checkable: true }),
         editorItem('code', { checkable: true }),
         { separator: true },
         {

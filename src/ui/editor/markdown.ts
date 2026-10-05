@@ -15,7 +15,8 @@ import type { ChapterRefLabel } from './chapter_ref_view.ts'
  * 正文持久化格式（Markdown）与编辑器文档之间的转换。
  *
  * Markdown 方言与导出使用的 Rust pulldown-cmark 保持一致：CommonMark + GFM 表格、删除线、任务列表；
- * 正文不支持标题与 HTML：原始 HTML 与 Markdown 标题一律视为文字。序列化结果再次解析后结构不变（round trip），
+ * 正文不支持标题与 HTML：原始 HTML 与 Markdown 标题一律视为文字（唯一的例外是上下标的 `<sup>` / `<sub>`）。
+ * 序列化结果再次解析后结构不变（round trip），
  * 见 markdown.test.ts。
  */
 
@@ -115,12 +116,101 @@ tokenizer.inline.ruler.before('escape', 'writer_math', (state, silent) => {
   }
   return false
 })
+/**
+ * 上下标标签（docs/decisions.md 第 21 节）：正文中唯一生效的 HTML，只认恰好是 `<sup>`、`</sup>`、`<sub>`、`</sub>`
+ * 的标签（小写、没有属性与空白）。这里只切分出标签，配对见 writer_scripts。
+ */
+const SCRIPT_TAG = /^<(\/?)(sup|sub)>/
+
+tokenizer.inline.ruler.after('html_inline', 'writer_script_tag', (state, silent) => {
+  if (state.src[state.pos] !== '<') return false
+  const match = SCRIPT_TAG.exec(state.src.slice(state.pos, state.pos + 6))
+  if (!match) return false
+  if (!silent) {
+    const token = state.push('script_tag', '', 0)
+    token.content = match[0]
+    token.meta = { script: match[2], closing: match[1] === '/' }
+  }
+  state.pos += match[0].length
+  return true
+})
+
 // commonmark 预设只允许 20 层；maxNesting 是 markdown-it 的运行时选项，类型定义中没有列出。
 Object.assign(tokenizer.options, { maxNesting: MAX_NESTING })
 // 保留链接与图片地址的原文：不做百分号编码，也不因协议拒绝（导出时由 Rust 决定是否可用）。
 tokenizer.normalizeLink = (url) => url
 tokenizer.normalizeLinkText = (url) => url
 tokenizer.validateLink = () => true
+
+/**
+ * 上下标配对，与 Rust 渲染器（render::markdown 的 InlineRun）相同：
+ * - 同一层（段落、强调、链接、图片描述之内）中，结束标签与它之前最近的、尚未配对的同类开始标签配对，
+ *   两者之间未配对的标签都是文字；配不上的标签是文字。
+ * - 上下标之中不再有上下标：嵌套时以外层为准，内层的标签去掉、只保留内容。
+ * 在其他规则读取行内记号之前完成（脚注、章节引用等取纯文字时，配对的标签没有文字）。
+ */
+tokenizer.core.ruler.after('inline', 'writer_scripts', (state) => {
+  for (const token of state.tokens) {
+    if (token.type === 'inline' && token.children) token.children = pairScripts(token.children)
+  }
+})
+
+const LEVEL_OPEN = /^(em|strong|s|link)_open$/
+const LEVEL_CLOSE = /^(em|strong|s|link)_close$/
+
+function pairScripts(children: Token[]): Token[] {
+  if (!children.some((child) => child.type === 'script_tag' || child.type === 'image')) return children
+  for (const child of children) {
+    if (child.type === 'image' && child.children) child.children = pairScripts(child.children)
+  }
+  /** 每一层中尚未配对的开始标签（在 children 中的位置）。 */
+  const levels: number[][] = [[]]
+  const partner = new Map<number, number>()
+  children.forEach((child, index) => {
+    if (LEVEL_OPEN.test(child.type)) levels.push([])
+    else if (LEVEL_CLOSE.test(child.type)) {
+      if (levels.length > 1) levels.pop()
+    } else if (child.type === 'script_tag') {
+      const { script, closing } = child.meta as { script: string; closing: boolean }
+      const open = levels.at(-1)!
+      if (!closing) open.push(index)
+      else {
+        let at = open.length - 1
+        while (at >= 0 && (children[open[at]].meta as { script: string }).script !== script) at--
+        if (at >= 0) {
+          partner.set(open[at], index)
+          partner.set(index, open[at])
+          open.length = at
+        }
+      }
+    }
+  })
+  const out: Token[] = []
+  let depth = 0
+  children.forEach((child, index) => {
+    if (child.type !== 'script_tag') {
+      out.push(child)
+      return
+    }
+    const other = partner.get(index)
+    if (other === undefined) {
+      child.type = 'text'
+      out.push(child)
+      return
+    }
+    const opening = other > index
+    if (!opening) depth--
+    if (depth === 0) {
+      const { script } = child.meta as { script: string }
+      child.type = `${script}_${opening ? 'open' : 'close'}`
+      child.content = ''
+      child.nesting = opening ? 1 : -1
+      out.push(child)
+    }
+    if (opening) depth++
+  })
+  return out
+}
 
 /**
  * 正文不支持标题（docs/decisions.md 第 8 节）：Markdown 标题当作普通段落，文字是标题的原文（如“## 研究背景”），
@@ -459,6 +549,8 @@ const parser = new MarkdownParser(schema, tokenizer, {
   em: { mark: 'em' },
   strong: { mark: 'strong' },
   s: { mark: 'strike' },
+  sup: { mark: 'sup' },
+  sub: { mark: 'sub' },
   link: {
     mark: 'link',
     getAttrs: (token) => ({ href: token.attrGet('href') ?? '', title: token.attrGet('title') || null }),
@@ -657,6 +749,9 @@ const serializer = new MarkdownSerializer(
     em: baseMarks.em,
     strong: baseMarks.strong,
     strike: { open: '~~', close: '~~', mixable: true, expelEnclosingWhitespace: true },
+    // 标签两侧没有定界规则。不是 mixable：标签总是写在强调之外（schema 中排在强调之前，见 adjustEmphasis）。
+    sup: { open: '<sup>', close: '</sup>' },
+    sub: { open: '<sub>', close: '</sub>' },
     code: {
       open: (_state, _mark, parent, index) => codeDelimiter(parent.child(index).text ?? '', 'open'),
       close: (_state, _mark, parent, index) => codeDelimiter(parent.child(index - 1).text ?? '', 'close'),
@@ -832,11 +927,13 @@ function sourceText(source: string): string {
 //    章节引用上的链接与行内代码无法表达（链接不能嵌套，代码中没有链接）：去掉这两种格式，引用不变。
 // 2. CommonMark 的 * / ~~ 只有在两侧字符满足 flanking 规则时才生效：标记内侧紧挨空白，或内侧紧挨标点、
 //    外侧紧挨文字时（中文里很常见：是**“重要”**的）会变成字面的星号。
-//    把这类边界上的空白与标点移到标记之外（是“**重要**”的）。
+//    把这类边界上的空白与标点移到标记之外（是“**重要**”的）。上下标的标签写在强调之外，
+//    强调的边界两侧上下标不同时，紧挨 ** 外侧的是标签的 > 或 <（标点）：x<sup>**n**</sup>、**m**<sup>**3**</sup>。
 // 3. 兜底：写出后再次解析，格式仍不能原样读回时（相邻的多种强调互相嵌套等），
 //    依次去掉强调、全部格式，直到文字能原样读回。
 
 const FLANKING_MARKS = [marks.strong, marks.em, marks.strike]
+const SCRIPT_MARKS = [marks.sup, marks.sub]
 const UNWRAPPED = [marks.link, marks.code]
 
 const isPunctuation = (char: string) => /[\p{P}\p{S}]/u.test(char)
@@ -992,6 +1089,10 @@ function adjustEmphasis(block: Node): Node {
   })
   const firstAt = (i: number) => (i < 0 || i >= units.length ? null : units[i].first ?? '\n')
   const lastAt = (i: number) => (i < 0 || i >= units.length ? null : units[i].last ?? '\n')
+  // 强调边界外侧的字符：两侧上下标不同时是标签（开始标签以 > 结尾，结束标签以 < 开头）。
+  const scriptAt = (i: number) => units[i].node.marks.find((mark) => SCRIPT_MARKS.includes(mark.type))?.type ?? null
+  const before = (i: number) => (i > 0 && scriptAt(i - 1) !== scriptAt(i) ? '>' : lastAt(i - 1))
+  const after = (i: number) => (i < units.length && scriptAt(i) !== scriptAt(i - 1) ? '<' : firstAt(i))
 
   let changed = false
   for (const type of FLANKING_MARKS) {
@@ -1011,8 +1112,8 @@ function adjustEmphasis(block: Node): Node {
       // 标记内侧的空白移到外侧（Markdown 中 ** 内侧不能紧挨空白）；内侧是标点而外侧是文字时，标点移到外侧。
       const movable = (inner: string | null, outer: string | null) =>
         isSpace(inner) || (isPunctuation(inner ?? '') && isWord(outer))
-      while (start < end && movable(firstAt(start), lastAt(start - 1))) drop(start++)
-      while (end > start && movable(lastAt(end - 1), firstAt(end))) drop(--end)
+      while (start < end && movable(firstAt(start), before(start))) drop(start++)
+      while (end > start && movable(lastAt(end - 1), after(end))) drop(--end)
       i = Math.max(end, i + 1)
       while (i < units.length && type.isInSet(units[i].node.marks)) i++
     }

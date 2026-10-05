@@ -242,6 +242,13 @@
   user-select: none;
 }
 
+/* 上标 / 下标：与脚注、文献引用的编号同样大小；行高为 0，不撑高所在的行。 */
+.document-body sup,
+.document-body sub {
+  font-size: 0.72em;
+  line-height: 0;
+}
+
 /*
  * 脚注：正文中是链接色的上标编号（编号由 decoration / 全文阅读给出 data-number）；
  * 章节末尾在一条短线下列出全部脚注，字号小一号、次级颜色，与页底脚注的阅读习惯相同。

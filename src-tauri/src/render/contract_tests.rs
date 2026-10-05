@@ -48,6 +48,8 @@ fn runs(inlines: &[Inline], marks: &[String], out: &mut Vec<Value>) {
             Inline::Strong(children) => nested("strong".into(), children, out),
             Inline::Emphasis(children) => nested("emphasis".into(), children, out),
             Inline::Strike(children) => nested("strike".into(), children, out),
+            Inline::Superscript(children) => nested("sup".into(), children, out),
+            Inline::Subscript(children) => nested("sub".into(), children, out),
             Inline::Link { url, children } => nested(format!("link:{url}"), children, out),
             // 脚注投影为内容的纯文字（空白合并）：编辑器中脚注内容只有文字。
             Inline::Footnote(content) => {

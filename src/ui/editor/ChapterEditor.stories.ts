@@ -274,6 +274,27 @@ export const Footnotes: Story = {
   },
 }
 
+/**
+ * 上标与下标：选中文字后用“格式 → 上标 / 下标”设置（两者互斥）。上下标不撑高所在的行，
+ * 与脚注编号、文献引用同样大小；可以与粗体、斜体、链接同时使用，也可以在表格、列表中。
+ */
+export const SuperscriptAndSubscript: Story = {
+  args: {
+    chapterId: 'scripts',
+    number: '3.2',
+    title: '处理工艺',
+    content:
+      '设计处理规模为 5000 m<sup>3</sup>/d，进水 COD 浓度 400 mg/L，出水达到一级 A 标准[^1]。' +
+      '曝气池中溶解氧维持在 2 mg/L 左右，污泥浓度约 3.5×10<sup>3</sup> mg/L，' +
+      '反应式为 NH<sub>4</sub><sup>+</sup> + 2O<sub>2</sub> → NO<sub>3</sub><sup>-</sup> + H<sub>2</sub>O + 2H<sup>+</sup>。\n\n' +
+      '强调中的上下标：**容积负荷 1.2 kg/(m<sup>3</sup>·d)**，*x<sub>i</sub>* 为第 i 个样本，' +
+      '误差 ε<sup>*n*</sup> 随迭代次数减小，详见[规范 GB<sub>18918</sub>](https://example.com)。\n\n' +
+      '| 指标 | 单位 | 设计值 |\n| --- | --- | --: |\n| 流量 | m<sup>3</sup>/d | 5000 |\n| 面积 | m<sup>2</sup> | 1200 |\n\n' +
+      '- CO<sub>2</sub> 排放\n- 10<sup>-6</sup> 量级\n\n' +
+      '[^1]: 依据 GB 18918—2002。\n',
+  },
+}
+
 /** 图表编号：有图注的图在图注前显示“图 2-1”，有标题的表格上方显示“表 2-1　标题”（单击编辑，右键可添加）。 */
 export const FiguresAndTables: Story = {
   args: {
