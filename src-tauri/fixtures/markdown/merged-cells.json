@@ -1,0 +1,33 @@
+{
+  "说明": "合并单元格（docs/decisions.md 第 23 节）：两个竖线之间没有任何字符（||）是与左侧合并，内容恰好是 ^^ 是与上方合并；表头只横向合并，正文第一行的 ^^ 不与表头合并（是文字）。有空白的空单元格、补齐的单元格、转义的 \\^^ 不合并。被合并的位置是空单元格，spans 的 row 从表头起算。",
+  "blocks": [
+    {
+      "type": "table",
+      "align": ["left", "right", "right", "none"],
+      "header": [[{ "text": "地区" }], [{ "text": "2024" }], [], [{ "text": "备注" }]],
+      "rows": [
+        [[{ "text": "华东" }], [{ "text": "1" }], [{ "text": "2" }], [{ "text": "甲" }]],
+        [[], [{ "text": "3" }], [], [{ "text": "乙" }]],
+        [[], [], [], [{ "text": "丙" }]]
+      ],
+      "spans": [
+        { "row": 0, "col": 1, "rows": 1, "cols": 2 },
+        { "row": 1, "col": 0, "rows": 3, "cols": 1 },
+        { "row": 2, "col": 1, "rows": 2, "cols": 2 }
+      ]
+    },
+    {
+      "type": "table",
+      "align": ["none", "none", "none", "none"],
+      "header": [[{ "text": "a" }], [], [{ "text": "b" }], []],
+      "rows": [
+        [[{ "text": "^^" }], [{ "text": "^^" }], [{ "text": "x" }], [{ "text": "y" }]],
+        [[], [{ "text": "1" }], [], []]
+      ],
+      "spans": [
+        { "row": 0, "col": 2, "rows": 1, "cols": 2 },
+        { "row": 1, "col": 0, "rows": 2, "cols": 1 }
+      ]
+    }
+  ]
+}

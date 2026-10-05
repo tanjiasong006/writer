@@ -192,7 +192,7 @@ describe('文档 → Markdown', () => {
     )
   })
 
-  test('表格：列对齐、竖线转义、合并单元格补齐列数', () => {
+  test('表格：列对齐、竖线转义', () => {
     const cell = (type: typeof table_cell, content: string, attrs: Record<string, unknown> = {}) =>
       type.create(attrs, content ? text(content) : null)
     const written = write(
@@ -200,7 +200,7 @@ describe('文档 → Markdown', () => {
         null,
         table.create(null, [
           table_row.create(null, [cell(table_header, '名称', { align: 'center' }), cell(table_header, '值', { align: 'right' }), cell(table_header, '备注')]),
-          table_row.create(null, [cell(table_cell, 'a|b', { colspan: 2 }), cell(table_cell, '')]),
+          table_row.create(null, [cell(table_cell, 'a|b', { align: 'center' }), cell(table_cell, '', { align: 'right' }), cell(table_cell, '')]),
         ]),
       ),
     )
@@ -208,6 +208,85 @@ describe('文档 → Markdown', () => {
     const reparsed = parseMarkdown(written).child(0)
     expect(reparsed.child(1).child(0).textContent).toBe('a|b')
     expect(reparsed.child(1).childCount).toBe(3)
+  })
+
+  describe('合并单元格（docs/decisions.md 第 23 节）', () => {
+    const cell = (type: typeof table_cell, content: string, attrs: Record<string, unknown> = {}) =>
+      type.create(attrs, content ? text(content) : null)
+    /** 表格各行的单元格：文字与非 1 的跨行 / 跨列。 */
+    const cells = (table: ReturnType<typeof parseMarkdown>) => {
+      const rows: string[][] = []
+      table.forEach((row) => {
+        const out: string[] = []
+        row.forEach((c) => {
+          const span = [c.attrs.colspan !== 1 ? `c${c.attrs.colspan}` : '', c.attrs.rowspan !== 1 ? `r${c.attrs.rowspan}` : '']
+          out.push([c.textContent, ...span.filter(Boolean)].join(' '))
+        })
+        rows.push(out)
+      })
+      return rows
+    }
+
+    test('表头横向合并，正文纵向、横向与二维合并；写出后再解析不变', () => {
+      const markdown = [
+        '| 地区 | 2024 || 备注 |',
+        '| --- | ---: | ---: | --- |',
+        '| 华东 | 1 | 2 | 甲 |',
+        '| ^^ | 3 || 乙 |',
+        '| ^^ | ^^ || 丙 |',
+        '',
+      ].join('\n')
+      const parsed = parseMarkdown(markdown)
+      expect(cells(parsed.child(0))).toEqual([
+        ['地区', '2024 c2', '备注'],
+        ['华东 r3', '1', '2', '甲'],
+        ['3 c2 r2', '乙'],
+        ['丙'],
+      ])
+      expect(write(parsed)).toBe(markdown)
+    })
+
+    test('有空白的空单元格、补齐的单元格、转义的 \\^^、正文第一行的 ^^ 不合并', () => {
+      expect(cells(parseMarkdown('| a |  | b |\n|---|---|---|\n| 1 |').child(0))).toEqual([['a', '', 'b'], ['1', '', '']])
+      expect(cells(parseMarkdown('| a |\n|---|\n| ^^ |\n| \\^^ |').child(0))).toEqual([['a'], ['^^'], ['^^']])
+      // 正文第一行的 ^^ 是文字，第二行的 ^^ 与它合并。
+      expect(cells(parseMarkdown('| a |\n|---|\n| ^^ |\n| ^^ |').child(0))).toEqual([['a'], ['^^ r2'], []])
+      expect(cells(parseMarkdown('| a |\n|---|\n| 1 |\n| \\^^ |').child(0))).toEqual([['a'], ['1'], ['^^']])
+      expect(cells(parseMarkdown('> | a || b |\n> |---|---|---|').child(0).child(0))).toEqual([['a c2', 'b']])
+    })
+
+    test('内容恰好是 ^^ 的单元格写出时转义', () => {
+      const written = write(
+        doc.create(null, table.create(null, [table_row.create(null, [cell(table_header, 'a')]), table_row.create(null, [cell(table_cell, '^^')])])),
+      )
+      expect(written).toBe('| a |\n| --- |\n| \\^^ |\n')
+    })
+
+    test('表头不与正文合并：从表头向下合并的部分写成空单元格', () => {
+      const written = write(
+        doc.create(
+          null,
+          table.create(null, [
+            table_row.create(null, [cell(table_header, 'a', { rowspan: 2 }), cell(table_header, 'b')]),
+            table_row.create(null, [cell(table_cell, '1')]),
+          ]),
+        ),
+      )
+      expect(written).toBe('| a | b |\n| --- | --- |\n|  | 1 |\n')
+    })
+
+    test('列对齐取这一列中第一个从这一列开始的单元格', () => {
+      const written = write(
+        doc.create(
+          null,
+          table.create(null, [
+            table_row.create(null, [cell(table_header, 'a', { colspan: 2, align: 'center' })]),
+            table_row.create(null, [cell(table_cell, '1', { align: 'center' }), cell(table_cell, '2', { align: 'right' })]),
+          ]),
+        ),
+      )
+      expect(written).toBe('| a ||\n| :---: | ---: |\n| 1 | 2 |\n')
+    })
   })
 
   test('图片：含空格的引用用尖括号包裹，括号转义', () => {

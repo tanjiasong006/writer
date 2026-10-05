@@ -19,7 +19,7 @@ import {
   wrappingInputRule,
 } from 'prosemirror-inputrules'
 import { liftListItem, sinkListItem, splitListItem } from 'prosemirror-schema-list'
-import { addRowAfter, goToNextCell, isInTable, nextCell, selectionCell, tableEditing } from 'prosemirror-tables'
+import { addRowAfter, CellSelection, goToNextCell, isInTable, nextCell, selectionCell, tableEditing, TableMap } from 'prosemirror-tables'
 import { dropCursor } from 'prosemirror-dropcursor'
 import { GapCursor, gapCursor } from 'prosemirror-gapcursor'
 import { isEmptyDocument, nodes, schema } from './schema.ts'
@@ -232,6 +232,26 @@ const deleteEmptyFirstBlock: Command = (state, dispatch) => {
  * 其余是写作中的编辑行为（Enter、Tab、Backspace、方向键、Esc、Shift+Enter 换行），不是应用快捷键。
  * 重做没有快捷键（只在编辑菜单中），见 common/shortcuts.ts 的规则。
  */
+/**
+ * 光标在单元格文字的边缘时 Shift+方向键选中当前与相邻的单元格（之后的扩展由 prosemirror-tables 处理），
+ * 只用键盘也能选中多个单元格来合并。prosemirror-tables 自己的判断假定单元格中是段落，这里的单元格直接是一行文字。
+ */
+function selectCellsFromText(axis: 'horiz' | 'vert', dir: 1 | -1): Command {
+  return (state, dispatch, view) => {
+    const { selection } = state
+    if (!view || !(selection instanceof TextSelection)) return false
+    const { $head } = selection
+    const role = $head.parent.type.spec.tableRole
+    if (role !== 'cell' && role !== 'header_cell') return false
+    if (!view.endOfTextblock(axis === 'vert' ? (dir > 0 ? 'down' : 'up') : dir > 0 ? 'right' : 'left')) return false
+    const $cell = state.doc.resolve($head.before())
+    const $next = nextCell($cell, axis, dir)
+    if (!$next) return false
+    dispatch?.(state.tr.setSelection(new CellSelection($cell, $next)))
+    return true
+  }
+}
+
 const editingKeymap = keymap({
   // 刚由输入规则转换（如 "- " 变成列表）时，撤销回到转换前的文字，与 Backspace 相同。
   [proseMirrorKey(SHORTCUTS.undo)]: undoCommand,
@@ -248,6 +268,10 @@ const editingKeymap = keymap({
       return splitListItem(nodes.list_item, item?.type === nodes.list_item && item.attrs.checked !== null ? { checked: false } : undefined)(state, dispatch)
     }),
   'Shift-Enter': chainCommands(exitCode, insertHardBreak),
+  'Shift-ArrowLeft': selectCellsFromText('horiz', -1),
+  'Shift-ArrowRight': selectCellsFromText('horiz', 1),
+  'Shift-ArrowUp': selectCellsFromText('vert', -1),
+  'Shift-ArrowDown': selectCellsFromText('vert', 1),
   ArrowDown: chainCommands(arrowOutOfCode('down'), arrowOutOfTable('down')),
   ArrowUp: chainCommands(arrowOutOfCode('up'), arrowOutOfTable('up')),
   // 在粗体、上下标等格式的末尾按 →：先离开格式（之后输入普通文字），再按一次才移动光标。
@@ -370,6 +394,39 @@ function activeTable(): Plugin {
   })
 }
 
+/**
+ * 被上方单元格纵向合并的行中，第一个单元格不在第一列：加上 is-after-span（不进入文档），
+ * 单元格边界提示据此在它左侧画线（CSS 只能按 :first-child 判断第一列）。只在文档变化时重新计算。
+ */
+function cellsAfterSpan(): Plugin<DecorationSet> {
+  const compute = (doc: Node) => {
+    const decorations: Decoration[] = []
+    doc.descendants((node, pos) => {
+      if (node.type !== nodes.table) return !node.isTextblock
+      const map = TableMap.get(node)
+      node.forEach((row, offset, index) => {
+        const first = row.firstChild
+        if (!first || map.colCount(offset + 1) === 0 || index >= map.height) return
+        const cell = pos + 1 + offset + 1
+        decorations.push(Decoration.node(cell, cell + first.nodeSize, { class: 'is-after-span' }))
+      })
+      return false
+    })
+    return DecorationSet.create(doc, decorations)
+  }
+  return new Plugin<DecorationSet>({
+    state: {
+      init: (_, state) => compute(state.doc),
+      apply: (tr, set) => (tr.docChanged ? compute(tr.doc) : set),
+    },
+    props: {
+      decorations(state) {
+        return this.getState(state)
+      },
+    },
+  })
+}
+
 function cellEndMarker(): HTMLElement {
   const marker = document.createElement('span')
   marker.className = 'editor-cell-end'
@@ -460,6 +517,7 @@ export const editorPlugins: readonly Plugin[] = [
   tableEditing(),
   headerCellEnd(),
   activeTable(),
+  cellsAfterSpan(),
   taskList(),
   codeHighlight(),
   footnoteDisplay(),

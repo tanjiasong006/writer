@@ -125,7 +125,8 @@ impl Writer<'_> {
                 let fence = if info.contains('`') { "~~~" } else { "```" };
                 format!("{fence}{info}\n{smiles}\n{fence}")
             }
-            Block::Table { alignments, header, rows, caption, note } => {
+            // 合并单元格不写出合并记号（其他 Markdown 工具不认识）：被合并的位置是空单元格。
+            Block::Table { alignments, header, rows, caption, note, .. } => {
                 let mut out = String::new();
                 if let (Some(caption), Some(target)) = (caption, &element) {
                     out.push_str(&format!("**{}**\n\n", escape(&format!("{}{ELEMENT_SEPARATOR}{}", target.label, caption.text))));

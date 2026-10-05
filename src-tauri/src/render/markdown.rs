@@ -36,12 +36,45 @@ pub enum Block {
         alignments: Vec<Align>,
         header: Vec<Vec<Inline>>,
         rows: Vec<Vec<Vec<Inline>>>,
+        /// 合并单元格（docs/decisions.md 第 23 节）。header 与 rows 仍是完整的网格：
+        /// 被合并的位置是空单元格，内容在区域左上角的单元格中。
+        spans: Vec<CellSpan>,
         /// 表格标题：紧接在表格之前、原文以 `Table: ` 开头的段落（docs/decisions.md 第 12 节）。
         caption: Option<Caption>,
         /// 表注：紧跟在表格之后、原文以 `Table-note: ` 开头的段落的文字（docs/decisions.md 第 12 节）。
         note: Option<String>,
     },
     Rule,
+}
+
+/// 合并的单元格区域：row 从表头起算（表头是第 0 行），区域不跨越表头与正文。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CellSpan {
+    pub row: usize,
+    pub col: usize,
+    pub rows: usize,
+    pub cols: usize,
+}
+
+/// 单元格在合并区域中的位置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellPlace {
+    /// 不属于任何合并区域。
+    Single,
+    /// 区域的左上角：内容所在的单元格。
+    Origin(CellSpan),
+    /// 区域中被合并的其他位置。
+    Covered(CellSpan),
+}
+
+/// 第 row 行（表头是第 0 行）第 col 列的单元格在合并区域中的位置。
+pub fn cell_place(spans: &[CellSpan], row: usize, col: usize) -> CellPlace {
+    for &span in spans {
+        if (span.row..span.row + span.rows).contains(&row) && (span.col..span.col + span.cols).contains(&col) {
+            return if span.row == row && span.col == col { CellPlace::Origin(span) } else { CellPlace::Covered(span) };
+        }
+    }
+    CellPlace::Single
 }
 
 /// 反应式的箭头与条件（docs/decisions.md 第 22 节）：arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。
@@ -235,6 +268,20 @@ thread_local! {
     static TABLE_MARKS: RefCell<VecDeque<TableMark>> = const { RefCell::new(VecDeque::new()) };
 }
 
+/// 表格单元格原文中的合并记号（docs/decisions.md 第 23 节），按原文判断：
+/// 两个竖线之间没有任何字符（`||`）是与左侧合并，内容恰好是 `^^` 是与上方合并（转义的 `\^^` 是文字）。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CellMark {
+    Plain,
+    Left,
+    Up,
+}
+
+thread_local! {
+    /// 按顺序记录每个表格单元格原文的合并记号（由 HeadingsAsText 在产生单元格开始时记下）。
+    static CELL_MARKS: RefCell<VecDeque<CellMark>> = const { RefCell::new(VecDeque::new()) };
+}
+
 const CAPTION_PREFIX: &str = "Table: ";
 const NOTE_PREFIX: &str = "Table-note: ";
 
@@ -276,10 +323,12 @@ pub fn parse(markdown: &str) -> Vec<Block> {
         source: markdown,
         inner: Parser::new_ext(markdown, options).into_offset_iter(),
         queued: VecDeque::new(),
+        row_end: 0,
     }
     .peekable();
     FOOTNOTES.with(|footnotes| footnotes.borrow_mut().clear());
     TABLE_MARKS.with(|queue| queue.borrow_mut().clear());
+    CELL_MARKS.with(|queue| queue.borrow_mut().clear());
     let mut parsed = blocks(&mut events, &|_| false, 0);
     let definitions = FOOTNOTES.with(|footnotes| std::mem::take(&mut *footnotes.borrow_mut()));
     for block in &mut parsed {
@@ -373,6 +422,8 @@ struct HeadingsAsText<'a> {
     source: &'a str,
     inner: OffsetIter<'a>,
     queued: VecDeque<Event<'a>>,
+    /// 当前表格行原文的结束位置：行中缺少的单元格由解析器补齐，位置在行尾，不是原文中的 `||`。
+    row_end: usize,
 }
 
 impl<'a> Iterator for HeadingsAsText<'a> {
@@ -383,6 +434,20 @@ impl<'a> Iterator for HeadingsAsText<'a> {
             return Some(event);
         }
         let (event, range) = self.inner.next()?;
+        match event {
+            Event::Start(Tag::TableHead | Tag::TableRow) => self.row_end = range.end,
+            Event::Start(Tag::TableCell) => {
+                let mark = if range.is_empty() && range.start < self.row_end {
+                    CellMark::Left
+                } else if self.source[range.clone()].trim() == "^^" {
+                    CellMark::Up
+                } else {
+                    CellMark::Plain
+                };
+                CELL_MARKS.with(|queue| queue.borrow_mut().push_back(mark));
+            }
+            _ => {}
+        }
         if matches!(event, Event::Start(Tag::Paragraph)) {
             // 表格标题与表注按原文判断（`Table\: …`、`Table-note\: …` 转义后不是）。
             let source = self.source[range.clone()].trim_start();
@@ -590,30 +655,79 @@ fn table(events: &mut Events, alignments: &[Alignment]) -> Block {
             Alignment::Right => Align::Right,
         })
         .collect();
-    let mut header = Vec::new();
-    let mut rows = Vec::new();
+    let mut grid: Vec<Vec<Vec<Inline>>> = Vec::new();
+    let mut marks: Vec<Vec<CellMark>> = Vec::new();
     let mut row: Vec<Vec<Inline>> = Vec::new();
-    let mut in_head = false;
+    let mut row_marks: Vec<CellMark> = Vec::new();
     while let Some(event) = events.next() {
         match event {
-            Event::Start(Tag::TableHead) => in_head = true,
-            Event::End(TagEnd::TableHead) => {
-                in_head = false;
-                header = std::mem::take(&mut row);
+            Event::Start(Tag::TableCell) => {
+                row_marks.push(CELL_MARKS.with(|queue| queue.borrow_mut().pop_front()).unwrap_or(CellMark::Plain));
+                row.push(inlines(events, TagEnd::TableCell));
             }
-            Event::Start(Tag::TableCell) => row.push(inlines(events, TagEnd::TableCell)),
-            Event::End(TagEnd::TableRow) if !in_head => rows.push(std::mem::take(&mut row)),
+            Event::End(TagEnd::TableHead | TagEnd::TableRow) => {
+                grid.push(std::mem::take(&mut row));
+                marks.push(std::mem::take(&mut row_marks));
+            }
             Event::End(TagEnd::Table) => break,
             _ => {}
         }
     }
+    let spans = cell_spans(&marks);
+    for span in &spans {
+        for r in span.row..span.row + span.rows {
+            for c in span.col..span.col + span.cols {
+                if (r, c) != (span.row, span.col) {
+                    grid[r][c].clear();
+                }
+            }
+        }
+    }
+    let mut rows = grid.into_iter();
     Block::Table {
         alignments,
-        header,
-        rows,
+        header: rows.next().unwrap_or_default(),
+        rows: rows.collect(),
+        spans,
         caption: None,
         note: None,
     }
+}
+
+/// 由各单元格的合并记号得到合并区域（与编辑器 ui/editor/markdown.ts 的 tableSpans 相同）。
+/// 第 0 行是表头。按行依次处理没有被合并的单元格：右侧连续的 `||` 是它合并的列；之后各行中，
+/// 它所在列是 `^^`、其余各列都是 `||` 时这一行也属于这个区域。正文第一行的 `^^` 不与表头合并；
+/// 没有被合并的记号是普通单元格（`||` 是空单元格，`^^` 是文字），同样可以向右、向下合并。
+fn cell_spans(marks: &[Vec<CellMark>]) -> Vec<CellSpan> {
+    let mark = |r: usize, c: usize| match marks.get(r).and_then(|row| row.get(c)) {
+        Some(CellMark::Left) if c > 0 => CellMark::Left,
+        Some(CellMark::Up) if r >= 2 => CellMark::Up,
+        _ => CellMark::Plain,
+    };
+    let mut covered: Vec<Vec<bool>> = marks.iter().map(|row| vec![false; row.len()]).collect();
+    let mut spans = Vec::new();
+    for r in 0..marks.len() {
+        for c in 0..marks[r].len() {
+            if covered[r][c] || mark(r, c) == CellMark::Left {
+                continue;
+            }
+            let mut cols = 1;
+            while mark(r, c + cols) == CellMark::Left {
+                cols += 1;
+            }
+            let mut rows = 1;
+            while mark(r + rows, c) == CellMark::Up && (1..cols).all(|k| mark(r + rows, c + k) == CellMark::Left) {
+                rows += 1;
+            }
+            if rows > 1 || cols > 1 {
+                for row in &mut covered[r..r + rows] {
+                    row[c..c + cols].fill(true);
+                }
+                spans.push(CellSpan { row: r, col: c, rows, cols });
+            }
+        }
+    }
+    spans
 }
 
 /// 读取行内内容直到指定结束标记。
@@ -1040,10 +1154,53 @@ mod tests {
                     vec![vec![text("对照")], vec![text("30")]],
                     vec![vec![text("实验")], vec![Inline::Strong(vec![text("32")])]],
                 ],
+                spans: vec![],
                 caption: None,
                 note: None,
             }]
         );
+    }
+
+    #[test]
+    fn merged_cells_are_marked_in_the_source() {
+        let spans = |markdown: &str| match parse(markdown).first() {
+            Some(Block::Table { spans, .. }) => spans.clone(),
+            Some(Block::Quote(blocks)) => match blocks.first() {
+                Some(Block::Table { spans, .. }) => spans.clone(),
+                _ => panic!("不是表格"),
+            },
+            _ => panic!("不是表格"),
+        };
+        let span = |row, col, rows, cols| CellSpan { row, col, rows, cols };
+        // 表头中横向合并；正文中纵向、横向与二维合并。
+        assert_eq!(spans("| a || b |\n|---|---|---|\n| 1 | 2 | 3 |"), vec![span(0, 0, 1, 2)]);
+        assert_eq!(
+            spans("| a | b | c |\n|---|---|---|\n| 1 | 2 || \n| ^^ | 3 | 4 |\n| 5 | 6 || \n| 7 | ^^ || "),
+            vec![span(1, 0, 2, 1), span(1, 1, 1, 2), span(3, 1, 2, 2)]
+        );
+        // 有空白的空单元格、补齐的单元格、转义的 \^^、正文第一行的 ^^ 都不合并。
+        assert_eq!(spans("| a |  | b |\n|---|---|---|\n| 1 |"), vec![]);
+        assert_eq!(spans("| a |\n|---|\n| 1 |\n| \\^^ |"), vec![]);
+        assert_eq!(spans("| a |\n|---|\n| ^^ |"), vec![]);
+        // 第一列的 || 没有可以合并的单元格；没有形成合并的 ^^ 是文字，也可以向右合并。
+        assert_eq!(spans("|| a |\n|---|---|\n| 1 | 2 |"), vec![]);
+        assert_eq!(spans("| a | b | c |\n|---|---|---|\n| ^^ || x |"), vec![span(1, 0, 1, 2)]);
+        // 区域只有一列时，下方 ^^ 右侧的 || 不属于区域，是空单元格。
+        assert_eq!(spans("| a | b | c |\n|---|---|---|\n| 1 | 2 | 3 |\n| x | ^^ || "), vec![span(1, 1, 2, 1)]);
+        // 区域内的位置不是一致的记号时这一行不属于区域。
+        assert_eq!(spans("| a | b |\n|---|---|\n| 1 || \n| ^^ | x |"), vec![span(1, 0, 1, 2)]);
+        // 嵌套在引用中的表格同样按原文判断。
+        assert_eq!(spans("> | a || b |\n> |---|---|---|"), vec![span(0, 0, 1, 2)]);
+    }
+
+    #[test]
+    fn merged_cells_keep_the_grid_and_the_content_in_the_first_cell() {
+        let blocks = parse("| a || b |\n|---|---|---|\n| ^^ | 2 | 3 |\n| ^^ | \\^^ |  |");
+        let Some(Block::Table { header, rows, .. }) = blocks.first() else { panic!("不是表格") };
+        assert_eq!(header, &vec![vec![text("a")], vec![], vec![text("b")]]);
+        // 正文第一行的 ^^ 不与表头合并，是文字；第二行的 ^^ 与它合并，位置是空单元格。转义的 \^^ 是文字。
+        assert_eq!(rows[0], vec![vec![text("^^")], vec![text("2")], vec![text("3")]]);
+        assert_eq!(rows[1], vec![vec![], vec![text("^^")], vec![]]);
     }
 
     #[test]

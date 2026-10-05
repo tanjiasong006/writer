@@ -4,6 +4,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { Mark, Node } from 'prosemirror-model'
 import { parseChapter, serializeChapter } from './markdown.ts'
+import { TableMap } from 'prosemirror-tables'
 import { nodes } from './schema.ts'
 import { parseChapterRefAddress } from '../../domain/chapter_reference/chapter_reference.ts'
 
@@ -53,6 +54,7 @@ type SemBlock =
       rows: SemInline[][][]
       caption?: { text: string; id?: string }
       note?: string
+      spans?: { row: number; col: number; rows: number; cols: number }[]
     }
 
 const MARK_NAMES: Record<string, string> = { strong: 'strong', em: 'emphasis', strike: 'strike' }
@@ -141,15 +143,32 @@ function block(node: Node): SemBlock {
       return { type: 'list', ordered, start: ordered ? (node.attrs.order as number) : 1, items }
     }
     case nodes.table: {
+      // 完整的网格：被合并的位置是空单元格，合并区域另列（row 从表头起算）；列对齐取这一列中第一个从这一列开始的单元格。
+      const map = TableMap.get(node)
       const rows: SemInline[][][] = []
-      const align: string[] = []
-      node.forEach((row, _, index) => {
+      const align: string[] = Array.from({ length: map.width }, () => 'none')
+      const aligned = new Set<number>()
+      const spans: { row: number; col: number; rows: number; cols: number }[] = []
+      for (let row = 0; row < map.height; row++) {
         const cells: SemInline[][] = []
-        row.forEach((cell) => cells.push(inlines(cell.inlineContent ? cell : (cell.firstChild ?? cell))))
-        if (index === 0) row.forEach((cell) => align.push((cell.attrs.align as string | null) ?? 'none'))
+        for (let col = 0; col < map.width; col++) {
+          const pos = map.map[row * map.width + col]
+          const rect = map.findCell(pos)
+          const cell = node.nodeAt(pos)!
+          if (rect.left === col && !aligned.has(col)) {
+            align[col] = (cell.attrs.align as string | null) ?? 'none'
+            aligned.add(col)
+          }
+          const origin = rect.top === row && rect.left === col
+          cells.push(origin ? inlines(cell.inlineContent ? cell : (cell.firstChild ?? cell)) : [])
+          if (origin && (rect.bottom - rect.top > 1 || rect.right - rect.left > 1)) {
+            spans.push({ row, col, rows: rect.bottom - rect.top, cols: rect.right - rect.left })
+          }
+        }
         rows.push(cells)
-      })
+      }
       let table: SemBlock = { type: 'table', align, header: rows[0] ?? [], rows: rows.slice(1) }
+      if (spans.length > 0) table = { ...table, spans }
       const caption = node.attrs.caption as string | null
       if (caption !== null) {
         const id = node.attrs.captionId as string | null

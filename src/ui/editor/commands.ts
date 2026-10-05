@@ -13,8 +13,11 @@ import {
   deleteRow,
   deleteTable,
   isInTable,
+  mergeCells,
   selectedRect,
+  splitCell,
   TableMap,
+  CellSelection,
   type TableRect,
 } from 'prosemirror-tables'
 import { marks, nodes } from './schema.ts'
@@ -64,6 +67,8 @@ export type EditorCommand =
   | 'delete-row'
   | 'delete-column'
   | 'delete-table'
+  | 'merge-cells'
+  | 'split-cell'
 
 export interface CommandItemState {
   readonly enabled: boolean
@@ -555,6 +560,39 @@ const removeColumn = thenSelectCell(
   (before, after) => ({ row: before.top, col: Math.min(before.left, after.width - 1) }),
 )
 
+/**
+ * 合并选中的单元格（docs/decisions.md 第 23 节）。表头只能横向合并，不能与正文合并。
+ * 单元格只有一行文字，各单元格的内容按顺序以空格连接（prosemirror-tables 直接拼接，文字会粘在一起）。
+ */
+const mergeSelectedCells: Command = (state, dispatch) => {
+  if (!isInTable(state)) return false
+  const rect = selectedRect(state)
+  if (rect.top === 0 && rect.bottom > 1) return false
+  return mergeCells(
+    state,
+    dispatch &&
+      ((tr) => {
+        const parts: Node[] = []
+        const seen = new Set<number>()
+        for (let row = rect.top; row < rect.bottom; row++) {
+          for (let col = rect.left; col < rect.right; col++) {
+            const pos = rect.map.map[row * rect.map.width + col]
+            const cell = rect.table.nodeAt(pos)
+            if (seen.has(pos) || !cell || cell.content.size === 0) continue
+            seen.add(pos)
+            if (parts.length > 0) parts.push(state.schema.text(' '))
+            cell.content.forEach((node) => parts.push(node))
+          }
+        }
+        // 合并后的单元格在原区域第一个单元格的位置（其余单元格在它之后，被删除），仍是单元格选区。
+        const start = rect.tableStart + rect.map.map[rect.top * rect.map.width + rect.left]
+        const merged = tr.doc.nodeAt(start)!
+        tr.replaceWith(start + 1, start + 1 + merged.content.size, parts)
+        dispatch(tr.setSelection(CellSelection.create(tr.doc, start)))
+      }),
+  )
+}
+
 export const editorCommands: Readonly<
   Record<Exclude<EditorCommand, 'image' | 'chapter-ref' | 'footnote' | 'citation' | 'math' | 'math-block' | 'chem' | 'chem-block' | 'structure'>, Command>
 > = {
@@ -581,6 +619,8 @@ export const editorCommands: Readonly<
   'delete-row': removeRow,
   'delete-column': removeColumn,
   'delete-table': deleteTable,
+  'merge-cells': mergeSelectedCells,
+  'split-cell': splitCell,
 }
 
 /** 每个编辑命令的可用 / 激活状态，全部由当前 EditorState 推导。 */
@@ -623,5 +663,7 @@ export function commandState(state: EditorState): CommandState {
     'delete-row': plain(removeRow),
     'delete-column': plain(removeColumn),
     'delete-table': plain(deleteTable),
+    'merge-cells': plain(mergeSelectedCells),
+    'split-cell': plain(splitCell),
   }
 }

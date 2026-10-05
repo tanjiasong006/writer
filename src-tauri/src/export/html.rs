@@ -13,7 +13,7 @@ use super::{math, ExportReport};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::citations::Citations;
 use crate::render::elements::ElementTargets;
-use crate::render::markdown::{Align, Block, Inline, StructureConditions};
+use crate::render::markdown::{cell_place, Align, Block, CellPlace, Inline, StructureConditions};
 use crate::render::{resolve_image, Document, Section, StructureImage, StructureKey};
 
 /// 图表编号与图注之间的分隔（与 Word / PDF 相同）。
@@ -196,7 +196,7 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                 format!("<pre><code{class}>{}</code></pre>\n", escape(text))
             }
             Block::Structure { smiles, conditions } => self.structure(smiles, conditions),
-            Block::Table { alignments, header, rows, caption, note } => {
+            Block::Table { alignments, header, rows, spans, caption, note } => {
                 let caption = match (caption, &element) {
                     (Some(caption), Some(target)) => format!(
                         "<caption id=\"element-{}\">{}</caption>",
@@ -205,27 +205,26 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
                     ),
                     _ => String::new(),
                 };
-                let align = |i: usize| match alignments.get(i) {
-                    Some(Align::Left) => " style=\"text-align: left\"",
-                    Some(Align::Center) => " style=\"text-align: center\"",
-                    Some(Align::Right) => " style=\"text-align: right\"",
-                    _ => "",
+                // 第 r 行（表头是第 0 行）的单元格；被合并的位置不输出，区域左上角带 colspan / rowspan。
+                let row = |writer: &mut Self, r: usize, cells: &[Vec<Inline>], tag: &str| -> String {
+                    cells
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, cell)| {
+                            let span = match cell_place(spans, r, i) {
+                                CellPlace::Covered(_) => return None,
+                                CellPlace::Origin(span) => span_attributes(span.rows, span.cols),
+                                CellPlace::Single => String::new(),
+                            };
+                            Some(format!("<{tag}{span}{}>{}</{tag}>", align(alignments, i), writer.inlines(cell)))
+                        })
+                        .collect()
                 };
-                let head: String = header
-                    .iter()
-                    .enumerate()
-                    .map(|(i, cell)| format!("<th{}>{}</th>", align(i), self.inlines(cell)))
-                    .collect();
+                let head = row(self, 0, header, "th");
                 let body: String = rows
                     .iter()
-                    .map(|row| {
-                        let cells: String = row
-                            .iter()
-                            .enumerate()
-                            .map(|(i, cell)| format!("<td{}>{}</td>", align(i), self.inlines(cell)))
-                            .collect();
-                        format!("<tr>{cells}</tr>\n")
-                    })
+                    .enumerate()
+                    .map(|(r, cells)| format!("<tr>{}</tr>\n", row(self, r + 1, cells, "td")))
                     .collect();
                 let note = note.as_deref().map(|note| format!("<p class=\"table-note\">{}</p>\n", escape(note))).unwrap_or_default();
                 format!("<table>{caption}<thead><tr>{head}</tr></thead>\n<tbody>\n{body}</tbody></table>\n{note}")
@@ -485,6 +484,28 @@ mod base64_engine {
     }
 }
 
+/// 单元格的对齐（表格各列的对齐）。
+fn align(alignments: &[Align], i: usize) -> &'static str {
+    match alignments.get(i) {
+        Some(Align::Left) => " style=\"text-align: left\"",
+        Some(Align::Center) => " style=\"text-align: center\"",
+        Some(Align::Right) => " style=\"text-align: right\"",
+        _ => "",
+    }
+}
+
+/// 合并单元格的 rowspan / colspan 属性（为 1 时省略）。
+fn span_attributes(rows: usize, cols: usize) -> String {
+    let mut out = String::new();
+    if cols > 1 {
+        out.push_str(&format!(" colspan=\"{cols}\""));
+    }
+    if rows > 1 {
+        out.push_str(&format!(" rowspan=\"{rows}\""));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,6 +540,20 @@ mod tests {
         assert!(html.contains("<li id=\"cite-1\"><span class=\"cite-number\">[1]</span> 甲. 书[M]. 2020.</li>"));
         assert!(html.contains("<span class=\"math\"><svg"), "formula rendered as svg");
         assert_eq!(report.missing_images, vec!["../assets/none.png"]);
+    }
+
+    /// 合并单元格（docs/decisions.md 第 23 节）：被合并的位置不输出，区域左上角带 colspan / rowspan。
+    #[test]
+    fn merged_cells_span_rows_and_columns() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let request = RenderRequest {
+            chapters: vec![chapter("a", vec![1], "表", "| 甲 || 丙 |\n| --- | --- | ---: |\n| 1 | 2 | 3 |\n| ^^ | 4 || ")],
+            ..Default::default()
+        };
+        let (bytes, _) = export(&build(&request), dir.path());
+        let html = String::from_utf8(bytes).unwrap();
+        assert!(html.contains("<thead><tr><th colspan=\"2\">甲</th><th style=\"text-align: right\">丙</th></tr></thead>"), "{html}");
+        assert!(html.contains("<tr><td rowspan=\"2\">1</td><td>2</td><td style=\"text-align: right\">3</td></tr>\n<tr><td colspan=\"2\">4</td></tr>"), "{html}");
     }
 
     /// 化学结构式（docs/decisions.md 第 22 节）：图片按显示尺寸；没有图片的以原文输出并列入报告。

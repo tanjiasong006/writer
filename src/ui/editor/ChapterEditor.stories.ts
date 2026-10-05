@@ -319,6 +319,25 @@ export const FiguresAndTables: Story = {
   },
 }
 
+/**
+ * 合并单元格（docs/decisions.md 第 23 节）：表头横向合并，正文纵向、横向与二维合并。
+ * 拖选或 Shift+方向键选中多个单元格后，右键或“表格”菜单中“合并单元格”；光标在合并的单元格中时可以“拆分单元格”。
+ * 指针移入或光标在表格中时，单元格边界按合并后的格子显示。
+ */
+export const MergedCells: Story = {
+  args: {
+    chapterId: 'merged',
+    number: '3',
+    title: '结果',
+    content:
+      'Table: 各地区产量 {#tbl:output}\n\n' +
+      '| 地区 | 2024 年 || 备注 |\n| --- | ---: | ---: | --- |\n' +
+      '| 华东 | 120 | 135 | 含上海 |\n| ^^ | 合计 255 || 同比增长 |\n| 华南 | 98 | 101 | — |\n' +
+      '| 西部 | 暂无数据 || 待补充 |\n| ^^ | ^^ || 待补充 |\n\n' +
+      'Table-note: 注：单位为万吨。\n\n表格之后的正文段落。\n',
+  },
+}
+
 /** 公式：行内公式随正文排列，公式块居中；无法识别的写法以红色原文显示。双击编辑，输入 $…$ 也会变成公式。 */
 export const Formulas: Story = {
   args: {

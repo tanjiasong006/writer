@@ -50,6 +50,15 @@ function typeText(view: EditorView, text: string): void {
   }
 }
 
+/** 文字第一次出现的位置。 */
+function find(view: EditorView, needle: string): number {
+  let found = -1
+  view.state.doc.descendants((node, pos) => {
+    if (found < 0 && node.isText && node.text!.includes(needle)) found = pos + node.text!.indexOf(needle)
+  })
+  return found
+}
+
 function markdown(view: EditorView): string {
   return serializeChapter(view.state.doc)
 }
@@ -334,6 +343,33 @@ test('光标在表格中时表格带 is-active（编辑时显示单元格边界�
   cursorAfter(view, '前文')
   expect(table().classList.contains('is-active')).toBe(false)
   expect(markdown(view)).toBe('前文\n\n| 名称 | 数量 |\n| --- | --- |\n| 甲 | 1 |\n')
+})
+
+test('被上方单元格纵向合并的行中，第一个单元格带 is-after-span（边界提示在它左侧画线）', () => {
+  const view = viewOf('| A | B | C |\n| --- | --- | --- |\n| 甲 | 1 | 2 |\n| ^^ | 3 | 4 |\n| 乙 | 5 || ')
+  const marked = () => [...view.dom.querySelectorAll('.is-after-span')].map((cell) => cell.textContent)
+  expect(marked()).toEqual(['3'])
+  // 文档变化后重新计算：拆开纵向合并后不再有。
+  view.dispatch(view.state.tr.setNodeMarkup(view.state.doc.resolve(find(view, '甲')).before(), undefined, { rowspan: 1 }))
+  expect(marked()).toEqual([])
+})
+
+test('光标在单元格文字边缘时 Shift+方向键选中当前与相邻的单元格，可以合并', () => {
+  const view = viewOf('| A | B |\n| --- | --- |\n| 甲 | 乙 |\n| 丙 | 丁 |')
+  view.endOfTextblock = () => true
+  cursorAfter(view, '甲')
+  expect(press(view, 'ArrowRight', { shift: true })).toBe(true)
+  const selected = () => [...view.dom.querySelectorAll('.selectedCell')].map((cell) => cell.textContent)
+  expect(selected()).toEqual(['甲', '乙'])
+  // 已是单元格选区时继续扩展（prosemirror-tables）。
+  press(view, 'ArrowDown', { shift: true })
+  expect(selected()).toEqual(['甲', '乙', '丙', '丁'])
+
+  // 不在文字边缘时是普通的文字选择。
+  const other = viewOf('| A | B |\n| --- | --- |\n| 甲 | 乙 |')
+  other.endOfTextblock = () => false
+  cursorAfter(other, '甲')
+  expect(press(other, 'ArrowRight', { shift: true })).toBe(false)
 })
 
 test('章节第一行是空段落、后面还有内容时，按 Backspace 删掉这一行，光标进入下一块开头', () => {

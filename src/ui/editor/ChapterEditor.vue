@@ -1427,6 +1427,17 @@ defineExpose({
   box-shadow: inset 0 1px 0 var(--color-doc-cell-hint);
 }
 
+/* 被上方单元格纵向合并的行中，第一个单元格不在第一列（is-after-span，plugins.ts），左侧同样画线。 */
+.chapter-editor__body :deep(table:is(:hover, .is-active) tr > .is-after-span:first-child) {
+  box-shadow: inset 1px 0 0 var(--color-doc-cell-hint);
+}
+
+.chapter-editor__body :deep(table:is(:hover, .is-active) tr:nth-child(n + 3) > td.is-after-span:first-child) {
+  box-shadow:
+    inset 1px 0 0 var(--color-doc-cell-hint),
+    inset 0 1px 0 var(--color-doc-cell-hint);
+}
+
 .chapter-editor__body :deep(.selectedCell::after) {
   position: absolute;
   inset: 0;

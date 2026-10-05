@@ -23,7 +23,7 @@ use docx_rs::{
     Paragraph, ParagraphBorder, ParagraphBorderPosition, ParagraphBorders, Pic, Run, RunFonts,
     Shading, ShdType, SpecialIndentType, Start, Style, StyleType, Table, TableBorder,
     TableBorderPosition, TableBorders, TableCell, TableCellBorder, TableCellBorderPosition,
-    TableCellBorders, TableRow, VertAlignType, WidthType,
+    TableCellBorders, TableRow, VMergeType, VertAlignType, WidthType,
 };
 
 use super::fonts::{docx_fonts, FontFamily};
@@ -33,7 +33,7 @@ use super::{ExportError, ExportReport};
 use crate::render::citations::Citations;
 use crate::render::elements::{ElementTarget, ElementTargets};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
-use crate::render::markdown::{Align, Block, Inline, StructureConditions};
+use crate::render::markdown::{cell_place, Align, Block, CellPlace, CellSpan, Inline, StructureConditions};
 use crate::render::{resolve_image, Document, Section, StructureImage, StructureKey};
 
 /// A4，单位 twip（1/20 磅）。
@@ -412,6 +412,7 @@ impl Writer<'_> {
                 alignments,
                 header,
                 rows,
+                spans,
                 caption,
                 note,
             } => {
@@ -421,7 +422,7 @@ impl Writer<'_> {
                     let p = self.caption_paragraph(&text, target, context).keep_next(true);
                     self.items.push(Item::Paragraph(p));
                 }
-                self.table(alignments, header, rows, note.as_deref())
+                self.table(alignments, header, rows, spans, note.as_deref())
             }
             Block::Rule => self
                 .items
@@ -518,83 +519,111 @@ impl Writer<'_> {
     }
 
     /// 表格；有表注时表注紧随其后（TableNote 样式），最后一行与表注保持在同一页。
-    fn table(&mut self, alignments: &[Align], header: &[Vec<Inline>], rows: &[Vec<Vec<Inline>>], note: Option<&str>) {
+    /// 合并单元格（docs/decisions.md 第 23 节）：横向是 gridSpan，纵向是 vMerge（区域以下各行在区域的第一列
+    /// 放一个继续合并的单元格），其中图片的宽度上限是所跨各列的宽度之和。
+    fn table(
+        &mut self,
+        alignments: &[Align],
+        header: &[Vec<Inline>],
+        rows: &[Vec<Vec<Inline>>],
+        spans: &[CellSpan],
+        note: Option<&str>,
+    ) {
         let columns = header
             .len()
             .max(rows.iter().map(Vec::len).max().unwrap_or(0))
             .max(1);
         let width = TEXT_WIDTH as usize / columns;
-        // 单元格中的图片不超过单元格去掉左右内边距后的宽度（各列等宽）。
-        let cell_width = f64::from((width as u32).saturating_sub(2 * CELL_MARGIN)) / 20.0;
+        // 单元格中的图片不超过单元格去掉左右内边距后的宽度（各列等宽，合并的单元格是所跨各列之和）。
+        let cell_width = |cols: usize| f64::from(((width * cols) as u32).saturating_sub(2 * CELL_MARGIN)) / 20.0;
+        let cols_at = |row: usize, col: usize| match cell_place(spans, row, col) {
+            CellPlace::Origin(span) => span.cols,
+            _ => 1,
+        };
         // 高度：含图片的行不能跨页拆开，而表头在每页重复。Word 的排版结果无法在导出时测量，
         // 因此按表头文字折行的上限估计表头高度（表头中的图片另有上限），正文行中的图片不超过
         // 正文区减去表头与单元格段落间距。
         let text_height = f64::from(TEXT_HEIGHT) / 20.0;
-        let head_bounds = Bounds {
-            width: cell_width,
-            height: text_height * HEADER_IMAGE_SHARE,
-        };
+        let head_image_height = text_height * HEADER_IMAGE_SHARE;
         let table_size = self.theme.table;
         let head_height = header
             .iter()
-            .map(|cell| {
+            .enumerate()
+            .map(|(i, cell)| {
                 let text = crate::render::markdown::plain_text(cell);
-                let image = if has_image(cell) { head_bounds.height } else { 0.0 };
-                text_height_pt(&text, table_size, table_size * 1.5, cell_width) + image
+                let image = if has_image(cell) { head_image_height } else { 0.0 };
+                text_height_pt(&text, table_size, table_size * 1.5, cell_width(cols_at(0, i))) + image
             })
             .fold(0.0, f64::max)
             + TABLE_TEXT_SPACING_PT;
-        let body_bounds = Bounds {
-            width: cell_width,
-            height: text_height - head_height - TABLE_TEXT_SPACING_PT - IMAGE_HEIGHT_SLACK,
-        };
+        let body_image_height = text_height - head_height - TABLE_TEXT_SPACING_PT - IMAGE_HEIGHT_SLACK;
         let bold = RunStyle {
             bold: true,
             ..RunStyle::default()
         };
         // 最后一行的段落“与下段同页”，表注不会单独落到下一页。
-        let make_row =
-            |writer: &mut Self, cells: &[Vec<Inline>], style: RunStyle, is_header: bool, keep_next: bool| {
-                let cells = (0..columns)
-                    .map(|i| {
-                        let mut p = Paragraph::new().style("TableText");
-                        p = match alignments.get(i) {
-                            Some(Align::Center) => p.align(AlignmentType::Center),
-                            Some(Align::Right) => p.align(AlignmentType::Right),
-                            _ => p,
-                        };
-                        let inlines = cells.get(i).map_or(&[][..], Vec::as_slice);
-                        let bounds = if is_header { head_bounds } else { body_bounds };
-                        let p = writer.inlines(p, inlines, style, bounds).keep_next(keep_next);
-                        let cell = TableCell::new()
-                            .add_paragraph(p)
-                            .width(width, WidthType::Dxa);
-                        // 三线表：表头下方一条细线。
-                        if is_header {
-                            cell.set_borders(
-                                TableCellBorders::with_empty().set(
-                                    TableCellBorder::new(TableCellBorderPosition::Bottom)
-                                        .border_type(BorderType::Single)
-                                        .size(4)
-                                        .color("000000"),
-                                ),
-                            )
-                        } else {
-                            cell
-                        }
+        // r 是行号（表头是第 0 行）。
+        let make_row = |writer: &mut Self, r: usize, cells: &[Vec<Inline>], style: RunStyle, keep_next: bool| {
+            let is_header = r == 0;
+            let cells = (0..columns)
+                .filter_map(|i| {
+                    // 被合并的位置：区域第一列以下各行是继续纵向合并的单元格，其余不输出。
+                    let (cols, merge) = match cell_place(spans, r, i) {
+                        CellPlace::Covered(span) if span.row != r && span.col == i => (span.cols, Some(VMergeType::Continue)),
+                        CellPlace::Covered(_) => return None,
+                        CellPlace::Origin(span) => (span.cols, (span.rows > 1).then_some(VMergeType::Restart)),
+                        CellPlace::Single => (1, None),
+                    };
+                    let mut p = Paragraph::new().style("TableText");
+                    p = match alignments.get(i) {
+                        Some(Align::Center) => p.align(AlignmentType::Center),
+                        Some(Align::Right) => p.align(AlignmentType::Right),
+                        _ => p,
+                    };
+                    let inlines = match merge {
+                        Some(VMergeType::Continue) => &[][..],
+                        _ => cells.get(i).map_or(&[][..], Vec::as_slice),
+                    };
+                    let bounds = Bounds {
+                        width: cell_width(cols),
+                        height: if is_header { head_image_height } else { body_image_height },
+                    };
+                    let p = writer.inlines(p, inlines, style, bounds).keep_next(keep_next);
+                    let mut cell = TableCell::new()
+                        .add_paragraph(p)
+                        .width(width * cols, WidthType::Dxa);
+                    if cols > 1 {
+                        cell = cell.grid_span(cols);
+                    }
+                    if let Some(merge) = merge {
+                        cell = cell.vertical_merge(merge);
+                    }
+                    // 三线表：表头下方一条细线。
+                    Some(if is_header {
+                        cell.set_borders(
+                            TableCellBorders::with_empty().set(
+                                TableCellBorder::new(TableCellBorderPosition::Bottom)
+                                    .border_type(BorderType::Single)
+                                    .size(4)
+                                    .color("000000"),
+                            ),
+                        )
+                    } else {
+                        cell
                     })
-                    .collect();
-                // 表头行不跨页拆分，并在每一页重复（见 mark_header_rows）。
-                if is_header {
-                    TableRow::new(cells).cant_split()
-                } else {
-                    TableRow::new(cells)
-                }
-            };
+                })
+                .collect();
+            // 表头行不跨页拆分，并在每一页重复（见 mark_header_rows）。
+            if is_header {
+                TableRow::new(cells).cant_split()
+            } else {
+                TableRow::new(cells)
+            }
+        };
         let keep_last = note.is_some();
-        let mut table_rows = vec![make_row(self, header, bold, true, keep_last && rows.is_empty())];
+        let mut table_rows = vec![make_row(self, 0, header, bold, keep_last && rows.is_empty())];
         for (i, row) in rows.iter().enumerate() {
-            table_rows.push(make_row(self, row, RunStyle::default(), false, keep_last && i + 1 == rows.len()));
+            table_rows.push(make_row(self, i + 1, row, RunStyle::default(), keep_last && i + 1 == rows.len()));
         }
         // 三线表：顶线与底线 1 磅，无竖线与内部横线（与 PDF 默认一致）。
         let rule = |position| {
@@ -1941,6 +1970,29 @@ mod tests {
         let (cx, cy) = extents(&xml)[0];
         assert!((cx / EMU_PER_PT - 139.6).abs() < 0.01, "{cx}");
         assert!((cx / cy - 2.0).abs() < 1e-3);
+    }
+
+    /// 合并单元格（docs/decisions.md 第 23 节）：横向是 gridSpan，纵向是 vMerge；图片的宽度上限是所跨各列之和。
+    #[test]
+    fn merged_cells_span_rows_and_columns() {
+        let dir = project();
+        write_image(&dir.path().join("assets/宽.png"), 1200, 600, ImageFormat::Png);
+        let (bytes, _) = export_ok(
+            &dir,
+            &[(
+                "a",
+                vec![1],
+                "表",
+                "| 甲 | 乙 | 丙 |\n| --- | --- | --- |\n| ![宽](../assets/宽.png) || 3 |\n| ^^ || 4 |",
+            )],
+        );
+        let xml = part(&bytes, "word/document.xml");
+        assert_eq!(xml.matches("<w:gridSpan w:val=\"2\" />").count(), 2, "{xml}");
+        assert_eq!(xml.matches("<w:vMerge w:val=\"restart\" />").count(), 1, "{xml}");
+        assert_eq!(xml.matches("<w:vMerge w:val=\"continue\" />").count(), 1, "{xml}");
+        // 两列：2 × 3008 twip，减去左右内边距 2 × 108 → 5800 twip = 290 磅。
+        let (cx, _) = extents(&xml)[0];
+        assert!((cx / EMU_PER_PT - 290.0).abs() < 0.01, "{cx}");
     }
 
     #[test]

@@ -32,7 +32,7 @@ use super::{math, ExportError, ExportReport};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::citations::Citations;
 use crate::render::elements::ElementTargets;
-use crate::render::markdown::{plain_text, Align, Block, Inline, StructureConditions};
+use crate::render::markdown::{cell_place, plain_text, Align, Block, CellPlace, CellSpan, Inline, StructureConditions};
 use crate::render::{resolve_image, Document, Section, StructureImage, StructureKey};
 
 /// Typst 字符串字面量（供公式模块使用）。
@@ -412,9 +412,9 @@ impl<'a> Writer<'a> {
              #show raw.where(block: true): set text(size: {code}pt)\n\
              #show raw.where(block: true): block.with(fill: luma(245), inset: 8pt, radius: 3pt, width: 100%)\n\
              #set table(stroke: {table_stroke}, inset: {inset}pt)\n\
-             #let writer-three-line(last) = (_, y) => (\n\
+             #let writer-three-line = (_, y) => (\n\
                top: if y == 0 {{ 1pt }} else {{ none }},\n\
-               bottom: if y == last {{ 1pt }} else if y == 0 {{ 0.5pt }} else {{ none }},\n\
+               bottom: if y == 0 {{ 0.5pt }} else {{ none }},\n\
              )\n\
              #show table: set text(size: {table}pt)\n\
              #show table.cell.where(y: 0): set text(weight: \"bold\")\n\
@@ -637,7 +637,7 @@ impl<'a> Writer<'a> {
                 None => format!("#raw(block: true, {})", string(&breakable(text))),
             },
             Block::Structure { smiles, conditions } => self.structure(smiles, conditions),
-            Block::Table { alignments, header, rows, caption, note } => {
+            Block::Table { alignments, header, rows, spans, caption, note } => {
                 // 表格标题在表格上方，与表格留在同一页；有编号时前面是编号并带标签。
                 let title = match (caption, &element) {
                     (Some(caption), Some(target)) => {
@@ -649,14 +649,21 @@ impl<'a> Writer<'a> {
                     }
                     _ => String::new(),
                 };
-                let table = self.table(alignments, header, rows, note.as_deref());
+                let table = self.table(alignments, header, rows, spans, note.as_deref());
                 format!("{title}{table}")
             }
             Block::Rule => "#align(center, line(length: 30%, stroke: 0.5pt + luma(160)))".to_owned(),
         }
     }
 
-    fn table(&mut self, alignments: &[Align], header: &Vec<Vec<Inline>>, rows: &[Vec<Vec<Inline>>], note: Option<&str>) -> String {
+    fn table(
+        &mut self,
+        alignments: &[Align],
+        header: &Vec<Vec<Inline>>,
+        rows: &[Vec<Vec<Inline>>],
+        spans: &[CellSpan],
+        note: Option<&str>,
+    ) -> String {
         {
             {
                 // 三线表 / 网格表（无图片时列宽随内容；含图片时各列等宽，见下）。
@@ -673,35 +680,52 @@ impl<'a> Writer<'a> {
                 // 不超过单元格宽度；含图片的行不能跨页拆开，而表头在每页重复，因此正文行中的图片不超过
                 // 正文区减去表头高度与单元格上下内边距。表头高度在排版时按与最终表格相同的列宽、
                 // 在表格实际所在容器的宽度下测量，折行与最终结果一致。
+                // 合并的单元格（docs/decisions.md 第 23 节）：被合并的位置不输出，区域左上角是 table.cell，
+                // 其中图片的宽度上限是所跨各列的宽度之和。
                 let text_height = self.page.text_height_pt();
-                let cell_width = self.page.text_width_pt() / columns as f64 - 2.0 * TABLE_INSET_PT;
+                let column_width = self.page.text_width_pt() / columns as f64;
                 let cell_limit = num(text_height - 2.0 * TABLE_INSET_PT - IMAGE_HEIGHT_SLACK);
                 // 表头在每页重复，其中的图片不超过正文区高度的四分之一（与 Word 相同），不能占满页面。
-                let head_cell = Container {
-                    width: cell_width,
-                    max_height: format!("{}pt", num(text_height / 4.0)),
-                };
-                let body_cell = Container {
-                    width: cell_width,
-                    max_height: line_limit(&format!("{cell_limit}pt - writer-table-head")),
-                };
-                let row = |writer: &mut Self, row: &[Vec<Inline>], cell: &Container| -> Vec<String> {
+                let head_height = format!("{}pt", num(text_height / 4.0));
+                let body_height = line_limit(&format!("{cell_limit}pt - writer-table-head"));
+                let row = |writer: &mut Self, r: usize, row: &[Vec<Inline>], max_height: &str| -> Vec<String> {
                     (0..columns)
-                        .map(|i| format!("[{}]", writer.inlines(row.get(i).map_or(&[][..], Vec::as_slice), cell)))
+                        .filter_map(|i| {
+                            let (cell, cols) = match cell_place(spans, r, i) {
+                                CellPlace::Covered(_) => return None,
+                                CellPlace::Origin(span) => (
+                                    format!("table.cell(colspan: {}, rowspan: {})", span.cols, span.rows),
+                                    span.cols,
+                                ),
+                                CellPlace::Single => (String::new(), 1),
+                            };
+                            let container = Container {
+                                width: column_width * cols as f64 - 2.0 * TABLE_INSET_PT,
+                                max_height: max_height.to_owned(),
+                            };
+                            let content = writer.inlines(row.get(i).map_or(&[][..], Vec::as_slice), &container);
+                            Some(format!("{cell}[{content}]"))
+                        })
                         .collect()
                 };
-                let head = row(self, header, &head_cell).join(", ");
-                for r in rows {
-                    cells.extend(row(self, r, &body_cell));
+                let head = row(self, 0, header, &head_height).join(", ");
+                for (r, cells_of_row) in rows.iter().enumerate() {
+                    cells.extend(row(self, r + 1, cells_of_row, &body_height));
                 }
                 let align = align.join(", ");
                 let cells = cells.join(", ");
                 let with_images = std::iter::once(header).chain(rows).flatten().any(|cell| has_image(cell));
                 // 三线表：顶线、表头下的细线与底线；表头随跨页重复，顶线与表头线也随之重复。
+                // 底线是最后一行之后的横线（不按单元格判断：跨行的单元格只按它的第一行判断，底线会断开）。
                 // 网格表使用 preamble 中的统一描边。
                 let stroke = match self.layout.table {
-                    TableStyle::ThreeLine => format!(", stroke: writer-three-line({})", rows.len()),
-                    TableStyle::Grid => String::new(),
+                    TableStyle::ThreeLine => ", stroke: writer-three-line",
+                    TableStyle::Grid => "",
+                };
+                let cells = match self.layout.table {
+                    TableStyle::ThreeLine if cells.is_empty() => "table.hline(stroke: 1pt)".to_owned(),
+                    TableStyle::ThreeLine => format!("{cells}, table.hline(stroke: 1pt)"),
+                    TableStyle::Grid => cells,
                 };
                 if !with_images && note.is_none() {
                     return format!("#table(columns: {columns}, align: ({align},){stroke}, table.header({head}), {cells})");
@@ -2378,7 +2402,7 @@ mod tests {
         writer.preamble(&document, system_fonts().book());
         writer.section(&document.sections[0]);
         assert!(writer.out.contains("#set table(stroke: 0.5pt + luma(160)"));
-        assert!(!writer.out.contains("stroke: writer-three-line("));
+        assert!(!writer.out.contains("stroke: writer-three-line"));
         assert!(layout_with(&document, PdfLayout { table: TableStyle::Grid, ..PdfLayout::default() }).pages().len() == 2);
     }
 
@@ -2824,6 +2848,21 @@ mod tests {
         );
         let english = build(&request("Paper", &[("a", vec![1], "Intro", "Body text.")]));
         assert!(export(&english, dir.path(), fonts, &PdfLayout::default()).is_ok());
+    }
+
+    /// 合并单元格（docs/decisions.md 第 23 节）：区域左上角是 table.cell，被合并的位置不输出；
+    /// 三线表的底线是最后一行之后的横线，不会在跨行的单元格下方断开。
+    #[test]
+    fn merged_cells_span_rows_and_columns() {
+        let dir = project();
+        let mut writer = Writer::new(dir.path(), &PdfLayout::default());
+        let markdown = "| 地区 | 2024 || 备注 |\n| --- | --- | --- | --- |\n| 华东 | 1 | 2 | 甲 |\n| ^^ | 3 || 乙 |";
+        let document = build(&request("", &[("a", vec![1], "表", markdown)]));
+        writer.preamble(&document, system_fonts().book());
+        writer.section(&document.sections[0]);
+        assert!(writer.out.contains("table.header([#\"地区\"], table.cell(colspan: 2, rowspan: 1)[#\"2024\"], [#\"备注\"])"), "{}", writer.out);
+        assert!(writer.out.contains("table.cell(colspan: 1, rowspan: 2)[#\"华东\"], [#\"1\"], [#\"2\"], [#\"甲\"], table.cell(colspan: 2, rowspan: 1)[#\"3\"], [#\"乙\"], table.hline(stroke: 1pt)"), "{}", writer.out);
+        assert_eq!(layout_with(&document, PdfLayout::default()).pages().len(), 2);
     }
 
     #[test]

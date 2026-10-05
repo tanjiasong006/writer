@@ -23,6 +23,7 @@ import {
   setChapterRefShow,
 } from './commands.ts'
 import { nodes } from './schema.ts'
+import { CellSelection } from 'prosemirror-tables'
 
 /** 文档中某段文字的位置（第一次出现）。 */
 function find(state: EditorState, needle: string): number {
@@ -286,6 +287,53 @@ describe('表格的行与列', () => {
     for (const command of ['row-before', 'row-after', 'column-before', 'column-after', 'delete-row', 'delete-column'] as const) {
       expect(outside[command].enabled).toBe(false)
     }
+  })
+})
+
+describe('合并与拆分单元格（docs/decisions.md 第 23 节）', () => {
+  const TABLE = '| A | B |\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |\n'
+
+  /** 选中从 from 所在单元格到 to 所在单元格的矩形。 */
+  function selectCells(state: EditorState, from: string, to: string): EditorState {
+    const cell = (text: string) => {
+      const $pos = state.doc.resolve(find(state, text))
+      return $pos.before($pos.depth)
+    }
+    return state.apply(state.tr.setSelection(CellSelection.create(state.doc, cell(from), cell(to))))
+  }
+
+  test('横向、纵向合并：内容以空格连接，写出合并记号', () => {
+    expect(markdown(run(selectCells(stateOf(TABLE), 'a1', 'b1'), editorCommands['merge-cells']))).toBe(
+      '| A | B |\n| --- | --- |\n| a1 b1 ||\n| a2 | b2 |\n',
+    )
+    expect(markdown(run(selectCells(stateOf(TABLE), 'a1', 'a2'), editorCommands['merge-cells']))).toBe(
+      '| A | B |\n| --- | --- |\n| a1 a2 | b1 |\n| ^^ | b2 |\n',
+    )
+    expect(markdown(run(selectCells(stateOf(TABLE), 'A', 'B'), editorCommands['merge-cells']))).toBe(
+      '| A B ||\n| --- | --- |\n| a1 | b1 |\n| a2 | b2 |\n',
+    )
+  })
+
+  test('表头不能与正文合并；没有选中多个单元格时不能合并', () => {
+    expect(editorCommands['merge-cells'](selectCells(stateOf(TABLE), 'A', 'a1'))).toBe(false)
+    expect(commandState(stateOf(TABLE, { cursorAfter: 'a1' }))['merge-cells'].enabled).toBe(false)
+  })
+
+  test('拆分：内容留在第一个单元格，其余为空；没有合并的单元格不能拆分', () => {
+    const merged = run(selectCells(stateOf(TABLE), 'a1', 'b2'), editorCommands['merge-cells'])
+    expect(markdown(merged)).toBe('| A | B |\n| --- | --- |\n| a1 b1 a2 b2 ||\n| ^^ ||\n')
+    expect(markdown(run(merged, editorCommands['split-cell']))).toBe(
+      '| A | B |\n| --- | --- |\n| a1 b1 a2 b2 |  |\n|  |  |\n',
+    )
+    expect(commandState(stateOf(TABLE, { cursorAfter: 'a1' }))['split-cell'].enabled).toBe(false)
+  })
+
+  test('在合并区域中插入行时区域随之变高', () => {
+    const merged = run(selectCells(stateOf(TABLE), 'a1', 'a2'), editorCommands['merge-cells'])
+    const cursor = merged.apply(merged.tr.setSelection(TextSelection.create(merged.doc, find(merged, 'b1') + 2)))
+    expect(markdown(run(cursor, editorCommands['row-after']))).toBe(
+      '| A | B |\n| --- | --- |\n| a1 a2 | b1 |\n| ^^ |  |\n| ^^ | b2 |\n',
+    )
   })
 })
 

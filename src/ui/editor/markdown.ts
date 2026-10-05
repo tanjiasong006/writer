@@ -1,5 +1,7 @@
 import MarkdownIt from 'markdown-it'
 import footnotePlugin from 'markdown-it-footnote'
+import gfmTable from 'markdown-it/lib/rules_block/table.mjs'
+import type StateBlock from 'markdown-it/lib/rules_block/state_block.mjs'
 import { Fragment, type MarkType, type Node } from 'prosemirror-model'
 import {
   MarkdownParser,
@@ -7,6 +9,7 @@ import {
   defaultMarkdownSerializer,
   type MarkdownSerializerState,
 } from 'prosemirror-markdown'
+import { TableMap } from 'prosemirror-tables'
 import { marks, nodes, schema } from './schema.ts'
 import { parseChapterRefAddress } from '../../domain/chapter_reference/chapter_reference.ts'
 import type { ChapterRefLabel } from './chapter_ref_view.ts'
@@ -73,6 +76,115 @@ const MAX_NESTING = 100
 const tokenizer = MarkdownIt('commonmark', { html: false }).enable(['table', 'strikethrough']).use(footnotePlugin)
 // pulldown-cmark 不支持行内脚注 ^[…]：按文字处理。
 tokenizer.inline.ruler.disable(['footnote_inline'])
+
+/**
+ * 合并单元格（docs/decisions.md 第 23 节），与 Rust 渲染器相同，按单元格的原文判断：
+ * 两个竖线之间没有任何字符（`||`）是与左侧合并，内容恰好是 `^^` 是与上方合并（转义的 `\^^` 是文字）。
+ * GFM 表格规则只给出去掉首尾空白的内容，这里按同样的方式重新切分各行原文，再把被合并的单元格从记号流中去掉、
+ * 区域左上角的单元格记下 colspan / rowspan。
+ */
+type CellMark = 'plain' | 'left' | 'up'
+
+export interface CellSpan {
+  /** 从表头起算（表头是第 0 行）。 */
+  readonly row: number
+  readonly col: number
+  readonly rows: number
+  readonly cols: number
+}
+
+/**
+ * 由各单元格的合并记号得到合并区域（与 Rust render::markdown 的 cell_spans 相同）。
+ * 第 0 行是表头。按行依次处理没有被合并的单元格：右侧连续的 `||` 是它合并的列；之后各行中，
+ * 它所在列是 `^^`、其余各列都是 `||` 时这一行也属于这个区域。正文第一行的 `^^` 不与表头合并；
+ * 没有被合并的记号是普通单元格（`||` 是空单元格，`^^` 是文字），同样可以向右、向下合并。
+ */
+function tableSpans(marks: readonly (readonly CellMark[])[]): CellSpan[] {
+  const mark = (r: number, c: number): CellMark => {
+    const value = marks[r]?.[c]
+    if (value === 'left' && c > 0) return 'left'
+    if (value === 'up' && r >= 2) return 'up'
+    return 'plain'
+  }
+  const covered = marks.map((row) => row.map(() => false))
+  const spans: CellSpan[] = []
+  for (let r = 0; r < marks.length; r++) {
+    for (let c = 0; c < marks[r].length; c++) {
+      if (covered[r][c] || mark(r, c) === 'left') continue
+      let cols = 1
+      while (mark(r, c + cols) === 'left') cols++
+      let rows = 1
+      const rowBelongs = (row: number) =>
+        mark(row, c) === 'up' && Array.from({ length: cols - 1 }, (_, k) => mark(row, c + k + 1)).every((m) => m === 'left')
+      while (rowBelongs(r + rows)) rows++
+      if (rows > 1 || cols > 1) {
+        for (let i = r; i < r + rows; i++) for (let j = c; j < c + cols; j++) covered[i][j] = true
+        spans.push({ row: r, col: c, rows, cols })
+      }
+    }
+  }
+  return spans
+}
+
+/** 表格一行的原文切分为单元格原文（与 markdown-it 的 GFM 表格规则相同；首尾的竖线不算单元格）。 */
+function rawTableCells(state: StateBlock, line: number): string[] {
+  const text = state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]).trim()
+  const cells: string[] = []
+  let current = ''
+  let last = 0
+  let escaped = false
+  for (let pos = 0; pos < text.length; pos++) {
+    if (text[pos] === '|') {
+      if (!escaped) {
+        cells.push(current + text.slice(last, pos))
+        current = ''
+        last = pos + 1
+      } else {
+        current += text.slice(last, pos - 1)
+        last = pos
+      }
+    }
+    escaped = text[pos] === '\\'
+  }
+  cells.push(current + text.slice(last))
+  if (cells.length && cells[0] === '') cells.shift()
+  if (cells.length && cells[cells.length - 1] === '') cells.pop()
+  return cells
+}
+
+tokenizer.block.ruler.at('table', (state, startLine, endLine, silent) => {
+  const start = state.tokens.length
+  if (!gfmTable(state, startLine, endLine, silent)) return false
+  if (silent) return true
+  const tokens = state.tokens
+  // 各单元格开始记号的位置与合并记号，按行分组。
+  const cells: number[][] = []
+  const marks: CellMark[][] = []
+  let raw: string[] = []
+  for (let i = start; i < tokens.length; i++) {
+    const token = tokens[i]
+    if (token.type === 'tr_open') {
+      raw = rawTableCells(state, token.map![0])
+      cells.push([])
+      marks.push([])
+    } else if (token.type === 'th_open' || token.type === 'td_open') {
+      const text = raw[cells[cells.length - 1].length] as string | undefined
+      // 行中缺少的单元格由规则补齐（没有原文），不是 `||`。
+      marks[marks.length - 1].push(text === '' ? 'left' : text?.trim() === '^^' ? 'up' : 'plain')
+      cells[cells.length - 1].push(i)
+    }
+  }
+  const remove: number[] = []
+  for (const span of tableSpans(marks)) {
+    tokens[cells[span.row][span.col]].meta = { colspan: span.cols, rowspan: span.rows }
+    for (let r = span.row; r < span.row + span.rows; r++) {
+      for (let c = span.col; c < span.col + span.cols; c++) if (r !== span.row || c !== span.col) remove.push(cells[r][c])
+    }
+  }
+  // 被合并的单元格：开始、内容、结束三个记号。
+  for (const index of remove.sort((a, b) => b - a)) tokens.splice(index, 3)
+  return true
+})
 
 /** ASCII 空白（pulldown-cmark 判断 $ 能否开始 / 结束公式时使用的范围）。 */
 const isAsciiSpace = (char: string | undefined) => char !== undefined && /[ \t\n\r\f\v]/.test(char)
@@ -605,6 +717,12 @@ function cellAlign(token: Token): string | null {
   return match ? match[1] : null
 }
 
+/** 单元格的对齐与合并（合并区域左上角的单元格带 colspan / rowspan，见 writer 的表格规则）。 */
+function cellAttrs(token: Token): Record<string, unknown> {
+  const span = token.meta as { colspan: number; rowspan: number } | null
+  return { align: cellAlign(token), ...(span ?? {}) }
+}
+
 /** 图片的替代文字：合并全部子节点的文字（强调等标记不保留）。 */
 function imageAlt(token: Token): string {
   return (token.children ?? []).map((child) => child.content).join('')
@@ -640,8 +758,8 @@ const parser = new MarkdownParser(schema, tokenizer, {
   thead: { ignore: true },
   tbody: { ignore: true },
   tr: { block: 'table_row' },
-  th: { block: 'table_header', getAttrs: (token) => ({ align: cellAlign(token) }) },
-  td: { block: 'table_cell', getAttrs: (token) => ({ align: cellAlign(token) }) },
+  th: { block: 'table_header', getAttrs: cellAttrs },
+  td: { block: 'table_cell', getAttrs: cellAttrs },
   image: { node: 'image', getAttrs: imageAttrs },
   figure: { node: 'figure', getAttrs: imageAttrs },
   hardbreak: { node: 'hard_break' },
@@ -757,24 +875,37 @@ function serializeTable(state: MarkdownSerializerState, node: Node): void {
     state.write(`${CAPTION_PREFIX}${text}${id ? ` {#tbl:${id}}` : ''}`)
     state.closeBlock(node)
   }
-  const rows: string[][] = []
-  const aligns: Array<string | null> = []
-  node.forEach((row, _, rowIndex) => {
-    const cells: string[] = []
-    row.forEach((cell) => {
-      cells.push(cellMarkdown(cell))
-      if (rowIndex === 0) aligns.push(cell.attrs.align)
-      // Markdown 没有合并单元格：被合并的位置补空单元格，保持列数。
-      for (let extra = 1; extra < cell.attrs.colspan; extra++) {
-        cells.push('')
-        if (rowIndex === 0) aligns.push(null)
+  // 合并单元格（docs/decisions.md 第 23 节）：区域左上角写内容；同一行中其余位置写 `||`（与左侧合并），
+  // 以下各行中区域第一列写 `^^`（与上方合并）、其余位置写 `||`。表头不能与正文合并：
+  // 从表头向下合并的部分（粘贴的表格可能出现）写成空单元格。null 是 `||`。
+  const map = TableMap.get(node)
+  const rows: Array<Array<string | null>> = []
+  const aligns: Array<string | null> = Array.from({ length: map.width }, () => null)
+  const aligned = new Set<number>()
+  for (let row = 0; row < map.height; row++) {
+    const cells: Array<string | null> = []
+    for (let col = 0; col < map.width; col++) {
+      const pos = map.map[row * map.width + col]
+      const rect = map.findCell(pos)
+      const cell = node.nodeAt(pos)!
+      if (rect.left === col && !aligned.has(col)) {
+        // GFM 的对齐属于整列：取这一列中第一个从这一列开始的单元格的对齐。
+        aligns[col] = cell.attrs.align as string | null
+        aligned.add(col)
       }
-    })
+      if (rect.top === row && rect.left === col) cells.push(cellMarkdown(cell))
+      else if (rect.top === 0 && row > 0) cells.push('')
+      else if (rect.top === row || col !== rect.left) cells.push(null)
+      else cells.push('^^')
+    }
     rows.push(cells)
-  })
-  const columns = Math.max(1, ...rows.map((cells) => cells.length))
-  const line = (cells: readonly string[]) =>
-    `| ${Array.from({ length: columns }, (_, i) => cells[i] ?? '').join(' | ')} |`
+  }
+  const columns = Math.max(1, map.width)
+  const line = (cells: ReadonlyArray<string | null>) => {
+    let text = '|'
+    for (let i = 0; i < columns; i++) text += cells[i] === null ? '|' : ` ${cells[i] ?? ''} |`
+    return text
+  }
   const delimiter = Array.from({ length: columns }, (_, i) => {
     const align = aligns[i]
     return align === 'center' ? ':---:' : align === 'right' ? '---:' : align === 'left' ? ':---' : '---'
@@ -796,7 +927,12 @@ function serializeTable(state: MarkdownSerializerState, node: Node): void {
 /** 单元格内容按段落序列化，再转义竖线（GFM 在行内解析之前处理 \|，代码中同样适用）。 */
 function cellMarkdown(cell: Node): string {
   const paragraph = nodes.paragraph.create(null, cell.content)
-  return serializeMarkdown(nodes.doc.create(null, paragraph), writingRefLabel).replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()
+  const markdown = serializeMarkdown(nodes.doc.create(null, paragraph), writingRefLabel)
+    .replace(/\|/g, '\\|')
+    .replace(/\n/g, ' ')
+    .trim()
+  // 内容恰好是 `^^` 的单元格会被当作与上方合并：转义。
+  return markdown === '^^' ? '\\^^' : markdown
 }
 
 const baseNodes = defaultMarkdownSerializer.nodes
