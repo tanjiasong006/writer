@@ -327,7 +327,7 @@ test('openMenuAtCaret（⌘/，由菜单栏调用）在光标处打开同一个�
   expect(document.activeElement).toBe(first.element)
 })
 
-test('列表快捷键在光标处打开三种列表选择，选择任务列表后正文可继续输入', async () => {
+test('列表快捷键在光标处打开三种列表与编号样式选择，选择任务列表后正文可继续输入', async () => {
   const wrapper = mountEditor({ chapterId: 'a', content: '待办' })
   const view = viewOf(wrapper)
   view.coordsAtPos = () => ({ left: 10, right: 10, top: 0, bottom: 20 })
@@ -335,11 +335,27 @@ test('列表快捷键在光标处打开三种列表选择，选择任务列表�
   await wrapper.find('.chapter-editor__mount').trigger('keydown', {
     key: '8', code: 'Digit8', ...(IS_MAC ? { metaKey: true } : { ctrlKey: true }),
   })
-  expect(wrapper.findAll('[role="menu"] .popup-menu__label').map((item) => item.text())).toEqual(['无序列表', '有序列表', '任务列表'])
+  const labels = wrapper.findAll('[role="menu"] .popup-menu__label').map((item) => item.text())
+  expect(labels.slice(0, 3)).toEqual(['无序列表', '有序列表', '任务列表'])
+  expect(labels).toContain('一、 二、 三、')
   expect(wrapper.emitted('change')).toBeUndefined()
   expect(document.activeElement).toBe(wrapper.find('[role="menu"] button').element)
   await chooseFromContextMenu(wrapper, '任务列表')
   expect(wrapper.emitted('change')?.at(-1)).toEqual(['a', '- [ ] 待办'])
+  expect(view.hasFocus()).toBe(true)
+})
+
+test('列表菜单中选择编号样式：段落变成这种样式的有序列表，显示编号', async () => {
+  const wrapper = mountEditor({ chapterId: 'a', content: '总则' })
+  const view = viewOf(wrapper)
+  view.coordsAtPos = () => ({ left: 10, right: 10, top: 0, bottom: 20 })
+  view.focus()
+  void (wrapper.vm as unknown as { openListMenu(): Promise<void> }).openListMenu()
+  await flushPromises()
+  await chooseFromContextMenu(wrapper, '一、 二、 三、')
+  await flushPromises()
+  expect(wrapper.emitted('change')?.at(-1)).toEqual(['a', '<!-- writer:list 一、 -->\n1. 总则'])
+  expect(view.dom.querySelector('li')!.getAttribute('data-marker')).toBe('一、')
   expect(view.hasFocus()).toBe(true)
 })
 

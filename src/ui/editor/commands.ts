@@ -28,6 +28,7 @@ import {
   parseChapterRefAddress,
   type ChapterRefShow,
 } from '../../domain/chapter_reference/chapter_reference.ts'
+import type { ListNumbering } from '../../domain/list_numbering/list_numbering.ts'
 
 /**
  * 正文编辑命令。都是标准的 ProseMirror Command：只根据 EditorState 计算事务，不依赖 DOM。
@@ -174,6 +175,34 @@ function setTaskItems(tr: Transaction, task: boolean): void {
   list.node.forEach((item, offset) => {
     tr.setNodeAttribute(start + offset, 'checked', task ? (item.attrs.checked ?? false) : null)
   })
+}
+
+/** 光标所在的（不是任务列表的）有序列表的编号样式；不在这样的列表中时为 null。 */
+export function listNumberingAt(state: EditorState): ListNumbering | null {
+  const list = nearestList(state.selection.$from)
+  if (list?.node.type !== nodes.ordered_list || taskItem(state.selection.$from)?.attrs.checked != null) return null
+  return list.node.attrs.numbering as ListNumbering
+}
+
+/**
+ * 编号样式（docs/decisions.md 第 24 节）：设置光标所在有序列表（只是这一层）的编号样式。
+ * 在其他列表中或不在列表中时，与“有序列表”相同地先转换或包成有序列表。
+ */
+export function setListNumbering(numbering: ListNumbering): Command {
+  return (state, dispatch) => {
+    if (listNumberingAt(state) !== null) {
+      if (dispatch) {
+        const list = nearestList(state.selection.$from)!
+        dispatch(state.tr.setNodeAttribute(state.selection.$from.before(list.depth), 'numbering', numbering))
+      }
+      return true
+    }
+    return toggleOrderedList(state, dispatch && ((tr) => {
+      const list = nearestList(tr.selection.$from)
+      if (list?.node.type === nodes.ordered_list) tr.setNodeAttribute(tr.selection.$from.before(list.depth), 'numbering', numbering)
+      dispatch(tr)
+    }))
+  }
 }
 
 /** 引用：在引用中 → 移出；否则包成引用。 */

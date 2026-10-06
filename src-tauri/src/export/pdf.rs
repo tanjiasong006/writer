@@ -611,10 +611,11 @@ impl<'a> Writer<'a> {
         }
         match block {
             Block::Paragraph(inlines) => self.inlines(inlines, &Container::text_area(&self.page)),
-            Block::List { ordered, start, items } => {
+            Block::List { ordered, start, numbering, items } => {
                 let items: Vec<String> = items.iter().map(|item| format!("[{}]", self.blocks(item, section))).collect();
                 if *ordered {
-                    format!("#enum(start: {start}, {})", items.join(", "))
+                    // 编号样式就是 Typst 的编号写法（docs/decisions.md 第 24 节）。
+                    format!("#enum(start: {start}, numbering: {}, {})", string(numbering.pattern()), items.join(", "))
                 } else {
                     format!("#list({})", items.join(", "))
                 }
@@ -2049,6 +2050,19 @@ mod tests {
         let text = page_texts(&paged).concat();
         assert!(text.contains("流量 50 m3/d，H2O，xn。"), "{text}");
         assert!(!text.contains("<sup>"), "{text}");
+    }
+
+    /// 编号样式（docs/decisions.md 第 24 节）：Typst 按样式排出编号，与 HTML 的编号文字相同。
+    #[test]
+    fn numbered_lists_are_typeset_with_their_style() {
+        let markdown = "<!-- writer:list 一、 -->\n9. 甲\n10. 乙\n    <!-- writer:list (1) -->\n    1. 子\n\n<!-- writer:list ① -->\n1. 丙";
+        let document = build(&request("", &[("a", vec![1], "绪论", markdown)]));
+        let dir = project();
+        let (paged, _) = layout(&document, dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        let text = page_texts(&paged).concat();
+        for marker in ["九、", "十、", "(1)", "①"] {
+            assert!(text.contains(marker), "{marker}: {text}");
+        }
     }
 
     #[test]

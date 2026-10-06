@@ -68,3 +68,12 @@ test('章节引用按章节树生成文字；失效时显示链接文字并标�
   expect(refs.map((ref) => ref.textContent)).toEqual(['1.1 数据', '方法', '原来的目标'])
   expect(refs.map((ref) => ref.classList.contains('is-broken'))).toEqual([false, false, true])
 })
+
+test('编号样式与编辑器相同：编号文字写在列表项上，任务项没有编号', () => {
+  const body = render('<!-- writer:list （一） -->\n9. 甲\n10. [ ] 乙\n11. 丙\n\n段落\n\n1. 默认\n')
+  const [styled, plain] = body.querySelectorAll('ol')
+  expect(styled.getAttribute('data-numbering')).toBe('（一）')
+  expect([...styled.children].map((item) => item.getAttribute('data-marker'))).toEqual(['（九）', null, '（十一）'])
+  expect(plain.hasAttribute('data-numbering')).toBe(false)
+  expect(plain.querySelector('[data-marker]')).toBeNull()
+})

@@ -27,6 +27,8 @@ import {
   selectedChapterRef,
   setChapterRefShow,
   setCodeLanguage,
+  setListNumbering,
+  listNumberingAt,
   type CommandState,
   type EditorCommand,
 } from './commands.ts'
@@ -48,6 +50,7 @@ import { useMenu } from '../common/use_menu.ts'
 import { editSelectedCaption, figureNodeView, imageNodeView, type ImageResolver } from './image_view.ts'
 import { NO_CHAPTER_REFS, chapterRefNodeViews, chapterRefPos, type ChapterRefLabel } from './chapter_ref_view.ts'
 import { parseChapterRefAddress, type ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
+import { isListNumbering } from '../../domain/list_numbering/list_numbering.ts'
 import { DEFAULT_EDITOR_THEME, editorHeadingVars, editorThemeCssVars } from './editor_theme.ts'
 import { topBlock, type BlockPosition } from './block_position.ts'
 import { countDoc, countSelection } from './text_stats.ts'
@@ -572,7 +575,7 @@ async function openListMenu(): Promise<void> {
   const chapterId = currentId
   const caret = view.coordsAtPos(view.state.selection.head)
   focus()
-  const chosen = await menu.open(listEntries(commandState(view.state)), { x: caret.left, y: caret.bottom }, true)
+  const chosen = await menu.open(listEntries(commandState(view.state), listNumberingAt(view.state)), { x: caret.left, y: caret.bottom }, true)
   if (chosen !== null && currentId === chapterId) runMenuItem(chosen)
 }
 
@@ -592,6 +595,7 @@ async function showContextMenu(anchor: MenuAnchor, keyboard: boolean): Promise<v
     tableState(),
     selectedMath(view.state) !== null,
     selectedStructure(view.state) !== null,
+    listNumberingAt(view.state),
   )
   const chosen = await menu.open(entries, anchor, keyboard)
   if (chosen !== null) runMenuItem(chosen)
@@ -602,6 +606,10 @@ function runMenuItem(id: string): void {
   if (kind === 'command') runCommand(value as EditorCommand)
   else if (kind === 'code-language' && view) {
     setCodeLanguage(value ?? '')(view.state, view.dispatch)
+    focus()
+  }
+  else if (kind === 'list-numbering' && view && isListNumbering(value)) {
+    setListNumbering(value)(view.state, view.dispatch)
     focus()
   }
   else if (id === 'figure:caption' && view) editSelectedCaption(view)

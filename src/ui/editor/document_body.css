@@ -74,6 +74,46 @@
   color: var(--color-doc-muted);
 }
 
+/* 编号样式（docs/decisions.md 第 24 节）：编号文字由 list_markers.ts 写在 data-marker 中，
+   与浏览器的编号一样右对齐在缩进之内。编号较宽的样式加宽缩进。 */
+.document-body ol[data-numbering] > li {
+  position: relative;
+  list-style: none;
+}
+
+.document-body ol[data-numbering] > li[data-marker]::before {
+  position: absolute;
+  right: 100%;
+  margin-right: 0.3em;
+  color: var(--color-doc-muted);
+  white-space: nowrap;
+  /* 编号末尾的“.”“、”不悬挂、全角括号不压缩：与正文的间距由 margin 决定。 */
+  hanging-punctuation: none;
+  text-spacing-trim: space-all;
+  content: attr(data-marker);
+}
+
+.document-body ol[data-numbering='(1)'],
+.document-body ol[data-numbering='I.'] {
+  padding-left: 2.2em;
+}
+
+/* 全角的“、”与括号自带留白，编号紧挨正文，缩进正好容下编号。 */
+.document-body ol[data-numbering='一、'] {
+  padding-left: 2em;
+}
+
+.document-body ol[data-numbering='（1）'],
+.document-body ol[data-numbering='（一）'] {
+  padding-left: 3em;
+}
+
+.document-body ol[data-numbering='一、'] > li[data-marker]::before,
+.document-body ol[data-numbering='（1）'] > li[data-marker]::before,
+.document-body ol[data-numbering='（一）'] > li[data-marker]::before {
+  margin-right: 0;
+}
+
 .document-body li > ul,
 .document-body li > ol {
   margin: 0;

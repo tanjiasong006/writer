@@ -3,6 +3,7 @@ import type { CommandState, EditorCommand } from './commands.ts'
 import { SHORTCUTS } from '../common/shortcuts.ts'
 import { CODE_LANGUAGES, sameLanguage } from './code_highlight.ts'
 import type { ChapterRefShow } from '../../domain/chapter_reference/chapter_reference.ts'
+import { LIST_NUMBERINGS, formatListMarker, type ListNumbering } from '../../domain/list_numbering/list_numbering.ts'
 
 /**
  * 正文的右键菜单：只列出与点击处直接相关的操作。
@@ -14,7 +15,7 @@ import type { ChapterRefShow } from '../../domain/chapter_reference/chapter_refe
  * - 代码块中：“代码语言”子菜单放在最前面（当前语言打勾）。
  * - 其余：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当前所在结构打勾）、插入表格与图片。
  *
- * 菜单项 id：`command:<EditorCommand>`；编辑图注是 `figure:caption`；代码语言是 `code-language:<语言>`（空为自动识别）；
+ * 菜单项 id：`command:<EditorCommand>`；编号样式是 `list-numbering:<样式>`；编辑图注是 `figure:caption`；代码语言是 `code-language:<语言>`（空为自动识别）；
  * 章节引用是 `chapter-ref:open` 与 `chapter-ref:show:<格式>`（更改目标是 `command:chapter-ref`）。
  * 快捷键与菜单栏一致，只作显示（右键菜单打开期间才生效）。
  */
@@ -84,8 +85,25 @@ export function commandEntry(
 
 export const LIST_COMMANDS = ['bullet-list', 'ordered-list', 'task-list'] as const
 
-export function listEntries(state: CommandState | null): MenuEntry[] {
-  return LIST_COMMANDS.map((command) => commandEntry(command, state, { checkable: true }))
+/**
+ * 列表类型，之后是“编号样式”子菜单（docs/decisions.md 第 24 节）：各项以前三个编号示意，光标所在有序列表的样式打勾；
+ * 在其他列表中或不在列表中时选择样式，同时变成有序列表。numbering 是光标所在有序列表的样式（不在有序列表中时为 null）。
+ */
+export function listEntries(state: CommandState | null, numbering: ListNumbering | null = null): MenuEntry[] {
+  return [
+    ...LIST_COMMANDS.map((command) => commandEntry(command, state, { checkable: true })),
+    { separator: true },
+    {
+      id: 'list-numbering',
+      label: '编号样式',
+      submenu: LIST_NUMBERINGS.map((style) => ({
+        id: `list-numbering:${style}`,
+        label: [1, 2, 3].map((n) => formatListMarker(style, n)).join(' '),
+        checked: numbering === style,
+        disabled: !(state?.['ordered-list'].enabled ?? false),
+      })),
+    },
+  ]
 }
 
 /** 代码语言子菜单：自动识别、常用语言；手写的其他语言名也列出并打勾，选择其他项时替换它。 */
@@ -163,6 +181,8 @@ export function editorContextMenu(
   math = false,
   /** 选中了化学结构式。 */
   structure = false,
+  /** 光标所在有序列表的编号样式（不在有序列表中时为 null）。 */
+  listNumbering: ListNumbering | null = null,
 ): MenuEntry[] {
   if (math) return [{ id: 'math:edit', label: '编辑公式…' }, { separator: true }, { role: 'cut' }, { role: 'copy' }]
   if (structure) return [{ id: 'structure:edit', label: '编辑结构式…' }, { separator: true }, { role: 'cut' }, { role: 'copy' }]
@@ -214,7 +234,7 @@ export function editorContextMenu(
   if (!inTable) {
     entries.push(
       { separator: true },
-      { id: 'list', label: '列表', submenu: listEntries(state) },
+      { id: 'list', label: '列表', submenu: listEntries(state, listNumbering) },
       commandEntry('quote', state, { checkable: true }),
       commandEntry('code-block', state, { checkable: true }),
       { separator: true },

@@ -160,6 +160,45 @@ test('Markdown 输入规则：块结构', () => {
   expect(markdown(rule)).toBe('---\n\n后文\n')
 })
 
+test('输入规则：按编号样式输入编号，变成这种样式的有序列表', () => {
+  const cases: Array<[string, string]> = [
+    ['1) 甲', '<!-- writer:list 1) -->\n1. 甲\n'],
+    ['(3) 甲', '<!-- writer:list (1) -->\n3. 甲\n'],
+    ['（2）甲', '<!-- writer:list （1） -->\n2. 甲\n'],
+    ['一、甲', '<!-- writer:list 一、 -->\n1. 甲\n'],
+    ['十二、甲', '<!-- writer:list 一、 -->\n12. 甲\n'],
+    ['（三）甲', '<!-- writer:list （一） -->\n3. 甲\n'],
+    ['② 甲', '<!-- writer:list ① -->\n2. 甲\n'],
+    ['i. 甲', '<!-- writer:list i. -->\n1. 甲\n'],
+    ['I. 甲', '<!-- writer:list I. -->\n1. 甲\n'],
+    ['a. 甲', '<!-- writer:list a. -->\n1. 甲\n'],
+    ['A. 甲', '<!-- writer:list A. -->\n1. 甲\n'],
+    // 罗马数字与字母只认第一项；中文数字之后不是“、”时是文字。
+    ['b. 甲', 'b. 甲\n'],
+    ['一。甲', '一。甲\n'],
+  ]
+  for (const [input, expected] of cases) {
+    const view = viewOf('')
+    typeText(view, input)
+    expect(markdown(view), input).toBe(expected)
+  }
+})
+
+test('输入规则：紧接在同样式的列表之后、编号接续时并入那个列表', () => {
+  const view = viewOf('<!-- writer:list 一、 -->\n1. 甲\n\n后文\n')
+  cursorAfter(view, '后文')
+  // 在列表之后另起一段输入“二、”。
+  press(view, 'Enter')
+  typeText(view, '二、乙')
+  expect(markdown(view)).toBe('<!-- writer:list 一、 -->\n1. 甲\n\n后文\n\n<!-- writer:list 一、 -->\n2. 乙\n')
+  const joined = viewOf('<!-- writer:list 一、 -->\n1. 甲\n')
+  joined.dispatch(joined.state.tr.setSelection(Selection.atEnd(joined.state.doc)))
+  press(joined, 'Enter')
+  press(joined, 'Enter')
+  typeText(joined, '二、乙')
+  expect(markdown(joined)).toBe('<!-- writer:list 一、 -->\n1. 甲\n2. 乙\n')
+})
+
 test('输入规则可以用 Backspace 撤销', () => {
   const view = viewOf('')
   typeText(view, '- ')

@@ -13,12 +13,14 @@ import { TableMap } from 'prosemirror-tables'
 import { marks, nodes, schema } from './schema.ts'
 import { parseChapterRefAddress } from '../../domain/chapter_reference/chapter_reference.ts'
 import type { ChapterRefLabel } from './chapter_ref_view.ts'
+import { DEFAULT_LIST_NUMBERING, isListNumbering } from '../../domain/list_numbering/list_numbering.ts'
 
 /**
  * 正文持久化格式（Markdown）与编辑器文档之间的转换。
  *
  * Markdown 方言与导出使用的 Rust pulldown-cmark 保持一致：CommonMark + GFM 表格、删除线、任务列表；
- * 正文不支持标题与 HTML：原始 HTML 与 Markdown 标题一律视为文字（唯一的例外是上下标的 `<sup>` / `<sub>`）。
+ * 正文不支持标题与 HTML：原始 HTML 与 Markdown 标题一律视为文字（例外是上下标的 `<sup>` / `<sub>`
+ * 与有序列表之前的编号样式注释）。
  * 序列化结果再次解析后结构不变（round trip），
  * 见 markdown.test.ts。
  */
@@ -223,6 +225,59 @@ tokenizer.block.ruler.at('table', (state, startLine, endLine, silent) => {
   for (const index of remove.sort((a, b) => b - a)) tokens.splice(index, 3)
   return true
 }, { alt: ['paragraph', 'reference'] }) // 与原规则相同，表格可以打断段落（不传时 at 会清空）。
+
+/**
+ * 有序列表的编号样式（docs/decisions.md 第 24 节）：恰好一行 `<!-- writer:list <样式> -->`（样式是认识的写法），
+ * 下一行开始一个有序列表时，是这个列表的编号样式，不是文字。与 Rust 渲染器（render::markdown 的 ListNumbering::from_comment）相同：
+ * pulldown-cmark 中这一行是 HTML 块，可以打断段落，紧接着是有序列表。其他情况下仍是文字。
+ */
+const LIST_STYLE_COMMENT = /^<!--[ \t]*writer:list[ \t]+(\S+)[ \t]*-->[ \t]*$/
+const ORDERED_LIST_MARKER = /^\d{1,9}[.)](?:[ \t]|$)/
+
+export function listNumberingComment(numbering: string): string {
+  return `<!-- writer:list ${numbering} -->`
+}
+
+tokenizer.block.ruler.before('paragraph', 'writer_list_numbering', (state, startLine, endLine, silent) => {
+  const line = (n: number) => state.src.slice(state.bMarks[n] + state.tShift[n], state.eMarks[n])
+  const next = startLine + 1
+  if (state.sCount[startLine] - state.blkIndent >= 4 || next >= endLine) return false
+  const match = LIST_STYLE_COMMENT.exec(line(startLine))
+  if (!match || !isListNumbering(match[1])) return false
+  const indent = state.sCount[next] - state.blkIndent
+  if (indent < 0 || indent >= 4 || !ORDERED_LIST_MARKER.test(line(next))) return false
+  if (silent) return true
+  const token = state.push('list_numbering', '', 0)
+  token.content = line(startLine)
+  token.meta = { numbering: match[1] }
+  token.map = [startLine, next]
+  state.line = next
+  return true
+}, { alt: ['paragraph', 'reference', 'blockquote', 'list'] })
+
+/** 编号样式记在紧接着的有序列表上；列表规则没有接受下一行时（极少见），这一行仍是文字。 */
+tokenizer.core.ruler.after('block', 'writer_list_numbering', (state) => {
+  const tokens = state.tokens
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const token = tokens[i]
+    if (token.type !== 'list_numbering') continue
+    const list = tokens[i + 1]
+    if (list?.type === 'ordered_list_open') {
+      list.meta = { ...(list.meta as object | null), numbering: (token.meta as { numbering: string }).numbering }
+      tokens.splice(i, 1)
+      continue
+    }
+    const open = new state.Token('paragraph_open', 'p', 1)
+    const inline = new state.Token('inline', '', 0)
+    const close = new state.Token('paragraph_close', 'p', -1)
+    open.map = token.map
+    open.block = inline.block = close.block = true
+    inline.content = token.content
+    inline.map = token.map
+    inline.children = []
+    tokens.splice(i, 1, open, inline, close)
+  }
+})
 
 /** ASCII 空白（pulldown-cmark 判断 $ 能否开始 / 结束公式时使用的范围）。 */
 const isAsciiSpace = (char: string | undefined) => char !== undefined && /[ \t\n\r\f\v]/.test(char)
@@ -783,6 +838,7 @@ const parser = new MarkdownParser(schema, tokenizer, {
     getAttrs: (token, tokens, i) => ({
       order: Number(token.attrGet('start') ?? 1),
       tight: listIsTight(tokens, i),
+      numbering: (token.meta as { numbering?: string } | null)?.numbering ?? DEFAULT_LIST_NUMBERING,
     }),
   },
   code_block: { block: 'code_block', noCloseToken: true },
@@ -890,6 +946,25 @@ function renderList(
     return checked === null ? '' : checked ? '[x] ' : '[ ] '
   }
   state.renderList(node, indent, (i) => marker(i) + task(i))
+}
+
+/** prosemirror-markdown 写出状态中没有列入类型定义的部分（renderList 开头用它们决定与前一块之间的空行）。 */
+interface ListWriterState {
+  closed: Node | null
+  inTightList: boolean
+  flushClose(size?: number): void
+}
+
+/**
+ * 编号样式写在列表之前的一行（docs/decisions.md 第 24 节）。与前一块之间的空行与 renderList 相同，
+ * 注释与列表之间没有空行。
+ */
+function writeListNumbering(state: MarkdownSerializerState, node: Node): void {
+  const internal = state as unknown as ListWriterState
+  if (internal.closed && internal.closed.type === node.type) internal.flushClose(3)
+  else if (internal.inTightList) internal.flushClose(1)
+  state.write(listNumberingComment(node.attrs.numbering as string))
+  state.ensureNewLine()
 }
 
 /**
@@ -1010,6 +1085,7 @@ const serializer = new MarkdownSerializer(
       renderList(state, node, () => `${bullet} `, '  ')
     },
     ordered_list(state, node, parent, index) {
+      if (node.attrs.numbering !== DEFAULT_LIST_NUMBERING) writeListNumbering(state, node)
       const start: number = node.attrs.order
       const delimiter = alternateMarker(node, parent, index) ? ')' : '.'
       const width = String(start + node.childCount - 1).length

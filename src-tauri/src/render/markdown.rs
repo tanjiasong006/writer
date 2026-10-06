@@ -5,7 +5,7 @@
 //! 原始 HTML 一律作为普通文本（唯一的例外是上下标标签，见 InlineRun）；Markdown 标题作为普通段落，
 //! 文字是标题的原文（见 HeadingsAsText）。
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::iter::Peekable;
 
@@ -19,6 +19,9 @@ pub enum Block {
     List {
         ordered: bool,
         start: u64,
+        /// 有序列表的编号样式：紧挨在列表之前的 `<!-- writer:list <样式> -->`（docs/decisions.md 第 24 节）。
+        /// 无序列表与没有样式注释的有序列表是默认的 `1.`。
+        numbering: ListNumbering,
         items: Vec<Vec<Block>>,
     },
     Quote(Vec<Block>),
@@ -46,6 +49,42 @@ pub enum Block {
         note: Option<String>,
     },
     Rule,
+}
+
+/// 有序列表的编号样式（docs/decisions.md 第 24 节），即编号写法本身（与 Typst 的编号写法相同）：
+/// 其中的 1 / 一 / ① / I / i / A / a 是计数符号，其余是前后缀。与前端 `domain/list_numbering` 相同。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListNumbering(&'static str);
+
+impl ListNumbering {
+    pub const ALL: [&'static str; 11] = ["1.", "1)", "(1)", "（1）", "一、", "（一）", "①", "I.", "i.", "A.", "a."];
+    pub const DEFAULT: Self = Self("1.");
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Self::ALL.iter().find(|&&style| style == text).map(|&style| Self(style))
+    }
+
+    /// 样式注释：恰好一行 `<!-- writer:list <样式> -->`（首尾、各部分之间的空白只能是空格与制表符），样式是认识的写法。
+    /// 与编辑器（ui/editor/markdown.ts 的 LIST_STYLE_COMMENT）相同。
+    pub fn from_comment(html: &str) -> Option<Self> {
+        let blank = [' ', '\t'];
+        let line = html.trim_end_matches(['\n', '\r']).trim_matches(blank);
+        let body = line.strip_prefix("<!--")?.strip_suffix("-->")?.trim_matches(blank);
+        let rest = body.strip_prefix("writer:list")?;
+        if !rest.starts_with(blank) {
+            return None;
+        }
+        Self::parse(rest.trim_matches(blank))
+    }
+
+    /// 编号写法，如 `（一）`。
+    pub fn pattern(self) -> &'static str {
+        self.0
+    }
+
+    pub fn is_default(self) -> bool {
+        self == Self::DEFAULT
+    }
 }
 
 /// 合并的单元格区域：row 从表头第一行起算（表头各行之后是正文），区域不跨越表头与正文。
@@ -269,6 +308,12 @@ thread_local! {
     static TABLE_MARKS: RefCell<VecDeque<TableMark>> = const { RefCell::new(VecDeque::new()) };
 }
 
+thread_local! {
+    /// 刚产生的有序列表开始是否紧挨在一个 HTML 块之后（之间没有空行，由 HeadingsAsText 记下）：
+    /// 只有这时，HTML 块中的样式注释才是列表的编号样式（与编辑器相同）。
+    static LIST_AFTER_HTML: Cell<bool> = const { Cell::new(false) };
+}
+
 /// 表格单元格原文中的合并记号（docs/decisions.md 第 23 节），按原文判断：
 /// 两个竖线之间没有任何字符（`||`）是与左侧合并，内容恰好是 `^^` 是与上方合并（转义的 `\^^` 是文字）。
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -329,6 +374,7 @@ pub fn parse(markdown: &str) -> Vec<Block> {
         row_end: 0,
         run: None,
         run_open: false,
+        html_end: None,
     }
     .peekable();
     FOOTNOTES.with(|footnotes| footnotes.borrow_mut().clear());
@@ -436,6 +482,8 @@ struct HeadingsAsText<'a> {
     /// 表格开始时据此判断紧贴在它之前的各行是不是表头行（见 header_lines）。
     run: Option<(usize, usize)>,
     run_open: bool,
+    /// 上一个事件是 HTML 块的结束时，块在原文中的结束位置。
+    html_end: Option<usize>,
 }
 
 impl<'a> Iterator for HeadingsAsText<'a> {
@@ -446,6 +494,22 @@ impl<'a> Iterator for HeadingsAsText<'a> {
             return Some(event);
         }
         let (event, range) = self.inner.next()?;
+        let html_end = self.html_end.take();
+        match &event {
+            Event::End(TagEnd::HtmlBlock) => self.html_end = Some(range.end),
+            Event::Start(Tag::List(Some(_))) => {
+                let adjacent = html_end.is_some_and(|end| {
+                    // 块的范围可能不含行尾的换行；去掉它之后，到列表开始之间只剩容器的前缀（缩进、`>`）时没有空行。
+                    let mut gap = &self.source[end..range.start];
+                    if !self.source[..end].ends_with('\n') {
+                        gap = gap.strip_prefix("\r\n").or_else(|| gap.strip_prefix('\n')).unwrap_or(gap);
+                    }
+                    !gap.contains('\n')
+                });
+                LIST_AFTER_HTML.with(|cell| cell.set(adjacent));
+            }
+            _ => {}
+        }
         match &event {
             _ if is_inline_event(&event) => match (&mut self.run, self.run_open) {
                 (Some(run), true) => run.1 = range.end,
@@ -648,6 +712,22 @@ fn blocks(events: &mut Events, stop: &dyn Fn(&TagEnd) -> bool, depth: usize) -> 
             Event::Start(Tag::HtmlBlock) => {
                 flush(&mut pending, &mut out);
                 let text = raw_text(events, TagEnd::HtmlBlock);
+                // 紧挨在有序列表之前的样式注释是列表的编号样式，不是文字。
+                if let Some(numbering) = ListNumbering::from_comment(&text) {
+                    if depth < MAX_NESTING
+                        && matches!(events.peek(), Some(Event::Start(Tag::List(Some(_)))))
+                        && LIST_AFTER_HTML.with(Cell::get)
+                    {
+                        if let Some(Event::Start(Tag::List(start))) = events.next() {
+                            let mut block = list(events, start, depth + 1);
+                            if let Block::List { numbering: slot, .. } = &mut block {
+                                *slot = numbering;
+                            }
+                            out.push(block);
+                        }
+                        continue;
+                    }
+                }
                 out.push(Block::Paragraph(vec![Inline::Text(
                     text.trim_end().to_owned(),
                 )]));
@@ -722,6 +802,7 @@ fn list(events: &mut Events, start: Option<u64>, depth: usize) -> Block {
     Block::List {
         ordered: start.is_some(),
         start: start.unwrap_or(1),
+        numbering: ListNumbering::DEFAULT,
         items,
     }
 }
@@ -803,6 +884,7 @@ fn header_line(line: &str, columns: usize) -> (Vec<Vec<Inline>>, Vec<CellMark>) 
         row_end: 0,
         run: None,
         run_open: false,
+        html_end: None,
     }
     .peekable();
     let (mut cells, mut marks) = (Vec::new(), Vec::new());
@@ -1228,6 +1310,7 @@ mod tests {
                 Block::List {
                     ordered: false,
                     start: 1,
+                    numbering: ListNumbering::DEFAULT,
                     items: vec![vec![Block::Paragraph(vec![
                         text("列表中"),
                         Inline::SoftBreak,
@@ -1245,12 +1328,14 @@ mod tests {
             vec![Block::List {
                 ordered: false,
                 start: 1,
+                numbering: ListNumbering::DEFAULT,
                 items: vec![
                     vec![
                         Block::Paragraph(vec![text("甲")]),
                         Block::List {
                             ordered: true,
                             start: 1,
+                            numbering: ListNumbering::DEFAULT,
                             items: vec![vec![Block::Paragraph(vec![text("子项")])]],
                         },
                     ],
@@ -1466,6 +1551,43 @@ mod tests {
         assert_eq!(parse("文字 ![a](b.png)")[0].as_figure(), None);
     }
 
+    /// 编号样式（docs/decisions.md 第 24 节）：紧挨在有序列表之前的样式注释，与编辑器的规则相同。
+    #[test]
+    fn list_numbering_comment_styles_the_following_ordered_list() {
+        let numbering = |markdown: &str| {
+            fn walk(blocks: &[Block], out: &mut Vec<&'static str>) {
+                for block in blocks {
+                    match block {
+                        Block::List { ordered: true, numbering, items, .. } => {
+                            out.push(numbering.pattern());
+                            items.iter().for_each(|item| walk(item, out));
+                        }
+                        Block::List { items, .. } => items.iter().for_each(|item| walk(item, out)),
+                        Block::Quote(blocks) => walk(blocks, out),
+                        _ => {}
+                    }
+                }
+            }
+            let mut out = Vec::new();
+            walk(&parse(markdown), &mut out);
+            out
+        };
+        assert_eq!(numbering("<!-- writer:list 一、 -->\n3. 甲"), ["一、"]);
+        assert_eq!(numbering("段落\n<!-- writer:list ① -->\n3. 甲"), ["①"]);
+        assert_eq!(parse("段落\n<!-- writer:list ① -->\n3. 甲")[0], Block::Paragraph(vec![text("段落")]));
+        assert_eq!(numbering("1. <!-- writer:list i. -->\n   1. 甲"), ["1.", "i."]);
+        assert_eq!(numbering("1. 甲\n   <!-- writer:list a. -->\n   1. 乙"), ["1.", "a."]);
+        assert_eq!(numbering("> <!-- writer:list I. -->\n> 1. 甲"), ["I."]);
+        assert_eq!(numbering("<!--writer:list\t(1)-->\r\n1. 甲"), ["(1)"]);
+        // 中间有空行、样式不认识、多余的文字：注释是文字。
+        for markdown in ["<!-- writer:list (1) -->\n\n1. 甲", "<!-- writer:list (2) -->\n1. 甲", "<!-- writer:list (1) --> x\n1. 甲"] {
+            assert_eq!(numbering(markdown), ["1."], "{markdown}");
+            assert!(matches!(&parse(markdown)[0], Block::Paragraph(_)), "{markdown}");
+        }
+        // 无序列表之前：文字。
+        assert!(matches!(&parse("<!-- writer:list (1) -->\n- 甲")[0], Block::Paragraph(_)));
+    }
+
     #[test]
     fn raw_html_is_plain_text() {
         assert_eq!(
@@ -1498,6 +1620,7 @@ mod tests {
             vec![Block::List {
                 ordered: false,
                 start: 1,
+                numbering: ListNumbering::DEFAULT,
                 items: vec![vec![Block::Paragraph(vec![text("x"), sup(vec![text("2")])])]],
             }]
         );
@@ -1531,6 +1654,7 @@ mod tests {
                 Block::List {
                     ordered: false,
                     start: 1,
+                    numbering: ListNumbering::DEFAULT,
                     items: vec![vec![Block::Paragraph(vec![text("☑ 完成")])]],
                 },
                 Block::Paragraph(vec![Inline::Link {

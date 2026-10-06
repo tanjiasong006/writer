@@ -11,6 +11,7 @@ pub mod epub;
 pub mod fonts;
 pub mod html;
 pub mod images;
+pub mod list_numbering;
 pub mod markdown;
 pub mod math;
 pub mod pdf;

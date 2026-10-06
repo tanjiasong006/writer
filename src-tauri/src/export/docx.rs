@@ -33,7 +33,7 @@ use super::{ExportError, ExportReport};
 use crate::render::citations::Citations;
 use crate::render::elements::{ElementTarget, ElementTargets};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
-use crate::render::markdown::{cell_place, Align, Block, CellPlace, CellSpan, Inline, StructureConditions};
+use crate::render::markdown::{cell_place, Align, Block, CellPlace, CellSpan, Inline, ListNumbering, StructureConditions};
 use crate::render::{resolve_image, Document, Section, StructureImage, StructureKey};
 
 /// A4，单位 twip（1/20 磅）。
@@ -58,6 +58,8 @@ const BULLET_ABSTRACT: usize = 10;
 const DECIMAL_ABSTRACT: usize = 11;
 const BULLET_NUMBERING: usize = 10;
 const FIRST_LIST_NUMBERING: usize = 11;
+/// 其他编号样式的编号定义（docs/decisions.md 第 24 节）：用到时依次分配，从这里开始。
+const FIRST_STYLED_ABSTRACT: usize = 12;
 const MAX_HEADING: usize = 9;
 
 /// 磅 → Word 的半磅字号。
@@ -107,6 +109,7 @@ pub fn export(
         structures: &document.structures,
         next_numbering: FIRST_LIST_NUMBERING,
         numberings: Vec::new(),
+        styled_abstracts: Vec::new(),
         items: Vec::new(),
     };
 
@@ -155,6 +158,9 @@ pub fn export(
     writer.bibliography();
 
     let mut docx = base_document(&writer.theme, document.title.trim(), cover);
+    for (numbering, id) in writer.styled_abstracts.drain(..) {
+        docx = docx.add_abstract_numbering(ordered_abstract(id, numbering));
+    }
     for numbering in writer.numberings.drain(..) {
         docx = docx.add_numbering(numbering);
     }
@@ -289,6 +295,8 @@ struct Writer<'a> {
     structures: &'a HashMap<StructureKey, StructureImage>,
     next_numbering: usize,
     numberings: Vec<Numbering>,
+    /// 默认 `1.` 以外的编号样式各自的编号定义 id，按用到的顺序。
+    styled_abstracts: Vec<(ListNumbering, usize)>,
     items: Vec<Item>,
 }
 
@@ -377,8 +385,9 @@ impl Writer<'_> {
             Block::List {
                 ordered,
                 start,
+                numbering,
                 items,
-            } => self.list(*ordered, *start, items, section, context),
+            } => self.list(*ordered, *start, *numbering, items, section, context),
             Block::Quote(blocks) => {
                 let inner = BlockContext {
                     quote_level: context.quote_level + 1,
@@ -452,10 +461,24 @@ impl Writer<'_> {
         }
     }
 
+    /// 编号样式的编号定义 id：默认 `1.` 是 DECIMAL_ABSTRACT，其他样式第一次用到时分配。
+    fn ordered_abstract_id(&mut self, numbering: ListNumbering) -> usize {
+        if numbering.is_default() {
+            return DECIMAL_ABSTRACT;
+        }
+        if let Some(&(_, id)) = self.styled_abstracts.iter().find(|(used, _)| *used == numbering) {
+            return id;
+        }
+        let id = FIRST_STYLED_ABSTRACT + self.styled_abstracts.len();
+        self.styled_abstracts.push((numbering, id));
+        id
+    }
+
     fn list(
         &mut self,
         ordered: bool,
         start: u64,
+        numbering: ListNumbering,
         items: &[Vec<Block>],
         section: &Section,
         context: BlockContext,
@@ -471,8 +494,9 @@ impl Writer<'_> {
             let id = self.next_numbering;
             self.next_numbering += 1;
             let start = usize::try_from(start).unwrap_or(1).max(1);
+            let abstract_id = self.ordered_abstract_id(numbering);
             self.numberings.push(
-                Numbering::new(id, DECIMAL_ABSTRACT)
+                Numbering::new(id, abstract_id)
                     .add_override(LevelOverride::new(level).start(start)),
             );
             id
@@ -1220,7 +1244,6 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
 
     let bullets = ["•", "◦", "▪"];
     let mut bullet = AbstractNumbering::new(BULLET_ABSTRACT);
-    let mut decimal = AbstractNumbering::new(DECIMAL_ABSTRACT);
     for level in 0..MAX_HEADING {
         let indent = LIST_INDENT * (level as i32 + 1);
         bullet = bullet.add_level(
@@ -1238,12 +1261,38 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
                 None,
             ),
         );
-        decimal = decimal.add_level(
+    }
+    docx.add_abstract_numbering(bullet)
+        .add_abstract_numbering(ordered_abstract(DECIMAL_ABSTRACT, ListNumbering::DEFAULT))
+        .add_numbering(Numbering::new(BULLET_NUMBERING, BULLET_ABSTRACT))
+}
+
+/// 有序列表的编号定义：各级都是这个编号样式（Word 原生的编号格式，导出后仍是可编辑的列表），缩进与无序列表相同。
+fn ordered_abstract(id: usize, numbering: ListNumbering) -> AbstractNumbering {
+    let pattern = numbering.pattern();
+    let (counter, symbol) = pattern
+        .char_indices()
+        .find(|(_, c)| "1一①IiAa".contains(*c))
+        .unwrap_or((0, '1'));
+    let format = match symbol {
+        '一' => "chineseCountingThousand",
+        '①' => "decimalEnclosedCircle",
+        'I' => "upperRoman",
+        'i' => "lowerRoman",
+        'A' => "upperLetter",
+        'a' => "lowerLetter",
+        _ => "decimal",
+    };
+    let (prefix, suffix) = (&pattern[..counter], &pattern[counter + symbol.len_utf8()..]);
+    let mut abstract_numbering = AbstractNumbering::new(id);
+    for level in 0..MAX_HEADING {
+        let indent = LIST_INDENT * (level as i32 + 1);
+        abstract_numbering = abstract_numbering.add_level(
             Level::new(
                 level,
                 Start::new(1),
-                NumberFormat::new("decimal"),
-                LevelText::new(format!("%{}.", level + 1)),
+                NumberFormat::new(format),
+                LevelText::new(format!("{prefix}%{}{suffix}", level + 1)),
                 LevelJc::new("left"),
             )
             .indent(
@@ -1254,9 +1303,7 @@ fn base_document(theme: &Theme, title: &str, cover: bool) -> Docx {
             ),
         );
     }
-    docx.add_abstract_numbering(bullet)
-        .add_abstract_numbering(decimal)
-        .add_numbering(Numbering::new(BULLET_NUMBERING, BULLET_ABSTRACT))
+    abstract_numbering
 }
 
 /// 章节标题的书签名（章节引用的跳转目标）。下划线开头是 Word 的隐藏书签，不出现在书签列表中。
@@ -1686,6 +1733,25 @@ mod tests {
         assert_unique_ids(&numbering, r#"<w:abstractNum w:abstractNumId=""#);
         let rels = part(&bytes, "word/_rels/document.xml.rels");
         assert!(rels.contains("https://example.com"));
+    }
+
+    /// 编号样式（docs/decisions.md 第 24 节）：Word 原生的编号格式，同一样式共用一个编号定义，各列表从自己的起始值开始。
+    #[test]
+    fn numbered_lists_use_native_number_formats() {
+        let dir = project();
+        let markdown = "<!-- writer:list 一、 -->\n1. 甲\n   <!-- writer:list （1） -->\n   1. 子\n\n\
+                        段落\n\n<!-- writer:list 一、 -->\n5. 乙\n\n<!-- writer:list i. -->\n1. 丙\n\n1. 丁";
+        let (bytes, _) = export_ok(&dir, &[("a", vec![1], "章", markdown)]);
+        let numbering = part(&bytes, "word/numbering.xml");
+        assert!(numbering.contains(r#"<w:numFmt w:val="chineseCountingThousand" />"#), "{numbering}");
+        assert!(numbering.contains(r#"<w:lvlText w:val="%1、" />"#), "{numbering}");
+        assert!(numbering.contains(r#"<w:lvlText w:val="（%2）" />"#), "{numbering}");
+        assert!(numbering.contains(r#"<w:numFmt w:val="lowerRoman" />"#), "{numbering}");
+        assert!(numbering.contains(r#"<w:startOverride w:val="5" />"#), "{numbering}");
+        // 默认、一、、（1）、i. 各一个编号定义（另有 docx-rs 自带的与无序列表的）。
+        assert_eq!(numbering.matches("<w:abstractNum ").count(), 6, "{numbering}");
+        assert_unique_ids(&numbering, r#"<w:num w:numId=""#);
+        assert_unique_ids(&numbering, r#"<w:abstractNum w:abstractNumId=""#);
     }
 
     #[test]

@@ -93,8 +93,12 @@ impl Writer<'_> {
         }
         match block {
             Block::Paragraph(inlines) => escape_line_start(&self.inlines(inlines)),
-            Block::List { ordered, start, items } => {
+            Block::List { ordered, start, numbering, items } => {
                 let mut out = Vec::new();
+                // 编号样式保留为正文中的写法（docs/decisions.md 第 24 节），其他工具中不显示。
+                if *ordered && !numbering.is_default() {
+                    out.push(format!("<!-- writer:list {} -->", numbering.pattern()));
+                }
                 for (index, item) in items.iter().enumerate() {
                     let marker = if *ordered { format!("{}. ", *start as usize + index) } else { "- ".to_owned() };
                     let indent = " ".repeat(marker.len());
@@ -336,6 +340,23 @@ mod tests {
         };
         let text = export(&build(&request), dir.path(), "assets").text;
         assert!(text.contains("| 地区 | 2024 |  |\n| --- | --- | --- |\n|  | 上 | 下 |\n| 华东 | 1 | 2 |"), "{text}");
+    }
+
+    /// 编号样式保留为正文中的写法（docs/decisions.md 第 24 节）。
+    #[test]
+    fn numbered_lists_keep_their_style_comments() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let markdown = "<!-- writer:list A. -->\n1. 甲\n   <!-- writer:list ① -->\n   1. 子\n\n1. 默认";
+        let request = RenderRequest {
+            chapters: vec![RenderChapter { id: "a".into(), number: vec![1], title: "列表".into(), markdown: markdown.into() }],
+            ..Default::default()
+        };
+        let text = export(&build(&request), dir.path(), "assets").text;
+        assert!(text.contains("<!-- writer:list A. -->\n1. 甲"), "{text}");
+        assert!(text.contains("   <!-- writer:list ① -->\n   1. 子"), "{text}");
+        assert_eq!(text.matches("writer:list").count(), 2, "{text}");
+        let reparsed = crate::render::markdown::parse(&text);
+        assert!(reparsed.iter().any(|block| matches!(block, crate::render::markdown::Block::List { numbering, .. } if numbering.pattern() == "A.")), "{text}");
     }
 
     #[test]

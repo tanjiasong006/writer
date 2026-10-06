@@ -67,7 +67,7 @@ describe('Markdown → 文档', () => {
     expect(bullets.attrs.tight).toBe(true)
     expect(bullets.child(0).child(1).type).toBe(bullet_list)
     expect(ordered.type).toBe(ordered_list)
-    expect(ordered.attrs).toEqual({ order: 3, tight: false })
+    expect(ordered.attrs).toEqual({ order: 3, tight: false, numbering: '1.' })
   })
 
   test('任务列表标记进入列表项属性；转义的方括号不是任务标记', () => {
@@ -311,6 +311,45 @@ describe('文档 → Markdown', () => {
     expect(expectStable(node)).toBe('- 一\n\n\n* 二\n\n1. 三\n\n\n1) 四\n')
   })
 
+  test('编号样式：写在列表之前一行，默认样式不写出', () => {
+    const item = (value: string, ...rest: Node[]) => list_item.create(null, [p.create(null, text(value)), ...rest])
+    const nested = ordered_list.create({ numbering: 'a.' }, [item('子')])
+    const node = doc.create(null, [
+      p.create(null, text('前文')),
+      ordered_list.create({ numbering: '（一）', order: 2 }, [item('甲', nested), item('乙')]),
+      ordered_list.create(null, [item('丙')]),
+      blockquote.create(null, ordered_list.create({ numbering: 'I.' }, [item('丁')])),
+    ])
+    expect(expectStable(node)).toBe(
+      '前文\n\n<!-- writer:list （一） -->\n2. 甲\n   <!-- writer:list a. -->\n   1. 子\n3. 乙\n\n\n1) 丙\n\n> <!-- writer:list I. -->\n> 1. 丁\n',
+    )
+  })
+
+  test('编号样式注释可以打断段落，也可以在列表项开头；不紧挨有序列表时是文字', () => {
+    const numbering = (markdown: string) => {
+      const found: string[] = []
+      parseMarkdown(markdown).descendants((node) => {
+        if (node.type === ordered_list) found.push(node.attrs.numbering as string)
+      })
+      return found
+    }
+    expect(numbering('段落\n<!-- writer:list ① -->\n3. 甲')).toEqual(['①'])
+    expect(parseMarkdown('段落\n<!-- writer:list ① -->\n3. 甲').child(0).textContent).toBe('段落')
+    expect(numbering('1. <!-- writer:list i. -->\n   1. 甲')).toEqual(['1.', 'i.'])
+    expect(numbering('<!--writer:list\t(1)-->\n1. 甲')).toEqual(['(1)'])
+    // 中间有空行、样式不认识、多余的文字、缩进成代码：都是文字。
+    for (const markdown of ['<!-- writer:list (1) -->\n\n1. 甲', '<!-- writer:list (2) -->\n1. 甲', '<!-- writer:list (1) --> x\n1. 甲']) {
+      expect(numbering(markdown)).toEqual(['1.'])
+      expect(parseMarkdown(markdown).child(0).type).toBe(p)
+    }
+    expect(parseMarkdown('    <!-- writer:list (1) -->\n1. 甲').child(0).type).toBe(code_block)
+  })
+
+  test('文字中的编号样式注释写出时转义，不会变成样式', () => {
+    const node = doc.create(null, [p.create(null, text('<!-- writer:list (1) -->')), ordered_list.create(null, list_item.create(null, p.create(null, text('甲'))))])
+    expectStable(node)
+  })
+
   test('按块缓存的写法随位置更新：删掉两个列表之间的段落后，后一个列表换用另一种标记', () => {
     const first = bullet_list.create(null, list_item.create(null, p.create(null, text('一'))))
     const second = bullet_list.create(null, list_item.create(null, p.create(null, text('二'))))
@@ -462,7 +501,9 @@ describe('往返', () => {
             p.create(null, inline(true)),
             ...(random() < 0.3 ? [block(depth + 1)] : []),
           ])
-        return (roll === 2 ? bullet_list : ordered_list).create({ tight: random() < 0.5 }, [item(), item()])
+        if (roll === 2) return bullet_list.create({ tight: random() < 0.5 }, [item(), item()])
+        const numbering = pick(['1.', '1.', '一、', '（一）', 'a.'])
+        return ordered_list.create({ tight: random() < 0.5, numbering }, [item(), item()])
       }
       if (roll === 4) return code_block.create({ params: pick(['', 'js']) }, text('x = `a`\n```\n  y'))
       if (roll === 5) {
@@ -483,7 +524,10 @@ describe('往返', () => {
         ? 'figure'
         : node.isTextblock || node.isLeaf
           ? node.type.name
-          : [node.type.name, ...Array.from({ length: node.childCount }, (_, i) => shape(node.child(i)))]
+          : [
+              node.type === ordered_list ? `${node.type.name} ${node.attrs.numbering as string}` : node.type.name,
+              ...Array.from({ length: node.childCount }, (_, i) => shape(node.child(i))),
+            ]
     const visible = (node: Node) => node.textContent.replace(/\s+/g, '')
 
     for (let round = 0; round < 1000; round++) {

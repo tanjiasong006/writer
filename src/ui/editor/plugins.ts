@@ -30,6 +30,8 @@ import { drawCaret } from './caret.ts'
 import { drawSelection } from './selection.ts'
 import { codeHighlight } from './code_highlight.ts'
 import { taskList } from './task_list.ts'
+import { listMarkers } from './list_markers.ts'
+import type { ListNumbering } from '../../domain/list_numbering/list_numbering.ts'
 import { figureEditing, newParagraphAtBlock, selectFigureBackward, selectFigureForward } from './figure_editing.ts'
 import { chapterRefSelection } from './chapter_ref_view.ts'
 import { footnoteDisplay } from './footnote_view.ts'
@@ -287,17 +289,48 @@ function blockInputRules(): Plugin {
   const rules: InputRule[] = [
     wrappingInputRule(/^\s*>\s$/, nodes.blockquote),
     wrappingInputRule(/^\s*([-+*])\s$/, nodes.bullet_list),
-    wrappingInputRule(
-      /^(\d+)\.\s$/,
-      nodes.ordered_list,
-      (match) => ({ order: Number(match[1]) }),
-      (match, node) => node.childCount + node.attrs.order === Number(match[1]),
-    ),
+    numberedListRule(/^(\d+)\.\s$/, '1.', (match) => Number(match[1])),
+    numberedListRule(/^(\d+)\)\s$/, '1)', (match) => Number(match[1])),
+    numberedListRule(/^\((\d+)\)\s$/, '(1)', (match) => Number(match[1])),
+    numberedListRule(/^（(\d+)）$/, '（1）', (match) => Number(match[1])),
+    numberedListRule(new RegExp(`^(${CHINESE_NUMBER})、$`), '一、', (match) => chineseNumber(match[1])),
+    numberedListRule(new RegExp(`^（(${CHINESE_NUMBER})）$`), '（一）', (match) => chineseNumber(match[1])),
+    numberedListRule(/^([①-⑳])\s$/, '①', (match) => match[1].codePointAt(0)! - 0x2460 + 1),
+    numberedListRule(/^I\.\s$/, 'I.', () => 1),
+    numberedListRule(/^i\.\s$/, 'i.', () => 1),
+    numberedListRule(/^A\.\s$/, 'A.', () => 1),
+    numberedListRule(/^a\.\s$/, 'a.', () => 1),
     textblockTypeInputRule(/^```$/, nodes.code_block),
     mathInputRule(),
     horizontalRuleRule(nodes.horizontal_rule),
   ]
   return inputRules({ rules })
+}
+
+/**
+ * 有序列表（docs/decisions.md 第 24 节）：段首按某种编号样式输入编号（`1. `、`(1) `、`一、`、`（一）`、`i. ` 等），
+ * 变成这种样式的有序列表，从输入的编号开始。紧接在同样式的列表之后、编号接续时并入那个列表。
+ * 罗马数字与字母只认第一项（`i. `、`a. ` 等），避免把普通的字母当作编号。
+ */
+function numberedListRule(regexp: RegExp, numbering: ListNumbering, start: (match: RegExpMatchArray) => number): InputRule {
+  return wrappingInputRule(
+    regexp,
+    nodes.ordered_list,
+    (match) => ({ order: start(match), numbering }),
+    (match, node) => node.attrs.numbering === numbering && node.childCount + (node.attrs.order as number) === start(match),
+  )
+}
+
+/** 一到九十九的中文数字。 */
+const CHINESE_NUMBER = '[一二三四五六七八九]|[二三四五六七八九]?十[一二三四五六七八九]?'
+const CHINESE_DIGITS = '一二三四五六七八九'
+
+function chineseNumber(text: string): number {
+  const ten = text.indexOf('十')
+  if (ten < 0) return CHINESE_DIGITS.indexOf(text) + 1
+  const tens = ten === 0 ? 1 : CHINESE_DIGITS.indexOf(text[0]) + 1
+  const ones = ten === text.length - 1 ? 0 : CHINESE_DIGITS.indexOf(text[ten + 1]) + 1
+  return tens * 10 + ones
 }
 
 /**
@@ -519,6 +552,7 @@ export const editorPlugins: readonly Plugin[] = [
   activeTable(),
   cellsAfterSpan(),
   taskList(),
+  listMarkers(),
   codeHighlight(),
   footnoteDisplay(),
   placeholder('开始写作…'),

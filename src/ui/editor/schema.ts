@@ -9,6 +9,7 @@ import {
   type TagParseRule,
 } from 'prosemirror-model'
 import { tableNodes } from 'prosemirror-tables'
+import { DEFAULT_LIST_NUMBERING, isListNumbering, type ListNumbering } from '../../domain/list_numbering/list_numbering.ts'
 
 /**
  * 正文结构的权威定义。
@@ -94,6 +95,26 @@ function imageOutputAttrs(node: Node): Record<string, string | null> {
   return { src: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title }
 }
 
+/** 网页中 <ol> 的 type 与 list-style-type 中可以对应的样式（复制自 Writer 时是 data-numbering）。 */
+const HTML_LIST_TYPES: ReadonlyMap<string, ListNumbering> = new Map<string, ListNumbering>([
+  ['a', 'a.'],
+  ['A', 'A.'],
+  ['i', 'i.'],
+  ['I', 'I.'],
+  ['lower-alpha', 'a.'],
+  ['lower-latin', 'a.'],
+  ['upper-alpha', 'A.'],
+  ['upper-latin', 'A.'],
+  ['lower-roman', 'i.'],
+  ['upper-roman', 'I.'],
+])
+
+function domListNumbering(dom: HTMLElement): ListNumbering {
+  const own = dom.getAttribute('data-numbering')
+  if (isListNumbering(own)) return own
+  return HTML_LIST_TYPES.get(dom.getAttribute('type') ?? '') ?? HTML_LIST_TYPES.get(dom.style.listStyleType) ?? DEFAULT_LIST_NUMBERING
+}
+
 export const schema = new Schema({
   nodes: {
     doc: { content: 'block+' },
@@ -148,10 +169,17 @@ export const schema = new Schema({
       toDOM: (node): DOMOutputSpec => ['ul', node.attrs.tight ? {} : { 'data-loose': '' }, 0],
     },
 
+    /** numbering 是编号样式（docs/decisions.md 第 24 节），Markdown 中是列表之前的 `<!-- writer:list <样式> -->`。 */
     ordered_list: {
       attrs: {
         order: { default: 1, validate: 'number' },
         tight: { default: true, validate: 'boolean' },
+        numbering: {
+          default: DEFAULT_LIST_NUMBERING,
+          validate: (value: unknown) => {
+            if (!isListNumbering(value)) throw new RangeError(`不认识的编号样式：${String(value)}`)
+          },
+        },
       },
       content: 'list_item+',
       group: 'block',
@@ -161,12 +189,17 @@ export const schema = new Schema({
           getAttrs: (dom) => ({
             order: dom.hasAttribute('start') ? Number(dom.getAttribute('start')) || 1 : 1,
             tight: !dom.hasAttribute('data-loose'),
+            numbering: domListNumbering(dom),
           }),
         },
       ],
       toDOM: (node): DOMOutputSpec => [
         'ol',
-        { ...(node.attrs.order === 1 ? {} : { start: node.attrs.order }), ...(node.attrs.tight ? {} : { 'data-loose': '' }) },
+        {
+          ...(node.attrs.order === 1 ? {} : { start: node.attrs.order }),
+          ...(node.attrs.tight ? {} : { 'data-loose': '' }),
+          ...(node.attrs.numbering === DEFAULT_LIST_NUMBERING ? {} : { 'data-numbering': node.attrs.numbering }),
+        },
         0,
       ],
     },

@@ -19,6 +19,8 @@ import {
   commandState,
   editorCommands,
   setCodeLanguage,
+  setListNumbering,
+  listNumberingAt,
   insertChapterRef,
   setChapterRefShow,
 } from './commands.ts'
@@ -456,5 +458,33 @@ describe('章节引用', () => {
     let broken = stateOf('[坏](writer:chapter/)')
     broken = broken.apply(broken.tr.setSelection(NodeSelection.create(broken.doc, 1)))
     expect(setChapterRefShow('number')(broken)).toBe(false)
+  })
+})
+
+describe('编号样式', () => {
+  test('设置光标所在这一层有序列表的样式，嵌套的列表不变；可以撤销', () => {
+    const state = stateOf('1. 甲\n   1. 子\n2. 乙\n', { cursorAfter: '乙' })
+    expect(listNumberingAt(state)).toBe('1.')
+    const styled = run(state, setListNumbering('一、'))
+    expect(markdown(styled)).toBe('<!-- writer:list 一、 -->\n1. 甲\n   1. 子\n2. 乙\n')
+    expect(listNumberingAt(styled)).toBe('一、')
+    const nested = run(stateOf(markdown(styled), { cursorAfter: '子' }), setListNumbering('（一）'))
+    expect(markdown(nested)).toBe('<!-- writer:list 一、 -->\n1. 甲\n   <!-- writer:list （一） -->\n   1. 子\n2. 乙\n')
+    expect(markdown(run(nested, undo))).toBe(markdown(styled))
+  })
+
+  test('在无序列表、任务列表中或不在列表中：变成这种样式的有序列表', () => {
+    expect(markdown(run(stateOf('- 甲\n- 乙\n', { cursorAfter: '甲' }), setListNumbering('a.')))).toBe('<!-- writer:list a. -->\n1. 甲\n2. 乙\n')
+    expect(markdown(run(stateOf('- [ ] 甲\n', { cursorAfter: '甲' }), setListNumbering('①')))).toBe('<!-- writer:list ① -->\n1. 甲\n')
+    expect(markdown(run(stateOf('段落\n', { cursorAfter: '段落' }), setListNumbering('I.')))).toBe('<!-- writer:list I. -->\n1. 段落\n')
+    expect(listNumberingAt(stateOf('- 甲\n', { cursorAfter: '甲' }))).toBe(null)
+    expect(listNumberingAt(stateOf('1. [ ] 甲\n', { cursorAfter: '甲' }))).toBe(null)
+  })
+
+  test('换成无序列表再换回有序列表时是默认样式（无序列表没有编号样式）', () => {
+    const styled = stateOf('<!-- writer:list （1） -->\n1. 甲\n', { cursorAfter: '甲' })
+    const bullets = run(styled, toggleBulletList)
+    expect(markdown(bullets)).toBe('- 甲\n')
+    expect(markdown(run(bullets, toggleOrderedList))).toBe('1. 甲\n')
   })
 })

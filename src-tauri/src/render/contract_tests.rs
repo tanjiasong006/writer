@@ -144,12 +144,19 @@ fn block(block: &Block) -> Value {
             structure
         }
         Block::Rule => json!({ "type": "rule" }),
-        Block::List { ordered, start, items } => json!({
-            "type": "list",
-            "ordered": ordered,
-            "start": start,
-            "items": items.iter().map(|item| list_item(item)).collect::<Vec<_>>(),
-        }),
+        Block::List { ordered, start, numbering, items } => {
+            let mut list = json!({
+                "type": "list",
+                "ordered": ordered,
+                "start": start,
+                "items": items.iter().map(|item| list_item(item)).collect::<Vec<_>>(),
+            });
+            // 编号样式只在不是默认的 `1.` 时列出。
+            if !numbering.is_default() {
+                list["numbering"] = json!(numbering.pattern());
+            }
+            list
+        }
         Block::Table { alignments, header, rows, spans, caption, note } => {
             let mut table = json!({
             "type": "table",

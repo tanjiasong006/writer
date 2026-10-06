@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { TextSelection } from 'prosemirror-state'
 import type { MenuEntry } from '../../application/desktop_shell.ts'
-import { commandState } from './commands.ts'
+import { commandState, listNumberingAt } from './commands.ts'
 import { createEditorState } from './plugins.ts'
 import { parseMarkdown } from './markdown.ts'
 import { editorContextMenu } from './editor_menu.ts'
@@ -23,7 +23,7 @@ test('正文中：剪切 / 拷贝 / 粘贴、文字格式、段落结构（当�
     '列表', '引用', '代码块', '-',
     '插入表格', '插入图片…', '插入章节引用…', '插入脚注…', '插入文献引用…', '插入行内公式…', '插入行内化学式…',
   ])
-  expect(labels(submenuOf(entries, '列表'))).toEqual(['无序列表', '有序列表', '任务列表'])
+  expect(labels(submenuOf(entries, '列表'))).toEqual(['无序列表', '有序列表', '任务列表', '-', '编号样式'])
   const bullet = submenuOf(entries, '列表').find((entry) => 'label' in entry && entry.label === '无序列表')
   expect(bullet && 'checked' in bullet && bullet.checked).toBe(true)
 })
@@ -101,4 +101,21 @@ test('选中的章节引用：前往、显示格式（当前格式打勾）、�
   const broken = editorContextMenu(state, null, null, { name: null, show: null })
   expect(broken[0]).toMatchObject({ label: '前往（引用已失效）', disabled: true })
   expect(submenuOf(broken, '显示格式').every((entry) => 'disabled' in entry && entry.disabled)).toBe(true)
+})
+
+test('编号样式子菜单：以前三个编号示意，光标所在有序列表的样式打勾', () => {
+  const state = stateAt('<!-- writer:list （一） -->\n1. 甲\n', 3)
+  const entries = editorContextMenu(commandState(state), null, null, null, false, null, false, false, listNumberingAt(state))
+  const styles = submenuOf(submenuOf(entries, '列表'), '编号样式')
+  expect(labels(styles)).toEqual([
+    '1. 2. 3.', '1) 2) 3)', '(1) (2) (3)', '（1） （2） （3）', '一、 二、 三、', '（一） （二） （三）',
+    '① ② ③', 'I. II. III.', 'i. ii. iii.', 'A. B. C.', 'a. b. c.',
+  ])
+  const checked = styles.filter((entry) => 'checked' in entry && entry.checked)
+  expect(checked.map((entry) => 'id' in entry && entry.id)).toEqual(['list-numbering:（一）'])
+  // 不在有序列表中：都不打勾，仍可选择（同时变成有序列表）。
+  const plain = stateAt('段落\n', 1)
+  const none = submenuOf(submenuOf(editorContextMenu(commandState(plain), null), '列表'), '编号样式')
+  expect(none.some((entry) => 'checked' in entry && entry.checked)).toBe(false)
+  expect(none.every((entry) => 'disabled' in entry && !entry.disabled)).toBe(true)
 })

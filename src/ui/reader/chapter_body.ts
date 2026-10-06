@@ -8,6 +8,7 @@ import { staticChapterRefDOM, type ChapterRefLabel } from '../editor/chapter_ref
 import { footnoteListDOM, footnotesOf } from '../editor/footnote_view.ts'
 import { staticMathDOM } from '../editor/math_view.ts'
 import { staticStructureDOM } from '../editor/structure_view.ts'
+import { applyListMarkers } from '../editor/list_markers.ts'
 
 /**
  * 章节正文 → 只读展示的 DOM：与编辑器使用同一个 Markdown 解析与 schema，
@@ -69,6 +70,7 @@ export function renderChapterBody(
     base.marks,
   )
   const fragment = serializer.serializeFragment(doc.content) as DocumentFragment
+  applyListMarkers(fragment)
   // 脚注：正文中按顺序编号，章节末尾列出内容（与编辑器相同）。列表不是正文的块，不参与按块对齐的阅读位置。
   const notes = footnotesOf(doc)
   if (notes.length > 0) {

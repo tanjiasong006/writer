@@ -41,6 +41,56 @@ export const ListInsertion: Story = {
   },
 }
 
+/**
+ * 编号样式（docs/decisions.md 第 24 节）：右键“列表 → 编号样式”或 ⌘8 / Ctrl+8 中选择；
+ * 段首输入 `一、`、`（一）`、`(1) `、`i. ` 等直接生成对应样式。编号较宽的样式缩进加宽，编号右对齐。
+ */
+export const ListNumbering: Story = {
+  args: {
+    chapterId: 'list-numbering',
+    number: '3',
+    title: '编号样式',
+    content: [
+      '<!-- writer:list 一、 -->',
+      '1. 总则',
+      '2. 适用范围',
+      '   <!-- writer:list （一） -->',
+      '   1. 本办法适用于全部项目',
+      '   2. 跨年度项目另行规定',
+      '      <!-- writer:list 1. -->',
+      '      1. 预算按年度分列',
+      '      2. 结余结转下年',
+      '         <!-- writer:list （1） -->',
+      '         1. 结转不超过两次',
+      '3. 附则',
+      '',
+      '段落之间。',
+      '',
+      '<!-- writer:list (1) -->',
+      '9. 第九项',
+      '10. 第十项',
+      '11. [ ] 任务项没有编号',
+      '',
+      '分隔。',
+      '',
+      '<!-- writer:list ① -->',
+      '1. 圈码',
+      '2. 第二项',
+      '',
+      '分隔。',
+      '',
+      '<!-- writer:list I. -->',
+      '1. Introduction',
+      '2. Methods',
+      '   <!-- writer:list a. -->',
+      '   1. Sampling',
+      '   2. Analysis',
+      '3. Results',
+      '',
+    ].join('\n'),
+  },
+}
+
 /** 常见结构：强调、列表（含嵌套与任务列表）、引用、表格、代码、分隔线（正文不支持标题）。 */
 export const Markdown: Story = {
   args: {

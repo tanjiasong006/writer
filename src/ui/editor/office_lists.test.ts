@@ -39,6 +39,26 @@ test('WPS / Mac Word 的注释形式与中文编号', () => {
   const item = (marker: string, text: string) =>
     `<p style="mso-list:l1 level1 lfo2"><!--[if !supportLists]--><span style="mso-list: Ignore">${marker}</span><!--[endif]-->${text}</p>`
   const body = new DOMParser().parseFromString(officeListsToHtml(item('一、', '第一') + item('二、', '第二')), 'text/html').body
-  expect(body.innerHTML).not.toContain('一、')
+  expect(body.textContent).not.toContain('一、')
   expect(Array.from(body.querySelectorAll('ol > li')).map((li) => li.textContent)).toEqual(['第一', '第二'])
+})
+
+test('编号样式与起始编号按每个列表的第一项保留', () => {
+  const html = (items: string[]) =>
+    officeListsToHtml(items.map((marker, i) => wordItem(1, marker, `项${i}`, i)).join(''))
+  const list = (marker: string) => {
+    const ol = new DOMParser().parseFromString(html([marker]), 'text/html').body.querySelector('ol')!
+    return [ol.getAttribute('data-numbering'), ol.getAttribute('start')]
+  }
+  expect(list('1.')).toEqual([null, null])
+  expect(list('3)')).toEqual(['1)', '3'])
+  expect(list('(2)')).toEqual(['(1)', '2'])
+  expect(list('（1）')).toEqual(['（1）', null])
+  expect(list('十二、')).toEqual(['一、', '12'])
+  expect(list('（三）')).toEqual(['（一）', '3'])
+  expect(list('②')).toEqual(['①', '2'])
+  expect(list('i.')).toEqual(['i.', null])
+  expect(list('IV.')).toEqual(['I.', '4'])
+  expect(list('c)')).toEqual(['a.', '3'])
+  expect(list('B.')).toEqual(['A.', '2'])
 })

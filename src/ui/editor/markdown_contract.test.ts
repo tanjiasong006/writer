@@ -7,6 +7,7 @@ import { parseChapter, serializeChapter, tableHeaderRows } from './markdown.ts'
 import { TableMap } from 'prosemirror-tables'
 import { nodes } from './schema.ts'
 import { parseChapterRefAddress } from '../../domain/chapter_reference/chapter_reference.ts'
+import { DEFAULT_LIST_NUMBERING } from '../../domain/list_numbering/list_numbering.ts'
 
 /**
  * 编辑器 ⇄ Rust 导出的内容契约（docs/decisions.md 第 8 节"编辑与输出的内容契约验证"）。
@@ -46,7 +47,7 @@ type SemBlock =
   | { type: 'quote'; blocks: SemBlock[] }
   | { type: 'code'; language: string | null; text: string }
   | { type: 'rule' }
-  | { type: 'list'; ordered: boolean; start: number; items: SemItem[] }
+  | { type: 'list'; ordered: boolean; start: number; numbering?: string; items: SemItem[] }
   | {
       type: 'table'
       align: string[]
@@ -141,7 +142,9 @@ function block(node: Node): SemBlock {
       const items: SemItem[] = []
       node.forEach((item) => items.push({ task: item.attrs.checked as boolean | null, blocks: blocks(item) }))
       const ordered = node.type === nodes.ordered_list
-      return { type: 'list', ordered, start: ordered ? (node.attrs.order as number) : 1, items }
+      const list: SemBlock = { type: 'list', ordered, start: ordered ? (node.attrs.order as number) : 1, items }
+      // 编号样式只在不是默认的 `1.` 时列出。
+      return ordered && node.attrs.numbering !== DEFAULT_LIST_NUMBERING ? { ...list, numbering: node.attrs.numbering as string } : list
     }
     case nodes.table: {
       // 完整的网格：被合并的位置是空单元格，合并区域另列（row 从表头起算）；列对齐取这一列中第一个从这一列开始的单元格。

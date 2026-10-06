@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::images::load_for_export;
+use super::list_numbering::marker as list_marker;
 use super::{math, ExportReport};
 use crate::render::chapter_reference::{broken_references, ref_text, ChapterTargets, RefShow};
 use crate::render::citations::Citations;
@@ -184,11 +185,25 @@ impl<'a, S: ImageSink, L: Locator> HtmlWriter<'a, S, L> {
         }
         match block {
             Block::Paragraph(inlines) => format!("<p>{}</p>\n", self.inlines(inlines)),
-            Block::List { ordered, start, items } => {
+            Block::List { ordered, start, numbering, items } => {
                 let tag = if *ordered { "ol" } else { "ul" };
-                let start = if *ordered && *start != 1 { format!(" start=\"{start}\"") } else { String::new() };
-                let items: String = items.iter().map(|item| format!("<li>{}</li>\n", self.blocks(item))).collect();
-                format!("<{tag}{start}>\n{items}</{tag}>\n")
+                // 编号样式（docs/decisions.md 第 24 节）：各项的编号文字写在 data-marker 中，由样式表显示。
+                let styled = *ordered && !numbering.is_default();
+                let class = if styled { " class=\"numbered\"" } else { "" };
+                let start_attr = if *ordered && *start != 1 { format!(" start=\"{start}\"") } else { String::new() };
+                let items: String = items
+                    .iter()
+                    .enumerate()
+                    .map(|(i, item)| {
+                        let marker = if styled {
+                            format!(" data-marker=\"{}\"", escape(&list_marker(*numbering, start + i as u64)))
+                        } else {
+                            String::new()
+                        };
+                        format!("<li{marker}>{}</li>\n", self.blocks(item))
+                    })
+                    .collect();
+                format!("<{tag}{class}{start_attr}>\n{items}</{tag}>\n")
             }
             Block::Quote(children) => format!("<blockquote>\n{}</blockquote>\n", self.blocks(children)),
             Block::Code { language, text } => {
@@ -391,6 +406,9 @@ a { color: #2f4b74; }
 .footnotes { font-size: 0.9em; color: #55555a; margin-top: 2em; }
 .footnotes hr { width: 30%; margin: 1em 0; }
 .footnote-ref a, .citation a { text-decoration: none; }
+ol.numbered { list-style: none; }
+ol.numbered > li { position: relative; }
+ol.numbered > li::before { content: attr(data-marker); position: absolute; right: 100%; margin-right: 0.4em; white-space: nowrap; }
 .bibliography { list-style: none; padding-left: 0; }
 .bibliography li { padding-left: 2.5em; text-indent: -2.5em; margin: 0.3em 0; }
 @media (prefers-color-scheme: dark) {
@@ -544,6 +562,21 @@ mod tests {
         assert!(html.contains("<li id=\"cite-1\"><span class=\"cite-number\">[1]</span> 甲. 书[M]. 2020.</li>"));
         assert!(html.contains("<span class=\"math\"><svg"), "formula rendered as svg");
         assert_eq!(report.missing_images, vec!["../assets/none.png"]);
+    }
+
+    /// 编号样式（docs/decisions.md 第 24 节）：编号文字写在 data-marker 中，与 PDF 的编号相同。
+    #[test]
+    fn numbered_lists_carry_their_markers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let request = RenderRequest {
+            chapters: vec![chapter("a", vec![1], "列表", "<!-- writer:list （一） -->\n10. 甲\n11. 乙\n\n段落\n\n1. 默认")],
+            ..Default::default()
+        };
+        let (bytes, _) = export(&build(&request), dir.path());
+        let html = String::from_utf8(bytes).unwrap();
+        assert!(html.contains("<ol class=\"numbered\" start=\"10\">\n<li data-marker=\"（十）\">"), "{html}");
+        assert!(html.contains("<li data-marker=\"（十一）\">"), "{html}");
+        assert!(html.contains("<ol>\n<li><p>默认</p>"), "{html}");
     }
 
     /// 合并单元格（docs/decisions.md 第 23 节）：被合并的位置不输出，区域左上角带 colspan / rowspan。

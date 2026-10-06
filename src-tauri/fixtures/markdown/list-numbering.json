@@ -1,0 +1,236 @@
+{
+  "blocks": [
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 1,
+      "numbering": "一、",
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "text": "总则"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "text": "分则"
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "ordered": true,
+              "start": 1,
+              "numbering": "（一）",
+              "items": [
+                {
+                  "task": null,
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "inlines": [
+                        {
+                          "text": "适用范围"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "task": null,
+                  "blocks": [
+                    {
+                      "type": "paragraph",
+                      "inlines": [
+                        {
+                          "text": "术语"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 3,
+      "numbering": "(1)",
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "text": "从三开始"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "text": "第四项"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 1,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "text": "默认样式"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "text": "<!-- writer:list x -->"
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 1,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "text": "不认识的样式是文字"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "text": "<!-- writer:list i. -->"
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": false,
+      "start": 1,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "text": "无序列表之前的注释是文字"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "inlines": [
+        {
+          "text": "<!-- writer:list (1) -->"
+        }
+      ]
+    },
+    {
+      "type": "list",
+      "ordered": true,
+      "start": 1,
+      "items": [
+        {
+          "task": null,
+          "blocks": [
+            {
+              "type": "paragraph",
+              "inlines": [
+                {
+                  "text": "空行隔开时注释是文字"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "quote",
+      "blocks": [
+        {
+          "type": "list",
+          "ordered": true,
+          "start": 1,
+          "numbering": "a.",
+          "items": [
+            {
+              "task": null,
+              "blocks": [
+                {
+                  "type": "paragraph",
+                  "inlines": [
+                    {
+                      "text": "引用中的列表"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
