@@ -52,7 +52,7 @@ const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete', 'note', 'status-none', 'status-draft', 'status-revise', 'status-done'] as const
 const INSERT_ACTIONS = ['update-chapter-refs', 'references'] as const
 const VIEW_ACTIONS = ['sidebar', 'switch-focus', 'reader', 'back', 'forward', 'focus-mode'] as const
-const APP_ACTIONS = ['check-update'] as const
+const APP_ACTIONS = ['check-update', 'show-logs'] as const
 const MOVE_DIRECTIONS = ['up', 'down', 'outdent', 'indent'] as const satisfies readonly KeyboardMoveDirection[]
 const APPEARANCES = ['system', 'light', 'dark'] as const satisfies readonly Appearance[]
 
@@ -195,8 +195,14 @@ function appearanceMenu(current: Appearance): WorkspaceMenuEntry {
   }
 }
 
-/** 帮助：检查更新（macOS 上系统把“帮助”菜单放在最后）。欢迎页与工作区相同。 */
-const HELP_MENU: WorkspaceMenu = { label: '帮助', items: [{ id: 'app:check-update', label: '检查更新…' }] }
+/** 帮助：检查更新、显示日志文件夹（排查问题时请用户发回日志）。macOS 上系统把“帮助”菜单放在最后。欢迎页与工作区相同。 */
+const HELP_MENU: WorkspaceMenu = {
+  label: '帮助',
+  items: [
+    { id: 'app:check-update', label: '检查更新…' },
+    { id: 'app:show-logs', label: '显示日志文件夹' },
+  ],
+}
 
 /** 文件 → 打开最近：最近的项目（文件夹名）与“清除菜单”；没有记录时不可用。 */
 function recentMenu(recent: readonly string[]): WorkspaceMenuEntry {

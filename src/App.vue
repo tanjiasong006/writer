@@ -91,7 +91,10 @@ function runWelcomeMenuItem(id: string): void {
   if (view.value.kind === 'open') return
   const command = parseMenuItemId(id)
   if (command?.group === 'appearance') appearance.set(command.appearance)
-  if (command?.group === 'app') void updates.check()
+  if (command?.group === 'app') {
+    if (command.action === 'show-logs') void shell.revealLogFolder?.()
+    else void updates.check()
+  }
   if (busy.value) return
   if (command?.group === 'recent') void openRecent(command.index)
   else if (command?.group === 'template') void newProject(command.template)

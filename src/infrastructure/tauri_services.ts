@@ -163,6 +163,14 @@ function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): D
     async restartApp() {
       await invoke('app_restart')
     },
+
+    async revealLogFolder() {
+      try {
+        await invoke('reveal_log_folder')
+      } catch (error) {
+        console.error('[revealLogFolder] failed', error)
+      }
+    },
   }
 }
 

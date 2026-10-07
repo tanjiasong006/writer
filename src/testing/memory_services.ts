@@ -146,6 +146,12 @@ export class MemoryShell implements DesktopShell {
   async restartApp() {
     this.restarts += 1
   }
+
+  logFolderReveals = 0
+
+  async revealLogFolder() {
+    this.logFolderReveals += 1
+  }
 }
 
 export function createMemoryServices(): AppServices & {

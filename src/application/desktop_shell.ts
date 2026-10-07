@@ -109,6 +109,8 @@ export interface DesktopShell {
   installUpdate?(): Promise<void>
   /** 重新启动应用（安装更新后）。调用前必须已保存并释放当前项目。 */
   restartApp?(): Promise<void>
+  /** 在系统文件管理器中打开应用的日志文件夹（帮助 → 显示日志文件夹）。不提供时（如 Storybook）什么都不做。 */
+  revealLogFolder?(): Promise<void>
 }
 
 export interface AppServices {

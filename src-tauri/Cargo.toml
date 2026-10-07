@@ -41,6 +41,8 @@ fxhash = "0.2"
 # 化学结构式的图片随导出请求以 base64 传入（render::RenderStructure）。
 base64 = "0.22"
 typst-render = "0.15"
+tauri-plugin-log = "2"
+log = "0.4"
 
 # 开发版也优化图片解码与排版的热点依赖，避免图文 PDF 导出被无优化构建拖慢。
 # Writer 自身保留默认开发配置与调试断言；这些设置不改变 release 配置。

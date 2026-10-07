@@ -1067,6 +1067,15 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 验证：Domain（版式只含非默认的合法项、按完整配置匹配）、分段控件无选中项、排版设置（整体替换、选中状态随修改变化、提交内容）测试；
   Story `PdfLayoutDialog/AcademicPreset`、`SegmentedControl/NoSelection`（Storybook 中目视检查了选择版式、改动后取消选中与样张更新）。
 
+#### P2-12 错误日志（完成，2026-10-07）
+
+- 规则见 decisions 第 25 节。Rust：`tauri-plugin-log`（`app_log.rs`：日志目录与 stdout、大小与轮换、启动信息、panic 钩子、
+  `reveal_log_folder`）；前端：`infrastructure/tauri_log.ts`（`installErrorLog` 转发 console.error / warn 与未处理的异常，
+  `main.ts` 中最先接上）；菜单“帮助 → 显示日志文件夹”（`app:show-logs`，`DesktopShell.revealLogFolder`）。
+  `structureImage` 失败时记录失败的步骤与错误（排查 Windows 上结构式导出为红色原文）。
+- 验证：日志行格式（字符串、JSON、Error / DOMException 与调用栈、无法序列化的值）、欢迎页与工作区的菜单测试；
+  开发版启动后日志文件中有启动信息。未在 Windows 正式包中检查。
+
 ### 发布准备（非功能）
 
 1. 手动验收清单在正式包中全部走一遍（需要真实桌面环境与 Word / WPS，known-risks #5）。

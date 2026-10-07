@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 mod app_env;
+mod app_log;
 mod commands;
 mod export;
 mod io_kind;
@@ -14,10 +15,12 @@ pub fn run() {
     // 开发构建是独立的应用 "Writer Dev"：不与正式版共享任何应用级数据（见 app_env）。
     app_env::apply(&mut context);
     tauri::Builder::default()
+        .plugin(app_log::plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::PendingUpdate::default())
         .setup(|app| {
+            app_log::start(app);
             // 扫描系统字体需要数秒：启动后在后台预热，首次导出 PDF 不必等待。
             let resource_dir = app.path().resource_dir().ok();
             std::thread::spawn(move || {
@@ -48,6 +51,7 @@ pub fn run() {
             commands::export_pdf,
             commands::preview_pdf,
             commands::reveal_in_file_manager,
+            app_log::reveal_log_folder,
             updater::update_check,
             updater::update_install,
             updater::app_restart,

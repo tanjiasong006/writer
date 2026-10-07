@@ -622,3 +622,12 @@
   - HTML / EPUB：编号文字写在列表项的 `data-marker` 中，由样式表显示（没有样式表时显示为数字编号）。
   - 合并的 Markdown：保留样式注释。
 - 从 Word / WPS 粘贴时保留编号样式（第 20 节）；从网页粘贴时 `<ol type>` 与 `list-style-type` 中的字母、罗马数字也保留。
+
+## 25. 错误日志（2026-10-07 产品负责人确认）
+
+- 目的：在用户的电脑上（包括没有开发者工具的正式版）定位问题。用户从“帮助 → 显示日志文件夹”打开日志所在的文件夹，
+  把日志文件发给开发者。不自动上传，不接入崩溃上报服务。
+- 位置：应用的日志目录（macOS `~/Library/Logs/<identifier>`，Windows `%LOCALAPPDATA%\<identifier>\logs`），
+  开发版与正式版按 identifier 分开。单个文件 1 MB，保留最近 3 个；时间用本地时间。
+- 内容：启动时的版本、系统与 WebView 版本；Rust 的 `log` 记录与 panic；前端的 `console.error` / `console.warn`、
+  未捕获的异常与未处理的 Promise 拒绝。只记录错误与排查所需的上下文，不记录正文；结构式导出失败时记录该结构式的 SMILES。

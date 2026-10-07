@@ -818,7 +818,8 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       emit('set-appearance', command.appearance)
       return
     case 'app':
-      emit('check-update')
+      if (command.action === 'show-logs') void shell.revealLogFolder?.()
+      else emit('check-update')
       return
     case 'recent':
       emit('open-recent', command.index)
