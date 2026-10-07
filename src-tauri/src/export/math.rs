@@ -83,6 +83,7 @@ pub fn render_png(tex: &str, display: bool, size_pt: f64, fonts: &'static FontSt
     let source = format!(
         "{SCOPE_IMPORT}#set page(width: auto, height: auto, margin: (x: 0.5pt, y: 1pt), fill: none)\n\
          #set text(size: {size_pt}pt)\n\
+         #set par(leading: 0pt)\n\
          #math.equation(block: {display}, {})\n",
         eval_expression(&typst)
     );
@@ -111,6 +112,7 @@ pub fn render_svg(tex: &str, display: bool, size_pt: f64, fonts: &'static FontSt
     let source = format!(
         "{SCOPE_IMPORT}#set page(width: auto, height: auto, margin: (x: 0.5pt, y: 1pt), fill: none)\n\
          #set text(size: {size_pt}pt)\n\
+         #set par(leading: 0pt)\n\
          #math.equation(block: {display}, {})\n",
         eval_expression(&typst)
     );
@@ -165,5 +167,17 @@ mod tests {
         assert_eq!(to_typst(r"\frac{a}{b}").as_deref(), Some("frac(a ,b )"));
         assert!(to_typst(r"\unknowncommand{x}").is_none());
         assert!(to_typst("  ").is_none());
+    }
+
+    #[test]
+    fn inline_images_include_subscripts_below_the_line() {
+        // 行内公式超出行高的部分（如下标）在段落中可以伸进行距，单独的图片中不能被裁掉。
+        let fonts = crate::export::pdf::font_store(None);
+        let plain = render_png(r"\mathrm{H}", false, 12.0, fonts).unwrap();
+        let subscript = render_png(r"\mathrm{H}_{2}", false, 12.0, fonts).unwrap();
+        assert!(subscript.height_pt > plain.height_pt, "{} <= {}", subscript.height_pt, plain.height_pt);
+        let (_, _, plain) = render_svg(r"\mathrm{H}", false, 12.0, fonts).unwrap();
+        let (_, _, subscript) = render_svg(r"\mathrm{H}_{2}", false, 12.0, fonts).unwrap();
+        assert!(subscript > plain, "{subscript} <= {plain}");
     }
 }
