@@ -54,3 +54,11 @@ export const NewChem: Story = { args: { label: '行内化学式', chem: true } }
 export const EditingChem: Story = {
   args: { label: '化学式块', display: true, chem: true, tex: '\\ce{N2 + 3H2 <=>[催化剂][高温高压] 2NH3}' },
 }
+
+/** 化学式的周期表：点击元素插入元素符号，指向时在表上方显示序数与名称。 */
+export const ChemElements: Story = {
+  args: { label: '化学式块', display: true, chem: true, tex: '\\ce{2Na + 2H2O -> 2NaOH + H2 ^}' },
+  play: ({ canvasElement }) => {
+    canvasElement.ownerDocument.querySelector<HTMLElement>('.math-popover__tool--text')?.click()
+  },
+}

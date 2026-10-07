@@ -169,4 +169,23 @@ describe('化学式（docs/decisions.md 第 22 节）', () => {
     key(input(wrapper), { key: 'Enter' })
     expect(wrapper.emitted('commit')).toEqual([['\\ce{2H2 + O2 ->[\\Delta] 2H2O ^}']])
   })
+
+  test('周期表默认收起；点击元素在光标处插入元素符号（替换选中的文字），指向时显示名称', async () => {
+    const wrapper = await openChem('')
+    expect(wrapper.find('.math-popover__elements').exists()).toBe(false)
+    await wrapper.find('.math-popover__tool--text').trigger('click')
+    expect(wrapper.findAll('.math-popover__element')).toHaveLength(118)
+
+    await wrapper.find('.math-popover__input').setValue('2H2 + X2')
+    input(wrapper).setSelectionRange(6, 7)
+    const oxygen = wrapper.find('.math-popover__element[aria-label="氧 O"]')
+    await oxygen.trigger('mouseenter')
+    expect(wrapper.find('.math-popover__element-info').text()).toMatch(/^8\s*O\s*氧$/)
+    await oxygen.trigger('click')
+    await flushPromises()
+    expect(input(wrapper).value).toBe('2H2 + O2')
+    expect(input(wrapper).selectionStart).toBe(7)
+    key(input(wrapper), { key: 'Enter' })
+    expect(wrapper.emitted('commit')).toEqual([['\\ce{2H2 + O2}']])
+  })
 })

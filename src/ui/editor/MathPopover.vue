@@ -9,6 +9,7 @@ import katex from 'katex'
 import { MathfieldElement } from 'mathlive'
 import { renderMath } from './math_view.ts'
 import { chemContent, chemTex } from './chem.ts'
+import { ELEMENTS, type Element } from './periodic_table.ts'
 
 /**
  * 编辑公式（docs/decisions.md 第 14 节）：在公式（或插入处）下方弹出。
@@ -17,7 +18,7 @@ import { chemContent, chemTex } from './chem.ts'
  *   方向键在各部分之间移动。
  * - “LaTeX”切换到源码：文本框加实时预览；⇧Enter 换行（公式块可以多行）。
  * - 化学式（chem，docs/decisions.md 第 22 节）：直接写 \ce{…} 的内容（如 2H2 + O2 -> 2H2O），上方是箭头、气体、沉淀等常用写法，
- *   下方是实时预览；没有可视编辑与 LaTeX 切换。
+ *   下方是实时预览；没有可视编辑与 LaTeX 切换。“周期表”展开元素周期表，点击元素在光标处插入元素符号。
  * - Enter 或“完成”按钮完成，Esc 或“取消”按钮放弃；点击浮层以外也完成。没有修改时完成得到原文（可视编辑器不改写未编辑的写法）。
  * - 只发出 commit / cancel，正文由编辑器修改。
  */
@@ -44,6 +45,9 @@ const chemText = ref(initialChem)
 const chemInput = ref<HTMLTextAreaElement | null>(null)
 const source = ref(preferSource)
 const showSymbols = ref(false)
+const showElements = ref(false)
+/** 周期表中指向的元素，在表上方的空白处显示序数与名称。 */
+const pointedElement = ref<Element | null>(null)
 const panel = ref<HTMLElement | null>(null)
 const fieldHost = ref<HTMLElement | null>(null)
 const input = ref<HTMLTextAreaElement | null>(null)
@@ -138,7 +142,7 @@ function commit(): void {
 }
 
 /** 在化学式的光标处插入常用写法；两侧的空格不与已有的空白重复。 */
-async function insertChem(item: ChemTemplate): Promise<void> {
+async function insertChem(item: Pick<ChemTemplate, 'before' | 'select' | 'after'>): Promise<void> {
   const input = chemInput.value
   if (!input) return
   const text = chemText.value
@@ -158,6 +162,13 @@ async function insertChem(item: ChemTemplate): Promise<void> {
   const from = start + before.length
   if (item.select !== undefined && selected === '') input.setSelectionRange(from, from + middle.length)
   else input.setSelectionRange(from + middle.length + after.length, from + middle.length + after.length)
+}
+
+async function toggleElements(): Promise<void> {
+  showElements.value = !showElements.value
+  pointedElement.value = null
+  await nextTick()
+  place()
 }
 
 function onSourceKeydown(event: KeyboardEvent): void {
@@ -290,6 +301,45 @@ onBeforeUnmount(() => {
           @click="insertChem(item)"
           v-html="chemIcons[index]"
         ></button>
+        <button
+          type="button"
+          class="math-popover__tool math-popover__tool--text"
+          :aria-pressed="showElements"
+          tabindex="-1"
+          @mousedown.prevent
+          @click="toggleElements"
+        >
+          周期表
+        </button>
+      </div>
+      <div
+        v-if="showElements"
+        class="math-popover__elements"
+        role="toolbar"
+        aria-label="插入元素符号"
+        @mouseleave="pointedElement = null"
+      >
+        <div class="math-popover__element-info" aria-hidden="true">
+          <template v-if="pointedElement">
+            <span class="math-popover__element-number">{{ pointedElement.number }}</span>
+            <span class="math-popover__element-symbol">{{ pointedElement.symbol }}</span>
+            {{ pointedElement.name }}
+          </template>
+        </div>
+        <button
+          v-for="element in ELEMENTS"
+          :key="element.symbol"
+          type="button"
+          class="math-popover__element"
+          :style="{ gridRow: element.row, gridColumn: element.column }"
+          :aria-label="`${element.name} ${element.symbol}`"
+          tabindex="-1"
+          @mousedown.prevent
+          @mouseenter="pointedElement = element"
+          @click="insertChem({ before: element.symbol })"
+        >
+          {{ element.symbol }}
+        </button>
       </div>
       <div class="math-popover__field math-popover__field--chem" :data-value="chemText">
         <textarea
@@ -522,6 +572,68 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+/*
+ * 元素周期表：18 族 × 7 周期，镧系与锕系隔开一行排在下方；与常用写法同样安静的文字按钮，不按元素分区着色。
+ * 表上方第 4–11 族的空白处显示指向的元素。
+ */
+.math-popover__elements {
+  display: grid;
+  grid-template-columns: repeat(18, 1fr);
+  grid-template-rows: repeat(7, var(--control-h-s)) var(--space-3) repeat(2, var(--control-h-s));
+  gap: 1px;
+  margin: var(--space-2) calc(-1 * var(--space-2)) 0;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-separator);
+}
+
+.math-popover__element {
+  min-width: 0;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: 1;
+  cursor: default;
+}
+
+.math-popover__element:hover {
+  background: var(--color-fill-hover);
+  color: var(--color-text);
+}
+
+.math-popover__element:active {
+  background: var(--color-fill-pressed);
+}
+
+.math-popover__element-info {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--space-3);
+  grid-row: 1 / 3;
+  grid-column: 4 / 12;
+  align-self: center;
+  color: var(--color-text-secondary);
+  font-size: var(--text-s);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.math-popover__element-number {
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.math-popover__element-symbol {
+  color: var(--color-text);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-medium);
+}
+
 /* 化学式的输入框在常用写法之下。 */
 .math-popover__field--chem {
   margin-top: var(--space-2);
@@ -657,7 +769,8 @@ onBeforeUnmount(() => {
 
 .math-popover__mode:focus-visible,
 .math-popover__action:focus-visible,
-.math-popover__tool:focus-visible {
+.math-popover__tool:focus-visible,
+.math-popover__element:focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 1px;
 }
