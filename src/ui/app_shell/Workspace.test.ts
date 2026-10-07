@@ -436,6 +436,8 @@ test('菜单栏：移动章节只在章节树获得焦点时可用，与快捷�
   const wrapper = await mountApp(services)
   await flushPromises()
   await wrapper.findAll('.chapter-tree__row')[2].trigger('click') // 方法
+  ;(document.activeElement as HTMLElement).blur()
+  await flushPromises()
   expect(appMenuItem(services, 'chapter:move-up').disabled).toBe(true)
   ;(wrapper.findAll('.chapter-tree__label')[2].element as HTMLElement).focus()
   await flushPromises()

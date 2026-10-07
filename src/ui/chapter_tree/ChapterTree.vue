@@ -355,6 +355,25 @@ async function focusRow(chapterId: ChapterId): Promise<void> {
   label?.focus()
 }
 
+/**
+ * 鼠标点在章节树的任何位置（行内空白、编号、箭头、行间、树下方空白）都让树获得焦点，而不只是点标题：
+ * 焦点落在被点的行，点在行外时落在可 Tab 聚焦的行。重命名输入框与"更多操作"自己管理焦点。
+ * 鼠标激活不显示键盘焦点描边。
+ */
+function focusFromPointer(event: MouseEvent): void {
+  const target = event.target as HTMLElement
+  if (target.closest('.chapter-tree__edit, .chapter-tree__more')) return
+  const rowLabel = target.closest('.chapter-tree__row')?.querySelector<HTMLElement>('.chapter-tree__label')
+  const id = rowLabel?.dataset.chapterId ?? tabbableId.value
+  if (id === null || id === undefined) return
+  focusedId.value = id
+  void nextTick(() => {
+    listElement.value
+      ?.querySelector<HTMLElement>(`.chapter-tree__label[data-chapter-id="${CSS.escape(id)}"]`)
+      ?.focus({ preventScroll: true, focusVisible: false } as FocusOptions)
+  })
+}
+
 function selectAndFocus(chapterId: ChapterId): void {
   if (chapterId !== props.selectedId) emit('select', chapterId)
   void focusRow(chapterId)
@@ -534,7 +553,7 @@ defineExpose({
       </button>
     </div>
 
-    <div ref="scrollElement" class="chapter-tree__scroll">
+    <div ref="scrollElement" class="chapter-tree__scroll" @click.capture="focusFromPointer">
       <ul
         ref="listElement"
         class="chapter-tree__list"

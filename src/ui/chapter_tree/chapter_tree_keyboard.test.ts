@@ -352,3 +352,28 @@ test('h / j / k / l 等同 ← / ↓ / ↑ / →；带修饰键时不移动', as
   await press(wrapper, 'a', 'j', { shiftKey: true })
   expect(selected(wrapper)).toBe('a')
 })
+
+test('点击行内空白、箭头或树下方空白也让章节树获得焦点，而不只是点标题', async () => {
+  const wrapper = mountManager('a')
+  const row = (id: ChapterId) => (label(wrapper, id).element as HTMLElement).closest('.chapter-tree__row') as HTMLElement
+
+  // 行内空白：选中并聚焦该行。
+  row('b').click()
+  await flushPromises()
+  expect(selected(wrapper)).toBe('b')
+  expect(focusedId()).toBe('b')
+
+  // 箭头：只折叠，不改变当前章节；焦点落在该行。
+  ;(document.activeElement as HTMLElement).blur()
+  ;(row('a').querySelector('.chapter-tree__toggle') as HTMLElement).click()
+  await flushPromises()
+  expect(selected(wrapper)).toBe('b')
+  expect(focusedId()).toBe('a')
+
+  // 树下方空白：焦点落在可 Tab 聚焦的行。
+  ;(document.activeElement as HTMLElement).blur()
+  ;(wrapper.find('.chapter-tree__tail').element as HTMLElement).click()
+  await flushPromises()
+  expect(focusedId()).toBe('a')
+  expect(selected(wrapper)).toBe('b')
+})
