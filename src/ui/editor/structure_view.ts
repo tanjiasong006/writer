@@ -308,22 +308,28 @@ export async function structureImage(source: StructureSource): Promise<Structure
   drawing.svg.setAttribute('height', String(pixelHeight))
   // data: URL 而不是 blob:：应用的 CSP（tauri.conf.json）的 img-src 不允许 blob:，图片会加载失败。
   const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(drawing.svg.outerHTML)}`
+  // 失败时记录在哪一步与错误，便于排查（如 Windows WebView2 中导出为红色原文）。
+  let step = 'decode'
   try {
     const image = new Image()
     image.src = url
     await image.decode()
+    step = 'draw'
     const canvas = document.createElement('canvas')
     canvas.width = pixelWidth
     canvas.height = pixelHeight
     const context = canvas.getContext('2d')
-    if (!context) return null
+    if (!context) throw new Error('no 2d context')
     context.fillStyle = '#ffffff'
     context.fillRect(0, 0, pixelWidth, pixelHeight)
     context.drawImage(image, 0, 0, pixelWidth, pixelHeight)
+    step = 'png'
     const png = canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '')
+    if (png === '' || png.startsWith('data:')) throw new Error(`unexpected toDataURL result: ${png.slice(0, 40)}`)
     const { smiles, arrow, above, below } = source
     return { smiles, arrow, above, below, png, width: drawing.width * EXPORT_PT_PER_UNIT, height: drawing.height * EXPORT_PT_PER_UNIT }
-  } catch {
+  } catch (error) {
+    console.error('[structureImage] failed', { step, smiles: source.smiles, pixelWidth, pixelHeight, svgLength: url.length, error })
     return null
   }
 }
