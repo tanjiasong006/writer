@@ -119,8 +119,11 @@ function place(): void {
   if (!element) return
   const { x, y } = props.anchor
   const left = Math.max(EDGE, Math.min(x - 24, window.innerWidth - element.offsetWidth - EDGE))
-  if (y + GAP + element.offsetHeight <= window.innerHeight - EDGE) position.value = { left, top: y + GAP }
-  else position.value = { left, bottom: Math.max(EDGE, window.innerHeight - (y - LINE - GAP)) }
+  const height = element.offsetHeight
+  if (y + GAP + height <= window.innerHeight - EDGE) position.value = { left, top: y + GAP }
+  else if (y - LINE - GAP - height >= EDGE) position.value = { left, bottom: window.innerHeight - (y - LINE - GAP) }
+  // 上下都放不下（如展开周期表）时贴着窗口底边，宁可盖住公式，也不让浮层超出窗口。
+  else position.value = { left, top: Math.max(EDGE, window.innerHeight - height - EDGE) }
 }
 
 function showPreview(): void {
@@ -347,7 +350,7 @@ onBeforeUnmount(() => {
           v-model="chemText"
           class="math-popover__input"
           rows="1"
-          placeholder="如 2H2 + O2 -> 2H2O"
+          placeholder="在这里输入化学式，如 2H2 + O2 -> 2H2O"
           :aria-label="label"
           spellcheck="false"
           autocomplete="off"
@@ -462,6 +465,14 @@ onBeforeUnmount(() => {
   font-size: var(--text-m);
   line-height: var(--leading-normal);
   animation: math-popover-in var(--duration-fast) var(--ease-out);
+  /* 不超出窗口：放不下时只有周期表在浮层内滚动，输入框、预览与按钮始终可见。 */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 2 * var(--space-4));
+}
+
+.math-popover > * {
+  flex: none;
 }
 
 @keyframes math-popover-in {
@@ -580,6 +591,9 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(18, 1fr);
   grid-template-rows: repeat(7, var(--control-h-s)) var(--space-3) repeat(2, var(--control-h-s));
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   gap: 1px;
   margin: var(--space-2) calc(-1 * var(--space-2)) 0;
   padding-top: var(--space-2);
@@ -634,9 +648,24 @@ onBeforeUnmount(() => {
   font-weight: var(--weight-medium);
 }
 
-/* 化学式的输入框在常用写法之下。 */
+/* 化学式的输入框在常用写法之下：有边框，与下方填充底色的预览区分开，一眼看出在哪里输入；聚焦时是焦点环。 */
 .math-popover__field--chem {
   margin-top: var(--space-2);
+  border-radius: var(--radius-m);
+  box-shadow: inset 0 0 0 1px var(--color-control-border);
+  cursor: text;
+}
+
+/* 内边距在文本框上，整个框都能点进去输入。 */
+.math-popover__field.math-popover__field--chem::after,
+.math-popover__field--chem .math-popover__input {
+  padding: var(--space-3) var(--space-4);
+}
+
+.math-popover__field--chem:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--color-accent),
+    0 0 0 2px var(--color-focus-ring);
 }
 
 /* 随内容增高的文本框（与脚注浮层相同的做法），等宽字体。 */

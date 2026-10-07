@@ -62,3 +62,9 @@ export const ChemElements: Story = {
     canvasElement.ownerDocument.querySelector<HTMLElement>('.math-popover__tool--text')?.click()
   },
 }
+
+/** 化学式在窗口下部、展开周期表：上下都放不下时浮层贴着窗口底边，窗口太矮时只有周期表滚动。 */
+export const ChemElementsNearBottom: Story = {
+  args: { ...ChemElements.args, anchor: { x: 160, y: 560 } },
+  play: ChemElements.play,
+}
