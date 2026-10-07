@@ -13,7 +13,7 @@ afterEach(() => {
   for (const wrapper of mounted.splice(0)) wrapper.unmount()
 })
 
-function render(props: { modelValue: string; disabled?: boolean }) {
+function render(props: { modelValue: string | null; disabled?: boolean }) {
   const wrapper = mount(SegmentedControl, {
     props: { options, label: '选项', ...props },
     attachTo: document.body,
@@ -51,4 +51,13 @@ test('disabled：不可操作，也不进入 Tab 顺序', () => {
   const radios = wrapper.findAll('[role="radio"]')
   expect(radios.every((r) => r.attributes('tabindex') === '-1')).toBe(true)
   expect(radios.every((r) => (r.element as HTMLButtonElement).disabled)).toBe(true)
+})
+
+test('没有选中项：都不标为选中，第一项占 Tab 位置；点击任一项发出新值', async () => {
+  const wrapper = render({ modelValue: null })
+  const radios = wrapper.findAll('[role="radio"]')
+  expect(radios.map((r) => r.attributes('aria-checked'))).toEqual(['false', 'false', 'false'])
+  expect(radios.map((r) => r.attributes('tabindex'))).toEqual(['0', '-1', '-1'])
+  await radios[0].trigger('click')
+  expect(wrapper.emitted('update:modelValue')).toEqual([['a']])
 })

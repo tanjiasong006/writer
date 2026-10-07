@@ -306,7 +306,8 @@ export async function structureImage(source: StructureSource): Promise<Structure
   const pixelHeight = Math.ceil(drawing.height * EXPORT_PIXELS_PER_UNIT)
   drawing.svg.setAttribute('width', String(pixelWidth))
   drawing.svg.setAttribute('height', String(pixelHeight))
-  const url = URL.createObjectURL(new Blob([drawing.svg.outerHTML], { type: 'image/svg+xml' }))
+  // data: URL 而不是 blob:：应用的 CSP（tauri.conf.json）的 img-src 不允许 blob:，图片会加载失败。
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(drawing.svg.outerHTML)}`
   try {
     const image = new Image()
     image.src = url
@@ -324,8 +325,6 @@ export async function structureImage(source: StructureSource): Promise<Structure
     return { smiles, arrow, above, below, png, width: drawing.width * EXPORT_PT_PER_UNIT, height: drawing.height * EXPORT_PT_PER_UNIT }
   } catch {
     return null
-  } finally {
-    URL.revokeObjectURL(url)
   }
 }
 

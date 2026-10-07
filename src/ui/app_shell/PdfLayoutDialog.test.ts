@@ -34,7 +34,9 @@ test('显示当前设置（未改的项为默认值），焦点在第一个选�
   expect((checkbox(wrapper, '封面').element as HTMLInputElement).checked).toBe(true)
   // 关闭目录时目录层级不可用。
   expect(group(wrapper, '目录层级').attributes('aria-disabled')).toBe('true')
-  expect(document.activeElement?.textContent?.trim()).toBe('B5')
+  // 配置不等于任何版式：版式都不选中，焦点在版式的第一项。
+  expect(group(wrapper, '版式').find('[aria-checked="true"]').exists()).toBe(false)
+  expect(document.activeElement?.textContent?.trim()).toBe('标准')
   expect(buttonNamed(wrapper, '导出…').exists()).toBe(true)
 })
 
@@ -54,6 +56,32 @@ test('修改只作用于草稿：完成时提交只含改动的设置，取消�
   await buttonNamed(other, '取消').trigger('click')
   expect(other.emitted('cancel')).toHaveLength(1)
   expect(other.emitted('submit')).toBeUndefined()
+})
+
+test('版式：选择后整体替换草稿；与某个版式相同时标为选中，改动任一项后不再选中', async () => {
+  const wrapper = await render({ paper: 'a5', margin: 'wide' }, 'save')
+  const selected = (label: string) => group(wrapper, label).find('[aria-checked="true"]')
+  await choose(wrapper, '版式', '学术')
+  expect(selected('版式').text()).toBe('学术')
+  // 原有改动不保留。
+  expect(selected('纸张').text()).toBe('A4')
+  expect(selected('页边距').text()).toBe('标准')
+  expect(selected('章节编号').text()).toBe('第 1 章')
+
+  await choose(wrapper, '行距', '标准')
+  expect(selected('版式').exists()).toBe(false)
+  await choose(wrapper, '行距', '紧凑')
+  expect(selected('版式').text()).toBe('学术')
+
+  await choose(wrapper, '版式', '简洁')
+  expect((checkbox(wrapper, '封面').element as HTMLInputElement).checked).toBe(false)
+  await buttonNamed(wrapper, '完成').trigger('click')
+  expect(wrapper.emitted('submit')).toEqual([
+    [{ cover: false, toc: false, chapterNewPage: false, paragraph: 'spacing', header: 'title', pageNumber: 'total' }],
+  ])
+
+  const standard = await render({})
+  expect(group(standard, '版式').find('[aria-checked="true"]').text()).toBe('标准')
 })
 
 test('恢复默认：清空全部改动；没有改动时不可用', async () => {
@@ -79,7 +107,7 @@ test('键盘：Esc 取消；焦点在复选框上时 Enter 等同主按钮；Tab
   const primary = buttonNamed(wrapper, '导出…').element as HTMLElement
   primary.focus()
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }))
-  expect(document.activeElement?.textContent?.trim()).toBe('A4')
+  expect(document.activeElement?.textContent?.trim()).toBe('标准')
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true }))
   expect(document.activeElement).toBe(primary)
 })

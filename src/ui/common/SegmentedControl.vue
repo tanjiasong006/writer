@@ -1,15 +1,16 @@
 <script setup lang="ts" generic="T extends string | number">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 /**
  * 分段控件：从少量互斥选项中选一个（单选按钮组）。
  *
  * - 键盘：整组只占一个 Tab 位置（选中项）；←/→（以及 ↑/↓）移动并选中相邻项，Home / End 到首 / 末。
+ * - modelValue 可以为 null（没有选中项）：这时第一项占 Tab 位置。
  * - disabled 时整组不可操作，也不进入 Tab 顺序。
  * - 只发出 update:modelValue，不持有状态。
  */
 const props = defineProps<{
-  modelValue: T
+  modelValue: T | null
   options: readonly { readonly value: T; readonly label: string }[]
   /** 整组的无障碍名称。 */
   label: string
@@ -19,6 +20,9 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: T] }>()
 
 const buttons = ref<HTMLButtonElement[]>([])
+
+/** 占 Tab 位置的选项：选中项；没有选中项时是第一项。 */
+const tabIndex = computed(() => Math.max(0, props.options.findIndex((option) => option.value === props.modelValue)))
 
 function select(index: number): void {
   const option = props.options[(index + props.options.length) % props.options.length]
@@ -61,7 +65,7 @@ function onKeydown(event: KeyboardEvent, index: number): void {
       class="segmented__option"
       :class="{ 'segmented__option--selected': option.value === modelValue }"
       :aria-checked="option.value === modelValue"
-      :tabindex="!disabled && option.value === modelValue ? 0 : -1"
+      :tabindex="!disabled && index === tabIndex ? 0 : -1"
       :disabled="disabled"
       @click="select(index)"
       @keydown="onKeydown($event, index)"

@@ -106,3 +106,27 @@ export function setPdfLayoutOption<K extends PdfLayoutKey>(
 export function isDefaultPdfLayout(settings: PdfLayoutSettings): boolean {
   return Object.keys(settings).length === 0
 }
+
+/** 内置版式（docs/pdf-layout.md 4.1 节）：命名的配置组合，顺序即界面顺序。 */
+export type PdfLayoutPresetId = 'standard' | 'academic' | 'book' | 'minimal'
+
+/** 每个版式与默认值不同的项。应用版式时项目的配置整体替换为它，不与原有改动合并。 */
+export const PDF_LAYOUT_PRESETS: { readonly [K in PdfLayoutPresetId]: PdfLayoutSettings } = {
+  standard: {},
+  academic: { binding: 'double', chapterNumber: 'chapter', tocDepth: 3, lineHeight: 'compact' },
+  book: { paper: 'b5', binding: 'double', bodySize: 10.5, chapterNumber: 'chapter', tocDepth: 1, pageNumber: 'page' },
+  minimal: { cover: false, toc: false, chapterNewPage: false, paragraph: 'spacing', header: 'title', pageNumber: 'total' },
+}
+
+export const PDF_LAYOUT_PRESET_IDS = Object.keys(PDF_LAYOUT_PRESETS) as readonly PdfLayoutPresetId[]
+
+/** 当前配置与哪个版式完全相同；与任何版式都不同时为 null。 */
+export function matchPdfLayoutPreset(settings: PdfLayoutSettings): PdfLayoutPresetId | null {
+  const layout = resolvePdfLayout(settings)
+  return (
+    PDF_LAYOUT_PRESET_IDS.find((id) => {
+      const preset = resolvePdfLayout(PDF_LAYOUT_PRESETS[id])
+      return PDF_LAYOUT_KEYS.every((key) => preset[key] === layout[key])
+    }) ?? null
+  )
+}

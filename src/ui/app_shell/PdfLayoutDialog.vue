@@ -2,11 +2,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import {
   PDF_LAYOUT_OPTIONS,
+  PDF_LAYOUT_PRESETS,
+  PDF_LAYOUT_PRESET_IDS,
   isDefaultPdfLayout,
+  matchPdfLayoutPreset,
   resolvePdfLayout,
   setPdfLayoutOption,
   type PdfLayout,
   type PdfLayoutKey,
+  type PdfLayoutPresetId,
   type PdfLayoutSettings,
 } from '../../domain/pdf_layout/pdf_layout.ts'
 import type { OutputResult } from '../../application/document_output.ts'
@@ -17,6 +21,7 @@ import PdfLayoutPreview from './PdfLayoutPreview.vue'
  * PDF 排版设置（docs/pdf-layout.md 第 4 节）：文档级的少量分档选项，旁边是随设置即时重新排版的样张。
  *
  * - 修改先作用于草稿：完成（或导出）时提交，取消 / Esc 放弃。"恢复默认"清空全部改动。
+ * - 最上方是内置版式（第 4.1 节）：选择后整体替换草稿；草稿与某个版式完全相同时标为选中，否则都不选中。
  * - action 为 export 时主按钮是"导出…"（从导出 PDF 进入），否则是"完成"（从菜单进入）。
  * - 模态，外观与其他对话框一致：Tab 只在对话框内循环；在选项以外的位置按 Enter 等同主按钮。
  *   打开时焦点在第一个选项，关闭后回到打开前的位置。
@@ -39,6 +44,20 @@ const dialog = ref<HTMLElement | null>(null)
 /** 样张全尺寸查看打开时，按键由查看层处理。 */
 const viewerOpen = ref(false)
 let previousFocus: HTMLElement | null = null
+
+const preset = computed(() => matchPdfLayoutPreset(draft.value))
+
+const PRESET_LABELS: Readonly<Record<PdfLayoutPresetId, string>> = {
+  standard: '标准',
+  academic: '学术',
+  book: '书籍',
+  minimal: '简洁',
+}
+const PRESET_OPTIONS = PDF_LAYOUT_PRESET_IDS.map((id) => ({ value: id, label: PRESET_LABELS[id] }))
+
+function applyPreset(id: PdfLayoutPresetId): void {
+  draft.value = PDF_LAYOUT_PRESETS[id]
+}
 
 function set<K extends PdfLayoutKey>(key: K, value: PdfLayout[K]): void {
   draft.value = setPdfLayoutOption(draft.value, key, value)
@@ -139,6 +158,16 @@ onBeforeUnmount(() => {
         />
 
         <div class="pdf-layout__options">
+          <div class="pdf-layout__row pdf-layout__presets">
+            <span class="pdf-layout__label">版式</span>
+            <SegmentedControl
+              label="版式"
+              :model-value="preset"
+              :options="PRESET_OPTIONS"
+              @update:model-value="applyPreset"
+            />
+          </div>
+
           <section class="pdf-layout__group" aria-labelledby="pdf-layout-page">
             <h3 id="pdf-layout-page" class="pdf-layout__group-title">页面</h3>
             <div class="pdf-layout__row">
@@ -387,6 +416,11 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+}
+
+/* 版式与下方各组的间距同组间距。 */
+.pdf-layout__presets {
+  margin-bottom: var(--space-6);
 }
 
 .pdf-layout__group + .pdf-layout__group {

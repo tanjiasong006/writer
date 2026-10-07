@@ -17,10 +17,13 @@ PDF 文档级排版配置的类型、默认值、可选值与合并规则（docs
 - `resolvePdfLayout(settings)`：合并出完整配置。
 - `setPdfLayoutOption(settings, key, value)`：修改一项；等于默认值时删除该项，结果不变时返回同一对象。
 - `isDefaultPdfLayout(settings)`：是否没有任何改动。
+- `PDF_LAYOUT_PRESETS` / `PDF_LAYOUT_PRESET_IDS`：内置版式（docs/pdf-layout.md 4.1 节），每个只含与默认值不同的项；
+  应用版式即把项目配置整体替换为它。
+- `matchPdfLayoutPreset(settings)`：按合并后的完整配置判断与哪个版式相同，都不同时为 null。
 
 ## 不变量
 
-- `PdfLayoutSettings` 中不出现等于默认值的项（经 `setPdfLayoutOption` 修改时）。
+- `PdfLayoutSettings` 中不出现等于默认值的项（经 `setPdfLayoutOption` 修改或应用版式时）。
 - 纯函数，不修改输入。
 
 ## 非目标

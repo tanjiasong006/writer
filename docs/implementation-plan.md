@@ -1059,6 +1059,14 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 验证：Rust 解析、共享 fixture `table-notes`、菜单、工作区端到端（添加、单击编辑、清空、保存的正文、全文阅读）、
   Word（样式、位置、keepNext 只在最后一行）、PDF（20–45 行跨过分页处时表注总与最后一行同页、长表注不撑宽列）、HTML / Markdown 导出。
 
+#### P2-11 内置版式（完成，2026-10-07）
+
+- 规则见 decisions 第 19 节，取值见 pdf-layout 4.1 节。Domain `PDF_LAYOUT_PRESETS` / `matchPdfLayoutPreset`；
+  `PdfLayoutDialog` 选项最上方的“版式”分段控件；`SegmentedControl` 支持没有选中项（第一项占 Tab 位置）。
+  模板对应的版式（论文 → 学术、书稿 → 书籍）尚未实施。
+- 验证：Domain（版式只含非默认的合法项、按完整配置匹配）、分段控件无选中项、排版设置（整体替换、选中状态随修改变化、提交内容）测试；
+  Story `PdfLayoutDialog/AcademicPreset`、`SegmentedControl/NoSelection`（Storybook 中目视检查了选择版式、改动后取消选中与样张更新）。
+
 ### 发布准备（非功能）
 
 1. 手动验收清单在正式包中全部走一遍（需要真实桌面环境与 Word / WPS，known-risks #5）。
