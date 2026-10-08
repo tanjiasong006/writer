@@ -7,7 +7,7 @@ import { moleculeBySmiles } from './structure_library.ts'
 /**
  * 化学结构式的显示（docs/decisions.md 第 22 节）：用 smiles-drawer 把 SMILES 画成骨架式，文档中保存的是 SMILES 原文。
  * 反应式（`反应物>试剂>产物`）中每个分子分别画出，以“＋”相连，中间是箭头（→ ⇌ ＝），试剂与条件写在箭头上下。
- * 分子可以旋转、左右翻转（代码块信息中的 rotate、flip）；反应式中的分子不旋转。
+ * 分子可以旋转、左右翻转（代码块信息中的 rotate、flip，每个分子一项；反应式中先反应物、后产物）。
  * 无法解析的 SMILES 以红色原文显示（与公式相同），悬停提示原因。编辑器、全文阅读与导出的图片共用同一套画法。
  */
 
@@ -140,6 +140,22 @@ export interface Orientation {
 
 const UPRIGHT: Orientation = { rotate: 0, flip: false }
 
+/** 第 index 个分子的方向。 */
+function orientationAt(conditions: Pick<StructureConditions, 'rotate' | 'flip'>, index: number): Orientation {
+  return { rotate: conditions.rotate[index] ?? 0, flip: conditions.flip[index] ?? false }
+}
+
+/**
+ * 结构式中的分子（方向按这个顺序对应）：分子是它本身（. 隔开的片段是同一个分子），反应式是各个反应物与产物（不含试剂）。
+ * 写法不对的反应式没有分子。
+ */
+export function structureMolecules(smiles: string): readonly string[] {
+  const text = smiles.trim()
+  const reaction = reactionParts(text)
+  if (reaction === null) return text === '' ? [] : [text]
+  return 'error' in reaction ? [] : [...reaction.reactants, ...reaction.products]
+}
+
 interface Point {
   x: number
   y: number
@@ -202,7 +218,7 @@ function drawMolecule(smiles: string, theme: Theme, orientation: Orientation = U
 export function drawStructure(smiles: string, theme: Theme = 'text', conditions: StructureConditions = NO_CONDITIONS): Drawn {
   const text = smiles.trim()
   const reaction = reactionParts(text)
-  if (reaction === null) return drawMolecule(text, theme, conditions)
+  if (reaction === null) return drawMolecule(text, theme, orientationAt(conditions, 0))
   if ('error' in reaction) return reaction
   return drawReaction(reaction, conditions, theme)
 }
@@ -275,9 +291,10 @@ function drawReaction(
   theme: Theme,
 ): Drawn {
   const color = theme === 'text' ? 'currentColor' : '#000000'
-  const side = (molecules: readonly string[]) => molecules.map((molecule) => drawMolecule(molecule, theme))
-  const reactants = side(reaction.reactants)
-  const products = side(reaction.products)
+  const side = (molecules: readonly string[], first: number) =>
+    molecules.map((molecule, index) => drawMolecule(molecule, theme, orientationAt(conditions, first + index)))
+  const reactants = side(reaction.reactants, 0)
+  const products = side(reaction.products, reaction.reactants.length)
   const failed = [...reactants, ...products].find((drawn) => 'error' in drawn)
   if (failed) return failed
   const drawn = (list: Drawn[]) => list as StructureDrawing[]
@@ -291,8 +308,10 @@ function drawReaction(
 
   const svg = element('svg', { xmlns: SVG_NS }) as SVGSVGElement
   let x = PADDING
-  const place = (molecules: StructureDrawing[]) => {
+  // 每个分子标上它的序号（data-molecule，与方向的顺序相同），预览中点击分子时用。
+  const place = (molecules: StructureDrawing[], first: number) => {
     molecules.forEach((molecule, index) => {
+      molecule.svg.dataset.molecule = String(first + index)
       if (index > 0) {
         const plus = textElement('+', x + GAP + PLUS_SIZE * 0.3, middle + PLUS_SIZE * 0.35, PLUS_SIZE, color)
         svg.append(plus)
@@ -306,7 +325,7 @@ function drawReaction(
       x += molecule.width
     })
   }
-  place(drawn(reactants))
+  place(drawn(reactants), 0)
   x += GAP
   const x0 = x
   const x1 = x + arrowLength
@@ -314,7 +333,7 @@ function drawReaction(
   if (above !== '') svg.append(textElement(above, (x0 + x1) / 2, middle - 7, TEXT_SIZE, color))
   if (below !== '') svg.append(textElement(below, (x0 + x1) / 2, middle + 7 + TEXT_SIZE * 0.8, TEXT_SIZE, color))
   x = x1 + GAP
-  place(drawn(products))
+  place(drawn(products), reactants.length)
   const width = x + PADDING
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
   return { svg, width, height }
@@ -367,7 +386,7 @@ export function structureNodeView(initial: Node): NodeView {
     dom,
     update(next) {
       if (next.type !== node.type) return false
-      const changed = ['smiles', 'arrow', 'above', 'below', 'rotate', 'flip'].some((key) => next.attrs[key] !== node.attrs[key])
+      const changed = ['smiles', 'arrow', 'above', 'below', 'rotate', 'flip'].some((key) => JSON.stringify(next.attrs[key]) !== JSON.stringify(node.attrs[key]))
       if (changed) renderStructure(dom, next.attrs.smiles as string, nodeConditions(next))
       node = next
       return true

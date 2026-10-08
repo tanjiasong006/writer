@@ -472,8 +472,8 @@ export interface StructureAttrs {
   readonly arrow?: string
   readonly above?: string
   readonly below?: string
-  readonly rotate?: number
-  readonly flip?: boolean
+  readonly rotate?: readonly number[]
+  readonly flip?: readonly boolean[]
 }
 
 /** 化学结构式（docs/decisions.md 第 22 节）：与公式块相同的插入规则，光标放在其后的段落中。 */
@@ -496,10 +496,11 @@ export function setStructure(pos: number, attrs: StructureAttrs): Command {
       arrow: attrs.arrow ?? '',
       above: attrs.above ?? '',
       below: attrs.below ?? '',
-      rotate: attrs.rotate ?? 0,
-      flip: attrs.flip ?? false,
+      rotate: attrs.rotate ?? [],
+      flip: attrs.flip ?? [],
     }
-    if (Object.entries(next).every(([key, value]) => node.attrs[key] === value)) return true
+    // 方向是数组：按内容比较。
+    if (Object.entries(next).every(([key, value]) => JSON.stringify(node.attrs[key]) === JSON.stringify(value))) return true
     if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...next }))
     return true
   }

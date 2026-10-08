@@ -12,8 +12,8 @@ import {
   usedMolecules,
   type Molecule,
 } from './structure_library.ts'
-import { isValidSmiles, renderStructure, smilesProblem } from './structure_view.ts'
-import { normalizeArrow, normalizeRotate, type StructureConditions } from './markdown.ts'
+import { isValidSmiles, renderStructure, smilesProblem, structureMolecules } from './structure_view.ts'
+import { normalizeArrow, normalizeOrientation, normalizeRotate, type StructureConditions } from './markdown.ts'
 
 /**
  * 编辑化学结构式（docs/decisions.md 第 22 节）：在结构式（或插入处）下方弹出，分“分子”与“反应式”两种。
@@ -28,7 +28,8 @@ import { normalizeArrow, normalizeRotate, type StructureConditions } from './mar
  * - 反应式：反应物与产物写分子的名称或 SMILES，以“+”分隔；正在输入的名称下方列出匹配（一侧为空或刚输入“+”时列出
  *   本文档中用过的分子），↑ / ↓ 选择、Enter 填入。
  *   箭头（→ ⇌ ＝）与箭头上下的条件。SMILES 中原有的试剂保留（显示在箭头上方）。
- * - 分子可以旋转（每次 30°）与左右翻转：预览右上角的按钮，翻转的是看到的样子。反应式不旋转。
+ * - 分子可以旋转（每次 30°）与左右翻转：预览右上角的按钮，翻转的是看到的样子。反应式中每个分子分别调整：在预览中点击一个分子
+ *   选中它（再点一次或点空白处取消），按钮只作用于它；方向按 SMILES 跟着分子走，分子换了的回到默认。
  * - Enter 或“完成”完成，Esc 或“取消”放弃，点击浮层以外也完成；下方是预览。没有修改时得到原值，清空即删除。
  * - 只发出 commit / cancel，正文由编辑器修改。
  */
@@ -42,8 +43,8 @@ const props = defineProps<{
   arrow?: string
   above?: string
   below?: string
-  rotate?: number
-  flip?: boolean
+  rotate?: readonly number[]
+  flip?: readonly boolean[]
   /** 本文档中的结构式（SMILES，当前章节在前），列出其中用过的分子。 */
   used?: readonly string[]
 }>()
@@ -67,8 +68,7 @@ const initial: StructureValue = {
   arrow: normalizeArrow(props.arrow ?? ''),
   above: props.above ?? '',
   below: props.below ?? '',
-  rotate: normalizeRotate(props.rotate ?? 0),
-  flip: props.flip ?? false,
+  ...normalizeOrientation({ rotate: props.rotate ?? [], flip: props.flip ?? [] }),
 }
 const initialParts = initial.smiles.split('>')
 const isReaction = initialParts.length === 3
@@ -107,18 +107,63 @@ const arrow = ref(initial.arrow)
 const above = ref(initial.above)
 const below = ref(initial.below)
 
-// 分子的方向
-const rotate = ref(initial.rotate)
-const flip = ref(initial.flip)
+// 分子的方向：每个分子一项，与 structureMolecules 的顺序相同。
+interface Oriented {
+  readonly smiles: string
+  readonly rotate: number
+  readonly flip: boolean
+}
+
+const oriented = ref<readonly Oriented[]>(
+  structureMolecules(initial.smiles).map((smiles, index) => ({ smiles, rotate: initial.rotate[index] ?? 0, flip: initial.flip[index] ?? false })),
+)
+/** 反应式中选中的分子（序号）；分子中总是第一个。 */
+const selected = ref<number | null>(null)
+const orientingIndex = computed(() => (mode.value === 'molecule' ? 0 : selected.value))
+
+function reorient(change: (item: Oriented) => Oriented): void {
+  const index = orientingIndex.value
+  if (index === null || !oriented.value[index]) return
+  oriented.value = oriented.value.map((item, i) => (i === index ? change(item) : item))
+}
 
 function turn(degrees: number): void {
-  rotate.value = normalizeRotate(rotate.value + degrees)
+  reorient((item) => ({ ...item, rotate: normalizeRotate(item.rotate + degrees) }))
 }
 
 /** 左右翻转看到的样子：先翻转再旋转，因此翻转后旋转的方向相反。 */
 function mirror(): void {
-  flip.value = !flip.value
-  rotate.value = normalizeRotate(-rotate.value)
+  reorient((item) => ({ ...item, flip: !item.flip, rotate: normalizeRotate(-item.rotate) }))
+}
+
+/** 反应式中指向的分子（序号）。 */
+const hovered = ref<number | null>(null)
+
+/**
+ * 指针下的分子：点在键或原子符号上时是它所在的分子，否则按各分子的范围（SVG 只有画出的部分接收指针，
+ * 键之间的空白处会落到预览上）。
+ */
+function moleculeAt(event: MouseEvent): number | null {
+  const direct = event.target instanceof Element ? event.target.closest('[data-molecule]') : null
+  const found =
+    direct ??
+    [...(preview.value?.querySelectorAll('svg[data-molecule]') ?? [])].find((molecule) => {
+      const rect = molecule.getBoundingClientRect()
+      return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom
+    })
+  const index = Number(found?.getAttribute('data-molecule') ?? NaN)
+  return Number.isInteger(index) ? index : null
+}
+
+/** 预览中点击：反应式中选中点到的分子，再点一次或点在分子以外取消。 */
+function onPreviewClick(event: MouseEvent): void {
+  if (mode.value !== 'reaction') return
+  const index = moleculeAt(event)
+  selected.value = index !== null && index !== selected.value ? index : null
+}
+
+function onPreviewMove(event: MouseEvent): void {
+  hovered.value = mode.value === 'reaction' ? moleculeAt(event) : null
 }
 
 /** 反应式中列出的匹配数上限。 */
@@ -148,24 +193,61 @@ const unknownTerms = computed(() => {
     : []
 })
 
-/** 完成时得到的结构式。 */
-const target = computed<StructureValue & { readonly name: string | null }>(() => {
+/** 完成时得到的 SMILES 与名称。 */
+const drawn = computed<{ readonly smiles: string; readonly name: string | null }>(() => {
   void libraryVersion.value
   if (mode.value === 'molecule') {
     const molecule = active.value >= 0 ? matches.value[active.value] : null
     const smiles = molecule ? molecule.smiles : smilesText(query.value)
-    const name = (molecule ?? moleculeBySmiles(smiles, true))?.names[0] ?? null
-    return { smiles, arrow: '', above: '', below: '', rotate: rotate.value, flip: flip.value, name }
+    return { smiles, name: (molecule ?? moleculeBySmiles(smiles, true))?.names[0] ?? null }
   }
   const left = sideSmiles(reactants.value)
   const right = sideSmiles(products.value)
-  const smiles = left === '' && right === '' ? '' : `${left}>${reagents}>${right}`
-  return { smiles, arrow: arrow.value, above: above.value.trim(), below: below.value.trim(), rotate: 0, flip: false, name: null }
+  return { smiles: left === '' && right === '' ? '' : `${left}>${reagents}>${right}`, name: null }
 })
 
-/** 能旋转、翻转：画成骨架式的分子（写成化学式的无机小分子不能）。 */
-const orientable = computed(
-  () => mode.value === 'molecule' && !target.value.smiles.includes('>') && isValidSmiles(target.value.smiles) && !moleculeBySmiles(target.value.smiles)?.formula,
+/**
+ * 分子变化时方向跟着分子走：分子中总是同一个（修改 SMILES 时方向不变）；反应式中按 SMILES 对应，新的分子是默认方向。
+ * 选中的分子不在原处时取消选中。
+ */
+watch(
+  () => structureMolecules(drawn.value.smiles).join('\n'),
+  () => {
+    const molecules = structureMolecules(drawn.value.smiles)
+    const previous = oriented.value
+    const selectedSmiles = selected.value === null ? null : previous[selected.value]?.smiles
+    if (mode.value === 'molecule') {
+      oriented.value = molecules.slice(0, 1).map((smiles) => ({ smiles, rotate: previous[0]?.rotate ?? 0, flip: previous[0]?.flip ?? false }))
+      return
+    }
+    const pool = [...previous]
+    oriented.value = molecules.map((smiles) => {
+      const index = pool.findIndex((item) => item.smiles === smiles)
+      return index < 0 ? { smiles, rotate: 0, flip: false } : pool.splice(index, 1)[0]
+    })
+    if (selected.value !== null && oriented.value[selected.value]?.smiles !== selectedSmiles) selected.value = null
+  },
+)
+
+/** 完成时得到的结构式。 */
+const target = computed<StructureValue & { readonly name: string | null }>(() => {
+  const orientation = normalizeOrientation({ rotate: oriented.value.map((item) => item.rotate), flip: oriented.value.map((item) => item.flip) })
+  const { smiles, name } = drawn.value
+  if (mode.value === 'molecule') return { smiles, arrow: '', above: '', below: '', ...orientation, name }
+  return { smiles, arrow: arrow.value, above: above.value.trim(), below: below.value.trim(), ...orientation, name }
+})
+
+/** 能画出、且有可以旋转的分子（写成化学式的无机小分子不能）。 */
+const canOrient = (smiles: string | undefined) => smiles !== undefined && !moleculeBySmiles(smiles)?.formula
+const drawable = computed(() => unknownTerms.value.length === 0 && isValidSmiles(target.value.smiles))
+/** 方向按钮作用于的分子能旋转、翻转。 */
+const orientable = computed(() => {
+  const index = orientingIndex.value
+  return drawable.value && index !== null && canOrient(oriented.value[index]?.smiles)
+})
+/** 反应式中还没有选中分子：提示点击分子。 */
+const orientHint = computed(
+  () => mode.value === 'reaction' && drawable.value && selected.value === null && oriented.value.some((item) => canOrient(item.smiles)),
 )
 
 const id = useId()
@@ -244,11 +326,45 @@ function showPreview(): void {
     return
   }
   if (!isValidSmiles(smiles)) showProblem(element, smiles)
-  else renderStructure(element, smiles, target.value)
+  else {
+    renderStructure(element, smiles, target.value)
+    if (mode.value === 'reaction') addTargets(element)
+  }
 }
 
+/** 反应式中每个分子下面垫一块与它同样大小的底（指向、选中时显示底色），选中、指向变化时不必重画。 */
+function addTargets(element: HTMLElement): void {
+  for (const molecule of element.querySelectorAll('svg[data-molecule]')) {
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    for (const key of ['x', 'y', 'width', 'height']) rect.setAttribute(key, molecule.getAttribute(key) ?? '0')
+    rect.setAttribute('rx', '4')
+    rect.setAttribute('class', 'structure-popover__target')
+    rect.setAttribute('data-molecule-target', molecule.getAttribute('data-molecule') ?? '')
+    molecule.parentNode?.insertBefore(rect, molecule)
+  }
+  markTargets()
+}
+
+function markTargets(): void {
+  for (const rect of preview.value?.querySelectorAll('.structure-popover__target') ?? []) {
+    const index = Number(rect.getAttribute('data-molecule-target'))
+    rect.classList.toggle('is-selected', index === selected.value)
+    rect.classList.toggle('is-hover', index === hovered.value && index !== selected.value)
+  }
+}
+
+watch([selected, hovered], markTargets)
+
 watch(
-  () => [target.value.smiles, target.value.arrow, target.value.above, target.value.below, target.value.rotate, target.value.flip, unknownTerms.value.join()],
+  () => [
+    target.value.smiles,
+    target.value.arrow,
+    target.value.above,
+    target.value.below,
+    target.value.rotate.join(),
+    target.value.flip.join(),
+    unknownTerms.value.join(),
+  ],
   showPreview,
 )
 
@@ -260,8 +376,8 @@ function commit(): void {
     arrow === initial.arrow &&
     above === initial.above.trim() &&
     below === initial.below.trim() &&
-    rotate === initial.rotate &&
-    flip === initial.flip
+    rotate.join() === initial.rotate.join() &&
+    flip.join() === initial.flip.join()
   emit('commit', unchanged ? initial : { smiles, arrow, above, below, rotate, flip })
 }
 
@@ -547,7 +663,16 @@ onMounted(async () => {
       </div>
 
       <div class="structure-popover__stage">
-        <div ref="preview" class="structure-popover__preview" aria-live="polite"></div>
+        <div
+          ref="preview"
+          class="structure-popover__preview"
+          aria-live="polite"
+          @mousedown.prevent
+          @click="onPreviewClick"
+          @mousemove="onPreviewMove"
+          @mouseleave="hovered = null"
+        ></div>
+        <div v-if="orientHint" class="structure-popover__orient-hint">点击分子调整方向</div>
         <div v-if="orientable" class="structure-popover__orient" role="group" aria-label="方向">
           <button
             v-for="item in [
@@ -944,6 +1069,31 @@ onMounted(async () => {
 
 .structure-popover__orient-button:active {
   background: var(--color-fill-pressed);
+}
+
+/* 反应式中还没有选中分子时，方向按钮的位置是一句提示。 */
+.structure-popover__orient-hint {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-3);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 反应式中每个分子的底：指向时是淡淡的灰，选中时是淡淡的强调色。 */
+.structure-popover__preview :deep(.structure-popover__target) {
+  fill: transparent;
+}
+
+.structure-popover__preview :deep(.structure-popover__target.is-hover) {
+  fill: var(--color-fill-pressed);
+}
+
+.structure-popover__preview :deep(.structure-popover__target.is-selected) {
+  fill: var(--color-accent-fill);
 }
 
 /* SMILES 的写法有误：原文中标出出错的字符，下方是说明。 */

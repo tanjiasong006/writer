@@ -49,3 +49,7 @@ CCCCO
 ```smiles rotate="330"
 CCO
 ```
+
+```smiles rotate="0 90" flip="false true"
+CCO.CC(=O)O>>CCOC(C)=O.O
+```

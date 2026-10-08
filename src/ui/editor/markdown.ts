@@ -660,26 +660,37 @@ tokenizer.core.ruler.push('writer_structure', (state) => {
 
 /**
  * 结构式代码块信息中的属性（docs/decisions.md 第 22 节）：反应式的箭头与条件，分子的方向。
- * arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。rotate 是顺时针旋转的度数（0–359），flip 是左右翻转（先翻转再旋转）；只用于分子。
+ * arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。rotate 是各分子顺时针旋转的度数（0–359），flip 是各分子是否左右翻转（先翻转再旋转）；
+ * 按分子的顺序（反应式中先反应物、后产物，不含试剂），末尾的 0 与 false 省略（空列表是都不转）。
  */
 export interface StructureConditions {
   readonly arrow: string
   readonly above: string
   readonly below: string
-  readonly rotate: number
-  readonly flip: boolean
+  readonly rotate: readonly number[]
+  readonly flip: readonly boolean[]
 }
 
-export const NO_CONDITIONS: StructureConditions = { arrow: '', above: '', below: '', rotate: 0, flip: false }
+export const NO_CONDITIONS: StructureConditions = { arrow: '', above: '', below: '', rotate: [], flip: [] }
 
 /** 旋转的度数：整数，换算到 0–359。 */
 export function normalizeRotate(degrees: number): number {
   return Number.isFinite(degrees) ? ((Math.round(degrees) % 360) + 360) % 360 : 0
 }
 
+/** 各分子的方向的规范写法：度数换算到 0–359，去掉末尾的 0 与 false。 */
+export function normalizeOrientation(conditions: Pick<StructureConditions, 'rotate' | 'flip'>): Pick<StructureConditions, 'rotate' | 'flip'> {
+  const rotate = conditions.rotate.map(normalizeRotate)
+  const flip = [...conditions.flip]
+  while (rotate.at(-1) === 0) rotate.pop()
+  while (flip.at(-1) === false) flip.pop()
+  return { rotate, flip }
+}
+
 /** 查找结构式图片等用的键：SMILES 与全部属性。 */
 export function structureKey(source: StructureSource): string {
-  return JSON.stringify([source.smiles, source.arrow, source.above, source.below, source.rotate, source.flip])
+  const { rotate, flip } = normalizeOrientation(source)
+  return JSON.stringify([source.smiles, source.arrow, source.above, source.below, rotate, flip])
 }
 
 /** 箭头的写法：→ 写作空（也接受 `->`），其他不认识的写法也是 →。 */
@@ -688,10 +699,13 @@ export function normalizeArrow(arrow: string): string {
   return value === '<=>' || value === '=' ? value : ''
 }
 
+/** 以空白分隔的列表的各项。 */
+const listItems = (value: string) => value.trim().split(/\s+/).filter((item) => item !== '')
+
 /**
  * 代码块信息中 smiles 之后的属性：`key="value"`，值中不含双引号（与 Rust 的 render::markdown 相同）。
  * 认识 arrow、above、below、rotate、flip（不区分大小写），其他忽略；条件去掉首尾空白。
- * rotate 是整数（可以有首尾空白），其他写法是 0；flip 是 true（不区分大小写）时翻转。
+ * rotate、flip 是以空白分隔的列表，每个分子一项：rotate 的一项是整数，其他写法是 0；flip 的一项是 true（不区分大小写）时翻转。
  */
 export function parseStructureInfo(info: string): StructureConditions {
   const rest = info.trim().replace(/^\S+/, '')
@@ -700,10 +714,10 @@ export function parseStructureInfo(info: string): StructureConditions {
     const key = match[1].toLowerCase()
     if (key === 'arrow') conditions = { ...conditions, arrow: normalizeArrow(match[2]) }
     else if (key === 'above' || key === 'below') conditions = { ...conditions, [key]: match[2].trim() }
-    else if (key === 'rotate') conditions = { ...conditions, rotate: /^\s*-?\d+\s*$/.test(match[2]) ? normalizeRotate(Number(match[2])) : 0 }
-    else if (key === 'flip') conditions = { ...conditions, flip: match[2].trim().toLowerCase() === 'true' }
+    else if (key === 'rotate') conditions = { ...conditions, rotate: listItems(match[2]).map((item) => (/^-?\d+$/.test(item) ? Number(item) : 0)) }
+    else if (key === 'flip') conditions = { ...conditions, flip: listItems(match[2]).map((item) => item.toLowerCase() === 'true') }
   }
-  return conditions
+  return { ...conditions, ...normalizeOrientation(conditions) }
 }
 
 /**
@@ -717,9 +731,9 @@ function structureInfo(conditions: StructureConditions): string {
   if (arrow !== '') parts.push(`arrow="${arrow}"`)
   if (conditions.above.trim() !== '') parts.push(`above="${value(conditions.above)}"`)
   if (conditions.below.trim() !== '') parts.push(`below="${value(conditions.below)}"`)
-  const rotate = normalizeRotate(conditions.rotate)
-  if (rotate !== 0) parts.push(`rotate="${rotate}"`)
-  if (conditions.flip) parts.push('flip="true"')
+  const { rotate, flip } = normalizeOrientation(conditions)
+  if (rotate.length > 0) parts.push(`rotate="${rotate.join(' ')}"`)
+  if (flip.length > 0) parts.push(`flip="${flip.join(' ')}"`)
   return parts.join(' ')
 }
 

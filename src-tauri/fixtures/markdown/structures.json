@@ -1,5 +1,5 @@
 {
-  "说明": "化学结构式（docs/decisions.md 第 22 节）：围栏代码块的语言（信息的第一个词，不区分大小写）是 smiles 时是结构式，内容去掉首尾空白；可以在引用与列表中。其他语言的代码块不变。反应式的箭头与条件在信息中：smiles 之后的 key=\"value\"（arrow、above、below，不区分大小写，其他忽略；条件去掉首尾空白；箭头 -> 与不认识的写法都是空）。分子的方向也在信息中：rotate 是整数度数（可有首尾空白，换算到 0–359，其他写法是 0），flip 是 true（不区分大小写）时左右翻转；为 0 与不翻转时省略。信息中的反斜杠转义照常处理。",
+  "说明": "化学结构式（docs/decisions.md 第 22 节）：围栏代码块的语言（信息的第一个词，不区分大小写）是 smiles 时是结构式，内容去掉首尾空白；可以在引用与列表中。其他语言的代码块不变。反应式的箭头与条件在信息中：smiles 之后的 key=\"value\"（arrow、above、below，不区分大小写，其他忽略；条件去掉首尾空白；箭头 -> 与不认识的写法都是空）。分子的方向也在信息中：rotate、flip 是以空白分隔的列表，每个分子一项（反应式中先反应物、后产物）；rotate 的一项是整数度数（换算到 0–359，其他写法是 0），flip 的一项是 true（不区分大小写）时左右翻转；末尾的 0 与 false 去掉，为空时省略。信息中的反斜杠转义照常处理。",
   "blocks": [
     { "type": "paragraph", "inlines": [{ "text": "乙醇：" }] },
     { "type": "structure", "smiles": "CCO" },
@@ -24,7 +24,8 @@
     { "type": "structure", "smiles": "CCO.CC(=O)O>OS(=O)(=O)O>CCOC(C)=O.O", "arrow": "=", "above": "浓硫酸 & \\ `△`", "below": "加热" },
     { "type": "structure", "smiles": "CC.ClCl>>CCCl.Cl", "above": "光照" },
     { "type": "paragraph", "inlines": [{ "text": "方向：" }] },
-    { "type": "structure", "smiles": "CCCCO", "rotate": 90, "flip": true },
-    { "type": "structure", "smiles": "CCO", "rotate": 330 }
+    { "type": "structure", "smiles": "CCCCO", "rotate": [90], "flip": [true] },
+    { "type": "structure", "smiles": "CCO", "rotate": [330] },
+    { "type": "structure", "smiles": "CCO.CC(=O)O>>CCOC(C)=O.O", "rotate": [0, 90], "flip": [false, true] }
   ]
 }

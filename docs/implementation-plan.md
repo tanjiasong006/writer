@@ -1053,9 +1053,13 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   `structure_view.ts` 的 `smilesProblem`（括号配对自己找位置，其他用 smiles-drawer 报告的位置）与方向（`orient` 在 smiles-drawer 的
   `rotateDrawing` 之后转原子坐标，翻转时互换楔形键）；`StructurePopover.vue` 的“本文档中”列表、出错说明、“编辑 SMILES”按钮与 Tab、方向按钮，固定高度的列表与预览、浮层式的反应式匹配。
   格式：`rotate` / `flip`（schema、`parseStructureInfo` / 写出、`structureKey`；Rust `StructureConditions`、共享 fixture `structures`）。
-  验证：组件与编辑器集成测试、Markdown 读写、画法（旋转后宽高互换、翻转后符号仍正、楔形键互换、反应式不旋转）、Rust 按方向对应图片；
+  验证：组件与编辑器集成测试、Markdown 读写、画法（旋转后宽高互换、翻转后符号仍正、楔形键互换）、Rust 按方向对应图片；
   Storybook（Chrome）中目视检查了浮层（用过的分子、Tab、旋转与翻转、出错标注）与正文中的旋转、翻转。未检查深色外观、
   Tauri WebView 中的显示与导出 PNG。
+- 反应式中每个分子的方向（2026-10-08）：`rotate` / `flip` 改为每个分子一项的列表（`normalizeOrientation`，Rust `Vec`）；
+  `structureMolecules` 给出方向对应的分子，`drawReaction` 按序号转各分子并标 `data-molecule`；浮层中点击预览选中分子、垫底色，
+  方向按 SMILES 跟着分子走。验证：Markdown 读写（列表、去掉末尾默认值）、共享 fixture、只转其中一个分子的画法、浮层选中与重新对应、
+  Rust 反序列化与按方向对应图片；Storybook 中目视检查了选中、旋转与正文中的反应式。
 
 #### P2-10 表注（完成，2026-10-05）
 

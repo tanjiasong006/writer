@@ -38,8 +38,8 @@ export interface RenderStructure {
   readonly arrow: string
   readonly above: string
   readonly below: string
-  readonly rotate: number
-  readonly flip: boolean
+  readonly rotate: readonly number[]
+  readonly flip: readonly boolean[]
   readonly png: string
   readonly width: number
   readonly height: number

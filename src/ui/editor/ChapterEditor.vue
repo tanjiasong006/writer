@@ -940,7 +940,7 @@ function documentStructures(): readonly string[] {
 function startNewStructure(): void {
   if (!view || !insertStructure({ smiles: 'C' })(view.state)) return
   const caret = view.coordsAtPos(view.state.selection.to)
-  const value = { smiles: '', arrow: '', above: '', below: '', rotate: 0, flip: false }
+  const value = { smiles: '', arrow: '', above: '', below: '', rotate: [], flip: [] }
   structureEditor.value = { chapterId: currentId, pos: null, value, anchor: { x: caret.left, y: caret.bottom }, used: documentStructures() }
 }
 

@@ -43,7 +43,7 @@ type SemBlock =
   | { type: 'paragraph'; inlines: SemInline[] }
   | { type: 'figure'; src: string; alt: string; id?: string }
   | { type: 'math'; tex: string }
-  | { type: 'structure'; smiles: string; arrow?: string; above?: string; below?: string; rotate?: number; flip?: boolean }
+  | { type: 'structure'; smiles: string; arrow?: string; above?: string; below?: string; rotate?: number[]; flip?: boolean[] }
   | { type: 'quote'; blocks: SemBlock[] }
   | { type: 'code'; language: string | null; text: string }
   | { type: 'rule' }
@@ -122,10 +122,10 @@ function block(node: Node): SemBlock {
     case nodes.math_block:
       return { type: 'math', tex: node.attrs.tex as string }
     case nodes.structure: {
-      const structure: Record<string, string | number | boolean> = { type: 'structure', smiles: node.attrs.smiles as string }
+      const structure: Record<string, string | number[] | boolean[]> = { type: 'structure', smiles: node.attrs.smiles as string }
       for (const key of ['arrow', 'above', 'below']) if (node.attrs[key] !== '') structure[key] = node.attrs[key] as string
-      if (node.attrs.rotate !== 0) structure.rotate = node.attrs.rotate as number
-      if (node.attrs.flip) structure.flip = true
+      if ((node.attrs.rotate as number[]).length > 0) structure.rotate = node.attrs.rotate as number[]
+      if ((node.attrs.flip as boolean[]).length > 0) structure.flip = node.attrs.flip as boolean[]
       return structure as SemBlock
     }
     case nodes.figure: {

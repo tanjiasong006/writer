@@ -24,6 +24,13 @@ import { DEFAULT_LIST_NUMBERING, isListNumbering, type ListNumbering } from '../
 
 type Align = 'left' | 'center' | 'right'
 
+/** 属性的校验：元素都是 type 的数组。 */
+function listOf(type: 'number' | 'boolean'): (value: unknown) => void {
+  return (value) => {
+    if (!Array.isArray(value) || value.some((item) => typeof item !== type)) throw new RangeError(`expected ${type}[]`)
+  }
+}
+
 function parseAlign(value: string | null | undefined): Align | null {
   return value === 'left' || value === 'center' || value === 'right' ? value : null
 }
@@ -353,7 +360,8 @@ export const schema = new Schema({
      * 化学结构式（docs/decisions.md 第 22 节）：Markdown 中语言为 `smiles` 的围栏代码块，显示为骨架式。
      * 块级原子节点，smiles 是代码块的内容（去掉首尾空白）。反应式（`反应物>试剂>产物`）的箭头与条件
      * 在代码块信息中（`arrow="<=>" above="…" below="…"`）：arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。
-     * 分子的方向也在其中（`rotate="90" flip="true"`）：rotate 是顺时针旋转的度数（0–359），flip 是左右翻转。
+     * 分子的方向也在其中（`rotate="0 90" flip="false true"`）：每个分子一项（反应式中先反应物、后产物），rotate 是顺时针
+     * 旋转的度数（0–359），flip 是左右翻转；节点中是去掉末尾默认值的数组。
      */
     structure: {
       group: 'block',
@@ -363,8 +371,8 @@ export const schema = new Schema({
         arrow: { default: '', validate: 'string' },
         above: { default: '', validate: 'string' },
         below: { default: '', validate: 'string' },
-        rotate: { default: 0, validate: 'number' },
-        flip: { default: false, validate: 'boolean' },
+        rotate: { default: [], validate: listOf('number') },
+        flip: { default: [], validate: listOf('boolean') },
       },
       parseDOM: [{ tag: 'div[data-structure]', getAttrs: (dom) => ({ smiles: dom.getAttribute('data-structure') ?? '' }) }],
       toDOM: (node): DOMOutputSpec => ['div', { class: 'structure-block', 'data-structure': node.attrs.smiles }, node.attrs.smiles],

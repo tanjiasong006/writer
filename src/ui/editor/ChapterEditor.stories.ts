@@ -437,6 +437,8 @@ export const Structures: Story = {
       '旋转 90° 与左右翻转的阿司匹林：\n\n' +
       '```smiles rotate="90"\nCC(=O)OC1=CC=CC=C1C(=O)O\n```\n\n' +
       '```smiles flip="true"\nCC(=O)OC1=CC=CC=C1C(=O)O\n```\n\n' +
+      '反应式中只旋转乙酸：\n\n' +
+      '```smiles arrow="<=>" above="浓硫酸" rotate="0 90"\nCCO.CC(=O)O>>CCOC(C)=O.O\n```\n\n' +
       '写错的结构式：\n\n```smiles\nC1CC(\n```\n',
   },
 }

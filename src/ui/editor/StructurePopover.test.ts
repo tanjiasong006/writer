@@ -12,7 +12,7 @@ afterEach(() => {
 
 async function open(
   smiles: string,
-  conditions: { arrow?: string; above?: string; below?: string; rotate?: number; flip?: boolean; used?: readonly string[] } = {},
+  conditions: { arrow?: string; above?: string; below?: string; rotate?: readonly number[]; flip?: readonly boolean[]; used?: readonly string[] } = {},
 ) {
   // 扩展库先加载好，查找结果不随加载的快慢变化。
   await loadExtendedMolecules()
@@ -25,7 +25,7 @@ async function open(
 const input = (wrapper: VueWrapper) => wrapper.find('.structure-popover__search')
 const key = (wrapper: VueWrapper, init: KeyboardEventInit) => input(wrapper).trigger('keydown', init)
 const options = (wrapper: VueWrapper) => wrapper.findAll('.structure-popover__option').map((option) => option.find('.structure-popover__name').text())
-const value = (smiles: string, arrow = '', above = '', below = '') => ({ smiles, arrow, above, below, rotate: 0, flip: false })
+const value = (smiles: string, arrow = '', above = '', below = '') => ({ smiles, arrow, above, below, rotate: [] as number[], flip: [] as boolean[] })
 const active = (wrapper: VueWrapper) => wrapper.find('.structure-popover__option--active .structure-popover__name')
 
 test('按名称查找：默认第一个匹配，预览画出它；Enter 得到它的 SMILES', async () => {
@@ -121,28 +121,27 @@ test('Tab 把选中的分子的 SMILES 填入输入框，在它的基础上修�
   expect(event.defaultPrevented).toBe(false)
 })
 
-test('分子可以旋转、翻转（翻转的是看到的样子）；反应式与写成化学式的分子没有这些按钮', async () => {
+test('分子可以旋转、翻转（翻转的是看到的样子）；写成化学式的分子与写错的没有这些按钮', async () => {
   const wrapper = await open('CCCCO')
   const button = (label: string) => wrapper.find(`.structure-popover__orient button[aria-label="${label}"]`)
   await button('向右旋转 30°').trigger('click')
   await button('向右旋转 30°').trigger('click')
   await button('向左旋转 30°').trigger('click')
   await key(wrapper, { key: 'Enter' })
-  expect(wrapper.emitted('commit')).toEqual([[{ ...value('CCCCO'), rotate: 30 }]])
+  expect(wrapper.emitted('commit')).toEqual([[{ ...value('CCCCO'), rotate: [30] }]])
 
-  const flipped = await open('CCCCO', { rotate: 30 })
+  const flipped = await open('CCCCO', { rotate: [30] })
   await flipped.find('.structure-popover__orient button[aria-label="左右翻转"]').trigger('click')
   await key(flipped, { key: 'Enter' })
-  expect(flipped.emitted('commit')).toEqual([[{ ...value('CCCCO'), rotate: 330, flip: true }]])
+  expect(flipped.emitted('commit')).toEqual([[{ ...value('CCCCO'), rotate: [330], flip: [true] }]])
 
   // 未修改时得到原值。
-  const unchanged = await open('CCCCO', { rotate: 90, flip: true })
+  const unchanged = await open('CCCCO', { rotate: [90], flip: [true] })
   await key(unchanged, { key: 'Enter' })
-  expect(unchanged.emitted('commit')).toEqual([[{ ...value('CCCCO'), rotate: 90, flip: true }]])
+  expect(unchanged.emitted('commit')).toEqual([[{ ...value('CCCCO'), rotate: [90], flip: [true] }]])
 
   expect((await open('O')).find('.structure-popover__orient').exists()).toBe(false)
   expect((await open('C1CC(')).find('.structure-popover__orient').exists()).toBe(false)
-  expect((await open('CCO>>C=C.O')).find('.structure-popover__orient').exists()).toBe(false)
 })
 
 describe('位置：始终在窗口内', () => {
@@ -258,6 +257,48 @@ describe('反应式', () => {
     await side(wrapper, 0).trigger('keydown', { key: 'Enter' })
     expect((side(wrapper, 0).element as HTMLInputElement).value).toBe('乙醇 + ClCCCCCCCCCCN')
     expect(wrapper.emitted('commit')).toBeUndefined()
+  })
+
+  test('每个分子分别调整方向：点击预览中的分子选中它，按钮只作用于它；方向跟着分子走', async () => {
+    const wrapper = await open('CCO.CC(=O)O>>CCOC(C)=O.O', { rotate: [0, 0, 90] })
+    const molecule = (index: number) => wrapper.find(`.structure-popover__preview svg[data-molecule="${index}"]`)
+    const button = (label: string) => wrapper.find(`.structure-popover__orient button[aria-label="${label}"]`)
+    // 还没有选中分子：提示点击分子，没有按钮。
+    expect(wrapper.find('.structure-popover__orient-hint').text()).toBe('点击分子调整方向')
+    expect(wrapper.find('.structure-popover__orient').exists()).toBe(false)
+
+    await molecule(1).trigger('click')
+    expect(wrapper.find('.structure-popover__preview .structure-popover__target.is-selected').attributes('data-molecule-target')).toBe('1')
+    await button('向右旋转 30°').trigger('click')
+    await button('左右翻转').trigger('click')
+    // 写成化学式的水不能旋转：选中它时没有按钮。
+    await molecule(3).trigger('click')
+    expect(wrapper.find('.structure-popover__orient').exists()).toBe(false)
+    // 再点一次取消选中。
+    await molecule(3).trigger('click')
+    expect(wrapper.find('.structure-popover__orient-hint').exists()).toBe(true)
+
+    // 在乙醇前面加一个反应物：方向跟着乙酸与乙酸乙酯走，新的分子是默认方向。
+    await side(wrapper, 0).setValue('甲醇 + 乙醇 + 乙酸')
+    await side(wrapper, 0).trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('commit')).toEqual([[{ ...value('CO.CCO.CC(=O)O>>CCOC(C)=O.O'), rotate: [0, 0, 330, 90], flip: [false, false, true] }]])
+  })
+
+  test('点在分子范围内的空白处（不在键或原子符号上）也选中它；指向时有淡淡的底色', async () => {
+    const wrapper = await open('CCO.CC(=O)O>>CCOC(C)=O.O')
+    const preview = wrapper.find('.structure-popover__preview')
+    // jsdom 没有布局：给第二个分子一个范围。
+    const molecule = preview.find('svg[data-molecule="1"]').element
+    vi.spyOn(molecule, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 50, 40, 30))
+    await preview.trigger('mousemove', { clientX: 120, clientY: 60 })
+    expect(preview.find('.structure-popover__target.is-hover').attributes('data-molecule-target')).toBe('1')
+    await preview.trigger('click', { clientX: 120, clientY: 60 })
+    expect(preview.find('.structure-popover__target.is-selected').attributes('data-molecule-target')).toBe('1')
+    expect(wrapper.find('.structure-popover__orient').exists()).toBe(true)
+    // 点在所有分子以外取消选中。
+    await preview.trigger('click', { clientX: 5, clientY: 5 })
+    expect(preview.find('.structure-popover__target.is-selected').exists()).toBe(false)
+    vi.restoreAllMocks()
   })
 
   test('从分子切换到反应式时，已输入的分子作为第一个反应物', async () => {

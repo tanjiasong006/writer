@@ -141,11 +141,11 @@ fn block(block: &Block) -> Value {
                     structure[key] = json!(value);
                 }
             }
-            if conditions.rotate != 0 {
+            if !conditions.rotate.is_empty() {
                 structure["rotate"] = json!(conditions.rotate);
             }
-            if conditions.flip {
-                structure["flip"] = json!(true);
+            if !conditions.flip.is_empty() {
+                structure["flip"] = json!(conditions.flip);
             }
             structure
         }

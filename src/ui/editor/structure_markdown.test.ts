@@ -32,7 +32,7 @@ test('写出为 ```smiles 围栏；未修改的章节原样写回', () => {
 })
 
 test('导出前收集正文中全部结构式（SMILES 与条件都相同的去重，按出现顺序）', () => {
-  const plain = (smiles: string) => ({ smiles, arrow: '', above: '', below: '', rotate: 0, flip: false })
+  const plain = (smiles: string) => ({ smiles, arrow: '', above: '', below: '', rotate: [], flip: [] })
   const markdown = '```smiles\nCCO\n```\n\n- 项\n\n  ```smiles\n  C\n  ```\n\n```smiles\nCCO\n```\n\n```smiles above="光照"\nCCO\n```\n\n```\nCC\n```'
   expect(structureSources(markdown)).toEqual([plain('CCO'), plain('C'), { ...plain('CCO'), above: '光照' }])
   expect(structureSources('没有结构式')).toEqual([])
@@ -41,14 +41,14 @@ test('导出前收集正文中全部结构式（SMILES 与条件都相同的去�
 test('反应式的箭头与条件：读写代码块信息；未修改的原样写回，修改后按统一风格写出', () => {
   const source = '```smiles arrow="<=>" above="催化剂" below="高温、高压"\nN#N.[H][H]>>N\n```\n'
   const parsed = parseChapter(source)
-  expect(parsed.doc.child(0).attrs).toEqual({ smiles: 'N#N.[H][H]>>N', arrow: '<=>', above: '催化剂', below: '高温、高压', rotate: 0, flip: false })
+  expect(parsed.doc.child(0).attrs).toEqual({ smiles: 'N#N.[H][H]>>N', arrow: '<=>', above: '催化剂', below: '高温、高压', rotate: [], flip: [] })
   expect(serializeChapter(parsed.doc, parsed.format)).toBe(source)
   const edited = parsed.doc.type.create(null, [
     nodes.structure.create({ smiles: 'CCO>>C=C.O', arrow: '->', above: '浓硫酸 "&" \\ x', below: '' }),
   ])
   const written = serializeChapter(edited, parsed.format)
   expect(written).toBe('```smiles above="浓硫酸 ＂\\&＂ \\\\ x"\nCCO>>C=C.O\n```\n')
-  expect(parseChapter(written).doc.child(0).attrs).toEqual({ smiles: 'CCO>>C=C.O', arrow: '', above: '浓硫酸 ＂&＂ \\ x', below: '', rotate: 0, flip: false })
+  expect(parseChapter(written).doc.child(0).attrs).toEqual({ smiles: 'CCO>>C=C.O', arrow: '', above: '浓硫酸 ＂&＂ \\ x', below: '', rotate: [], flip: [] })
 })
 
 test('条件中有反引号时用 ~~~ 围栏', () => {
@@ -58,18 +58,22 @@ test('条件中有反引号时用 ~~~ 围栏', () => {
   expect(parseChapter(written).doc.child(0).attrs.above).toBe('`a`')
 })
 
-test('分子的方向：rotate 是整数度数（换算到 0–359），flip 是 true 时翻转；写出时省略 0 与不翻转', () => {
+test('分子的方向：每个分子一项（空白分隔），rotate 是整数度数（换算到 0–359），flip 是 true 时翻转；去掉末尾的默认值', () => {
   const attrs = (info: string) => parseChapter(`\`\`\`smiles ${info}\nCCO\n\`\`\`\n`).doc.child(0).attrs
-  expect(attrs('rotate="90" flip="true"')).toMatchObject({ rotate: 90, flip: true })
-  expect(attrs('ROTATE=" -30 " FLIP="True"')).toMatchObject({ rotate: 330, flip: true })
-  expect(attrs('rotate="720"')).toMatchObject({ rotate: 0, flip: false })
-  expect(attrs('rotate="45.5" flip="yes"')).toMatchObject({ rotate: 0, flip: false })
+  expect(attrs('rotate="90" flip="true"')).toMatchObject({ rotate: [90], flip: [true] })
+  expect(attrs('ROTATE=" -30 " FLIP="True"')).toMatchObject({ rotate: [330], flip: [true] })
+  expect(attrs('rotate="720"')).toMatchObject({ rotate: [], flip: [] })
+  expect(attrs('rotate="45.5" flip="yes"')).toMatchObject({ rotate: [], flip: [] })
+  expect(attrs('rotate=" 0  90 x 0 " flip="false TRUE no"')).toMatchObject({ rotate: [0, 90], flip: [false, true] })
   const doc = parseMarkdown('x').type.create(null, [
-    nodes.structure.create({ smiles: 'CCO', rotate: 90, flip: true }),
-    nodes.structure.create({ smiles: 'CCO', rotate: 0, flip: false }),
+    nodes.structure.create({ smiles: 'CCO', rotate: [90], flip: [true] }),
+    nodes.structure.create({ smiles: 'CCO', rotate: [0], flip: [false] }),
+    nodes.structure.create({ smiles: 'CCO.CC(=O)O>>CCOC(C)=O.O', rotate: [0, 90, 0], flip: [false, true] }),
   ])
   const written = serializeChapter(doc, parseChapter('').format)
-  expect(written).toBe('```smiles rotate="90" flip="true"\nCCO\n```\n\n```smiles\nCCO\n```\n')
+  expect(written).toBe(
+    '```smiles rotate="90" flip="true"\nCCO\n```\n\n```smiles\nCCO\n```\n\n```smiles rotate="0 90" flip="false true"\nCCO.CC(=O)O>>CCOC(C)=O.O\n```\n',
+  )
   // 方向不同的同一个分子是两张图片。
-  expect(structureSources(written)).toHaveLength(2)
+  expect(structureSources(written)).toHaveLength(3)
 })

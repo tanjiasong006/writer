@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { drawStructure, isValidSmiles, smilesProblem } from './structure_view.ts'
+import { drawStructure, isValidSmiles, smilesProblem, structureMolecules } from './structure_view.ts'
 import { NO_CONDITIONS } from './markdown.ts'
 
 /** 化学结构式的画法：分子与反应式（docs/decisions.md 第 22 节）。 */
@@ -55,9 +55,9 @@ test('SMILES 无法画出的原因与位置：括号不配对、不能出现的�
   expect(smilesProblem('CC%')).toEqual({ message: '还没有写完', at: { start: 3, end: 3 } })
 })
 
-test('分子的方向：顺时针旋转；左右翻转时原子符号仍是正的，楔形键实、虚互换（同一个构型）；反应式不旋转', () => {
+test('分子的方向：顺时针旋转；左右翻转时原子符号仍是正的，楔形键实、虚互换（同一个构型）', () => {
   const draw = (smiles: string, rotate: number, flip = false) => {
-    const drawing = drawStructure(smiles, 'print', { ...NO_CONDITIONS, rotate, flip })
+    const drawing = drawStructure(smiles, 'print', { ...NO_CONDITIONS, rotate: [rotate], flip: [flip] })
     if ('error' in drawing) throw new Error(drawing.error)
     return drawing
   }
@@ -75,8 +75,23 @@ test('分子的方向：顺时针旋转；左右翻转时原子符号仍是正�
   expect(wedges(false)).toBe(1)
   expect(wedges(true)).toBe(0)
 
-  const reaction = drawStructure('CCCCCC>>CCCCCC', 'print', { ...NO_CONDITIONS, rotate: 90 })
-  const upright = drawStructure('CCCCCC>>CCCCCC', 'print')
-  if ('error' in reaction || 'error' in upright) throw new Error('reaction')
-  expect(reaction.width).toBeCloseTo(upright.width)
+})
+
+test('反应式中每个分子分别有方向（先反应物、后产物）；每个分子标有序号', () => {
+  const size = (rotate: number[]) => {
+    const drawing = drawStructure('CCCCCC.CCCC>>CCCCCCCCCC', 'print', { ...NO_CONDITIONS, rotate })
+    if ('error' in drawing) throw new Error(drawing.error)
+    return [...drawing.svg.querySelectorAll(':scope > svg')].map((svg) => [svg.getAttribute('data-molecule'), Number(svg.getAttribute('width')), Number(svg.getAttribute('height'))])
+  }
+  const upright = size([])
+  const turned = size([0, 90])
+  expect(upright.map(([index]) => index)).toEqual(['0', '1', '2'])
+  // 只有第二个反应物转了：宽高互换。
+  expect(turned[0]).toEqual(upright[0])
+  expect(turned[1][1]).toBeCloseTo(upright[1][2] as number)
+  expect(turned[1][2]).toBeCloseTo(upright[1][1] as number)
+  expect(turned[2]).toEqual(upright[2])
+  expect(structureMolecules('CCCCCC.CCCC>OS(=O)(=O)O>CCCCCCCCCC')).toEqual(['CCCCCC', 'CCCC', 'CCCCCCCCCC'])
+  expect(structureMolecules(' [Na+].[Cl-] ')).toEqual(['[Na+].[Cl-]'])
+  expect(structureMolecules('C>C')).toEqual([])
 })
