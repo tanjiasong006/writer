@@ -14,8 +14,8 @@ afterEach(() => {
   for (const wrapper of mounted.splice(0)) wrapper.unmount()
 })
 
-function mountEditor(content: string) {
-  const wrapper = mount(ChapterEditor, { attachTo: document.body, props: { chapterId: 'a', content, number: '1', title: '绪论' } })
+function mountEditor(content: string, otherStructures?: () => readonly string[]) {
+  const wrapper = mount(ChapterEditor, { attachTo: document.body, props: { chapterId: 'a', content, number: '1', title: '绪论', otherStructures } })
   mounted.push(wrapper)
   const view = (wrapper.vm as unknown as { getView(): EditorView }).getView()
   return { wrapper, view }
@@ -107,4 +107,13 @@ test('插入反应式：写名称、选择箭头、填写条件，写出为带�
   await flushPromises()
   expect(lastChange(wrapper)).toBe('正文\n\n```smiles arrow="<=>" above="催化剂"\nN#N.[H][H]>>N\n```')
   expect(view.dom.querySelector('.structure-block svg')).not.toBeNull()
+})
+
+test('插入时列出本文档中用过的分子：本章的在前，然后是其他章节的', async () => {
+  const { wrapper, view } = mountEditor('```smiles\nCC(C)CC1=CC=CC=C1\n```\n\n```smiles\nCCO>>C=C.O\n```\n', () => ['CC(C)CC1=CC=CC=C1', 'C1CCNCC1'])
+  view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
+  ;(wrapper.vm as unknown as { runCommand(c: string): void }).runCommand('structure')
+  await flushPromises()
+  const names = [...document.querySelectorAll('.structure-popover__option .structure-popover__name')].map((name) => name.textContent)
+  expect(names).toEqual(['CC(C)CC1=CC=CC=C1', '乙醇', '乙烯', 'C1CCNCC1'])
 })

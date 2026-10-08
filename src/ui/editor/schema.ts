@@ -353,6 +353,7 @@ export const schema = new Schema({
      * 化学结构式（docs/decisions.md 第 22 节）：Markdown 中语言为 `smiles` 的围栏代码块，显示为骨架式。
      * 块级原子节点，smiles 是代码块的内容（去掉首尾空白）。反应式（`反应物>试剂>产物`）的箭头与条件
      * 在代码块信息中（`arrow="<=>" above="…" below="…"`）：arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。
+     * 分子的方向也在其中（`rotate="90" flip="true"`）：rotate 是顺时针旋转的度数（0–359），flip 是左右翻转。
      */
     structure: {
       group: 'block',
@@ -362,6 +363,8 @@ export const schema = new Schema({
         arrow: { default: '', validate: 'string' },
         above: { default: '', validate: 'string' },
         below: { default: '', validate: 'string' },
+        rotate: { default: 0, validate: 'number' },
+        flip: { default: false, validate: 'boolean' },
       },
       parseDOM: [{ tag: 'div[data-structure]', getAttrs: (dom) => ({ smiles: dom.getAttribute('data-structure') ?? '' }) }],
       toDOM: (node): DOMOutputSpec => ['div', { class: 'structure-block', 'data-structure': node.attrs.smiles }, node.attrs.smiles],

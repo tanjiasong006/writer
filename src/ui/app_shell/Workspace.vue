@@ -38,7 +38,7 @@ import ExternalChangeDialog from './ExternalChangeDialog.vue'
 import { useExternalChanges } from './use_external_changes.ts'
 import { useHistory } from './use_history.ts'
 import { messageForStorageFailure } from './storage_messages.ts'
-import { appendImage } from '../editor/markdown.ts'
+import { appendImage, structureSources } from '../editor/markdown.ts'
 import { documentStructureImages } from '../editor/structure_view.ts'
 import { embeddableImage } from './embeddable_image.ts'
 import { chapterRefLabels, citationRefLabels, combineRefLabels, elementRefLabels } from '../editor/chapter_ref_view.ts'
@@ -456,6 +456,13 @@ function chapterName(id: ChapterId): string {
 const refReport = shallowRef<ChapterRefUpdate | null>(null)
 
 /** 章节 id，按阅读顺序（与导出相同）。 */
+/** 正在编辑的章节以外的结构式（按阅读顺序）：结构式浮层列出本文档中用过的分子。 */
+function otherStructures(): string[] {
+  return readingOrder()
+    .filter((id) => id !== selectedId.value)
+    .flatMap((id) => structureSources(document.value.contents.get(id) ?? '').map((source) => source.smiles))
+}
+
 function readingOrder(): ChapterId[] {
   const ids: ChapterId[] = []
   const visit = (nodes: typeof tree.value): void => {
@@ -1103,6 +1110,7 @@ async function createFirstChapter(): Promise<void> {
           :element-start="elementStart"
           :focus-mode="focusMode"
           :note="selectedChapter.note ?? ''"
+          :other-structures="otherStructures"
           @edit-note="(rect: DOMRect) => selectedId !== null && editNote(selectedId, rect)"
           @find-status="find.setSelected"
           @stats="stats = $event"

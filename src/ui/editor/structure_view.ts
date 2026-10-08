@@ -1,12 +1,13 @@
 import SmilesDrawer from 'smiles-drawer'
 import type { Node } from 'prosemirror-model'
 import type { NodeView } from 'prosemirror-view'
-import { NO_CONDITIONS, normalizeArrow, structureSources, type StructureConditions, type StructureSource } from './markdown.ts'
+import { NO_CONDITIONS, normalizeArrow, normalizeRotate, structureKey, structureSources, type StructureConditions, type StructureSource } from './markdown.ts'
 import { moleculeBySmiles } from './structure_library.ts'
 
 /**
  * 化学结构式的显示（docs/decisions.md 第 22 节）：用 smiles-drawer 把 SMILES 画成骨架式，文档中保存的是 SMILES 原文。
  * 反应式（`反应物>试剂>产物`）中每个分子分别画出，以“＋”相连，中间是箭头（→ ⇌ ＝），试剂与条件写在箭头上下。
+ * 分子可以旋转、左右翻转（代码块信息中的 rotate、flip）；反应式中的分子不旋转。
  * 无法解析的 SMILES 以红色原文显示（与公式相同），悬停提示原因。编辑器、全文阅读与导出的图片共用同一套画法。
  */
 
@@ -73,6 +74,50 @@ export function isValidSmiles(smiles: string): boolean {
   return [...reaction.reactants, ...reaction.reagents, ...reaction.products].every((molecule) => 'tree' in parse(molecule))
 }
 
+/** 一个分子的 SMILES 无法画出的原因：说明与出错的位置（字符下标，end 不含；整体出错时为 null）。 */
+export interface SmilesProblem {
+  readonly message: string
+  readonly at: { readonly start: number; readonly end: number } | null
+}
+
+/**
+ * 一个分子（不是反应式）的 SMILES 为什么无法画出；能画出时为 null。括号不配对由这里找出位置
+ * （smiles-drawer 只说数量不同），其他按 smiles-drawer 解析时报告的位置说明。
+ */
+export function smilesProblem(smiles: string): SmilesProblem | null {
+  const unpaired = unpairedBracket(smiles)
+  if (unpaired) return unpaired
+  let failure: unknown = null
+  SmilesDrawer.parse(smiles, () => undefined, (error) => (failure = error ?? 'error'))
+  if (failure === null) return 'error' in drawMolecule(smiles, 'text') ? { message: '无法画出这个结构', at: null } : null
+  const { found, location } = failure as { found?: string | null; location?: unknown }
+  const offset = typeof location === 'number' ? location : (location as { start?: { offset?: number } } | undefined)?.start?.offset
+  if (typeof offset !== 'number') return { message: '无法识别的写法', at: null }
+  if (typeof location === 'number') return { message: '连续写了两个键', at: { start: offset, end: offset + 1 } }
+  if (found === null || offset >= smiles.length) return { message: '还没有写完', at: { start: smiles.length, end: smiles.length } }
+  return { message: `这里不能写“${found ?? smiles[offset]}”`, at: { start: offset, end: offset + 1 } }
+}
+
+/** 圆括号与方括号的配对（方括号中不再有括号）：第一个多出的右括号，或最后一个没有闭合的左括号。 */
+function unpairedBracket(smiles: string): SmilesProblem | null {
+  const open: number[] = []
+  let bracket = -1
+  for (let index = 0; index < smiles.length; index++) {
+    const char = smiles[index]
+    const at = { start: index, end: index + 1 }
+    if (bracket >= 0) {
+      if (char === ']') bracket = -1
+      else if (char === '[' || char === '(' || char === ')') return { message: '“[”没有对应的“]”', at: { start: bracket, end: bracket + 1 } }
+    } else if (char === '[') bracket = index
+    else if (char === ']') return { message: '多了一个“]”', at }
+    else if (char === '(') open.push(index)
+    else if (char === ')' && open.pop() === undefined) return { message: '多了一个“)”', at }
+  }
+  if (bracket >= 0) return { message: '“[”没有对应的“]”', at: { start: bracket, end: bracket + 1 } }
+  const last = open.at(-1)
+  return last === undefined ? null : { message: '“(”没有对应的“)”', at: { start: last, end: last + 1 } }
+}
+
 /** 画好的结构式：SVG 元素与其尺寸（SVG 单位）。 */
 export interface StructureDrawing {
   readonly svg: SVGSVGElement
@@ -87,8 +132,53 @@ function subscriptDigits(text: string): string {
   return text.replace(/\d/g, (digit) => String.fromCharCode(0x2080 + Number(digit)))
 }
 
+/** 分子的方向：顺时针旋转的度数与左右翻转（先翻转再旋转）。 */
+export interface Orientation {
+  readonly rotate: number
+  readonly flip: boolean
+}
+
+const UPRIGHT: Orientation = { rotate: 0, flip: false }
+
+interface Point {
+  x: number
+  y: number
+}
+
+/** smiles-drawer 内部的布局（2.x）：画出之前的原子坐标、环的中心与楔形键。 */
+interface Layout {
+  rotateDrawing(): void
+  graph: { vertices: Array<{ position: Point }>; edges: Array<{ wedge: string }> }
+  rings: Array<{ center: Point }>
+}
+
+/**
+ * 在 smiles-drawer 摆正分子（rotateDrawing，按 30° 取整使最长的方向水平）之后转到指定的方向：转的是原子坐标，
+ * 原子符号仍是正的。翻转时楔形键的实、虚互换，画出的仍是同一个立体构型。
+ */
+function orient(layout: Layout, orientation: Orientation): void {
+  const rotateDrawing = layout.rotateDrawing.bind(layout)
+  layout.rotateDrawing = () => {
+    rotateDrawing()
+    const angle = (normalizeRotate(orientation.rotate) * Math.PI) / 180
+    const [cos, sin] = [Math.cos(angle), Math.sin(angle)]
+    // SVG 的 y 轴向下：这个旋转矩阵是顺时针。
+    const turn = (point: Point) => {
+      const x = orientation.flip ? -point.x : point.x
+      const y = point.y
+      point.x = x * cos - y * sin
+      point.y = x * sin + y * cos
+    }
+    for (const vertex of layout.graph.vertices) turn(vertex.position)
+    for (const ring of layout.rings) turn(ring.center)
+    if (orientation.flip) {
+      for (const edge of layout.graph.edges) edge.wedge = edge.wedge === 'up' ? 'down' : edge.wedge === 'down' ? 'up' : edge.wedge
+    }
+  }
+}
+
 /** 画出一个分子（可以是 . 隔开的几个片段）；库中的无机小分子写成化学式。 */
-function drawMolecule(smiles: string, theme: Theme): Drawn {
+function drawMolecule(smiles: string, theme: Theme, orientation: Orientation = UPRIGHT): Drawn {
   const formula = moleculeBySmiles(smiles)?.formula
   if (formula) return drawFormula(subscriptDigits(formula), theme)
   const parsed = parse(smiles)
@@ -96,7 +186,9 @@ function drawMolecule(smiles: string, theme: Theme): Drawn {
   try {
     const svg = document.createElementNS(SVG_NS, 'svg')
     svg.setAttribute('xmlns', SVG_NS)
-    new SmilesDrawer.SvgDrawer(OPTIONS).draw(parsed.tree, svg, theme)
+    const drawer = new SmilesDrawer.SvgDrawer(OPTIONS)
+    if (orientation.rotate !== 0 || orientation.flip) orient(drawer.preprocessor as Layout, orientation)
+    drawer.draw(parsed.tree, svg, theme)
     const [, , width, height] = (svg.getAttribute('viewBox') ?? '').split(' ').map(Number)
     if (!(width > 0 && height > 0)) return { error: 'empty' }
     svg.removeAttribute('style')
@@ -110,7 +202,7 @@ function drawMolecule(smiles: string, theme: Theme): Drawn {
 export function drawStructure(smiles: string, theme: Theme = 'text', conditions: StructureConditions = NO_CONDITIONS): Drawn {
   const text = smiles.trim()
   const reaction = reactionParts(text)
-  if (reaction === null) return drawMolecule(text, theme)
+  if (reaction === null) return drawMolecule(text, theme, conditions)
   if ('error' in reaction) return reaction
   return drawReaction(reaction, conditions, theme)
 }
@@ -242,7 +334,7 @@ export function renderStructure(dom: HTMLElement, smiles: string, conditions: St
   if ('error' in drawing) {
     dom.textContent = smiles
     dom.classList.add('is-invalid')
-    dom.title = drawing.error
+    dom.title = (smiles.includes('>') ? null : smilesProblem(smiles.trim())?.message) ?? drawing.error
     return
   }
   drawing.svg.setAttribute('width', String(drawing.width * STRUCTURE_SCALE))
@@ -252,9 +344,10 @@ export function renderStructure(dom: HTMLElement, smiles: string, conditions: St
   dom.append(drawing.svg)
 }
 
-/** 节点中的条件。 */
+/** 节点中代码块信息的属性。 */
 function nodeConditions(node: Node): StructureConditions {
-  return { arrow: node.attrs.arrow as string, above: node.attrs.above as string, below: node.attrs.below as string }
+  const { arrow, above, below, rotate, flip } = node.attrs as StructureConditions
+  return { arrow, above, below, rotate, flip }
 }
 
 /** 结构式节点的 DOM。 */
@@ -266,7 +359,7 @@ export function staticStructureDOM(node: Node): HTMLElement {
   return dom
 }
 
-/** 编辑器中的节点视图：只随 SMILES 与条件变化重新绘制。 */
+/** 编辑器中的节点视图：只随 SMILES 与属性变化重新绘制。 */
 export function structureNodeView(initial: Node): NodeView {
   let node = initial
   const dom = staticStructureDOM(node)
@@ -274,7 +367,7 @@ export function structureNodeView(initial: Node): NodeView {
     dom,
     update(next) {
       if (next.type !== node.type) return false
-      const changed = ['smiles', 'arrow', 'above', 'below'].some((key) => next.attrs[key] !== node.attrs[key])
+      const changed = ['smiles', 'arrow', 'above', 'below', 'rotate', 'flip'].some((key) => next.attrs[key] !== node.attrs[key])
       if (changed) renderStructure(dom, next.attrs.smiles as string, nodeConditions(next))
       node = next
       return true
@@ -288,7 +381,7 @@ const EXPORT_PIXELS_PER_UNIT = 4
 /** 导出中一个 SVG 单位的磅数（与编辑器中 STRUCTURE_SCALE 个 CSS 像素相同大小）。 */
 const EXPORT_PT_PER_UNIT = STRUCTURE_SCALE * 0.75
 
-/** 导出用的结构式图片：黑色、白底的 PNG（base64）与显示尺寸（磅），以及它对应的 SMILES 与条件。 */
+/** 导出用的结构式图片：黑色、白底的 PNG（base64）与显示尺寸（磅），以及它对应的 SMILES 与属性。 */
 export interface StructureImage extends StructureSource {
   readonly png: string
   readonly width: number
@@ -326,8 +419,8 @@ export async function structureImage(source: StructureSource): Promise<Structure
     step = 'png'
     const png = canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '')
     if (png === '' || png.startsWith('data:')) throw new Error(`unexpected toDataURL result: ${png.slice(0, 40)}`)
-    const { smiles, arrow, above, below } = source
-    return { smiles, arrow, above, below, png, width: drawing.width * EXPORT_PT_PER_UNIT, height: drawing.height * EXPORT_PT_PER_UNIT }
+    const { smiles, arrow, above, below, rotate, flip } = source
+    return { smiles, arrow, above, below, rotate, flip, png, width: drawing.width * EXPORT_PT_PER_UNIT, height: drawing.height * EXPORT_PT_PER_UNIT }
   } catch (error) {
     console.error('[structureImage] failed', { step, smiles: source.smiles, pixelWidth, pixelHeight, svgLength: url.length, error })
     return null
@@ -338,7 +431,7 @@ export async function structureImage(source: StructureSource): Promise<Structure
 export async function documentStructureImages(markdowns: readonly string[]): Promise<StructureImage[]> {
   const sources = new Map<string, StructureSource>()
   for (const source of markdowns.flatMap((markdown) => structureSources(markdown))) {
-    sources.set(JSON.stringify([source.smiles, source.arrow, source.above, source.below]), source)
+    sources.set(structureKey(source), source)
   }
   const images = await Promise.all([...sources.values()].map((source) => structureImage(source)))
   return images.filter((image): image is StructureImage => image !== null)

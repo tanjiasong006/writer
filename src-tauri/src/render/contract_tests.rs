@@ -141,6 +141,12 @@ fn block(block: &Block) -> Value {
                     structure[key] = json!(value);
                 }
             }
+            if conditions.rotate != 0 {
+                structure["rotate"] = json!(conditions.rotate);
+            }
+            if conditions.flip {
+                structure["flip"] = json!(true);
+            }
             structure
         }
         Block::Rule => json!({ "type": "rule" }),

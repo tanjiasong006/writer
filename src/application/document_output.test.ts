@@ -78,7 +78,7 @@ function recordingDrawer(): { draw: StructureDrawer; calls: Array<readonly strin
   const calls: Array<readonly string[]> = []
   const draw: StructureDrawer = async (markdowns) => {
     calls.push(markdowns)
-    return markdowns.filter((markdown) => markdown !== '').map((markdown) => ({ smiles: markdown, arrow: '', above: '', below: '', png: 'AA==', width: 10, height: 5 }))
+    return markdowns.filter((markdown) => markdown !== '').map((markdown) => ({ smiles: markdown, arrow: '', above: '', below: '', rotate: 0, flip: false, png: 'AA==', width: 10, height: 5 }))
   }
   return { draw, calls }
 }
@@ -124,7 +124,7 @@ test('createPdfPreview：内容只捕获一次，每次按完整的排版配置�
   expect(output.previews[0].request).toBe(output.previews[1].request)
   // 结构式的图片只画一次。
   expect(drawer.calls).toEqual([['正文']])
-  expect(output.previews[0].request.structures).toEqual([{ smiles: '正文', arrow: '', above: '', below: '', png: 'AA==', width: 10, height: 5 }])
+  expect(output.previews[0].request.structures).toEqual([{ smiles: '正文', arrow: '', above: '', below: '', rotate: 0, flip: false, png: 'AA==', width: 10, height: 5 }])
   expect(output.previews[0].request.chapters).toEqual([{ id: 'a', number: [1], title: '绪论', markdown: '正文' }])
   expect(output.previews[1].pdfLayout.paper).toBe('a4')
 })

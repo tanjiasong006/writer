@@ -658,14 +658,29 @@ tokenizer.core.ruler.push('writer_structure', (state) => {
   }
 })
 
-/** 反应式的箭头与条件（docs/decisions.md 第 22 节）。arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。 */
+/**
+ * 结构式代码块信息中的属性（docs/decisions.md 第 22 节）：反应式的箭头与条件，分子的方向。
+ * arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。rotate 是顺时针旋转的度数（0–359），flip 是左右翻转（先翻转再旋转）；只用于分子。
+ */
 export interface StructureConditions {
   readonly arrow: string
   readonly above: string
   readonly below: string
+  readonly rotate: number
+  readonly flip: boolean
 }
 
-export const NO_CONDITIONS: StructureConditions = { arrow: '', above: '', below: '' }
+export const NO_CONDITIONS: StructureConditions = { arrow: '', above: '', below: '', rotate: 0, flip: false }
+
+/** 旋转的度数：整数，换算到 0–359。 */
+export function normalizeRotate(degrees: number): number {
+  return Number.isFinite(degrees) ? ((Math.round(degrees) % 360) + 360) % 360 : 0
+}
+
+/** 查找结构式图片等用的键：SMILES 与全部属性。 */
+export function structureKey(source: StructureSource): string {
+  return JSON.stringify([source.smiles, source.arrow, source.above, source.below, source.rotate, source.flip])
+}
 
 /** 箭头的写法：→ 写作空（也接受 `->`），其他不认识的写法也是 →。 */
 export function normalizeArrow(arrow: string): string {
@@ -675,7 +690,8 @@ export function normalizeArrow(arrow: string): string {
 
 /**
  * 代码块信息中 smiles 之后的属性：`key="value"`，值中不含双引号（与 Rust 的 render::markdown 相同）。
- * 认识 arrow、above、below（不区分大小写），其他忽略；条件去掉首尾空白。
+ * 认识 arrow、above、below、rotate、flip（不区分大小写），其他忽略；条件去掉首尾空白。
+ * rotate 是整数（可以有首尾空白），其他写法是 0；flip 是 true（不区分大小写）时翻转。
  */
 export function parseStructureInfo(info: string): StructureConditions {
   const rest = info.trim().replace(/^\S+/, '')
@@ -684,6 +700,8 @@ export function parseStructureInfo(info: string): StructureConditions {
     const key = match[1].toLowerCase()
     if (key === 'arrow') conditions = { ...conditions, arrow: normalizeArrow(match[2]) }
     else if (key === 'above' || key === 'below') conditions = { ...conditions, [key]: match[2].trim() }
+    else if (key === 'rotate') conditions = { ...conditions, rotate: /^\s*-?\d+\s*$/.test(match[2]) ? normalizeRotate(Number(match[2])) : 0 }
+    else if (key === 'flip') conditions = { ...conditions, flip: match[2].trim().toLowerCase() === 'true' }
   }
   return conditions
 }
@@ -699,6 +717,9 @@ function structureInfo(conditions: StructureConditions): string {
   if (arrow !== '') parts.push(`arrow="${arrow}"`)
   if (conditions.above.trim() !== '') parts.push(`above="${value(conditions.above)}"`)
   if (conditions.below.trim() !== '') parts.push(`below="${value(conditions.below)}"`)
+  const rotate = normalizeRotate(conditions.rotate)
+  if (rotate !== 0) parts.push(`rotate="${rotate}"`)
+  if (conditions.flip) parts.push('flip="true"')
   return parts.join(' ')
 }
 
@@ -709,7 +730,7 @@ function structureFence(smiles: string, info: string): string {
   return char.repeat(Math.max(2, ...runs) + 1)
 }
 
-/** 正文中的一个结构式：SMILES 与反应式的条件。 */
+/** 正文中的一个结构式：SMILES 与代码块信息中的属性。 */
 export interface StructureSource extends StructureConditions {
   readonly smiles: string
 }
@@ -720,7 +741,7 @@ export function structureSources(markdown: string): readonly StructureSource[] {
   for (const token of flattenTokens(tokenizer.parse(markdown, {}))) {
     if (token.type !== 'structure' || token.content === '') continue
     const source = { smiles: token.content, ...parseStructureInfo(token.info) }
-    sources.set(JSON.stringify([source.smiles, source.arrow, source.above, source.below]), source)
+    sources.set(structureKey(source), source)
   }
   return [...sources.values()]
 }

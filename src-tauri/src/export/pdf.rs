@@ -2182,7 +2182,7 @@ mod tests {
         use crate::render::markdown::StructureConditions;
         let mut request = request("", &[("a", vec![1], "反应", "```smiles arrow=\"<=>\" above=\"催化剂\"\nN#N.[H][H]>>N\n```\n\n```smiles\nN#N.[H][H]>>N\n```")]);
         let mut image = crate::render::tests::test_structure("N#N.[H][H]>>N");
-        image.conditions = StructureConditions { arrow: "<=>".into(), above: "催化剂".into(), below: String::new() };
+        image.conditions = StructureConditions { arrow: "<=>".into(), above: "催化剂".into(), ..Default::default() };
         request.structures = vec![image];
         let dir = project();
         let (paged, report) = layout(&build(&request), dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
@@ -2197,6 +2197,24 @@ mod tests {
         let structure: crate::render::RenderStructure = serde_json::from_str(json).unwrap();
         assert_eq!(structure.conditions.arrow, "=");
         assert_eq!(structure.conditions.above, "光");
+        // 分子的方向（之前的版本不传时是默认值）。
+        let json = r#"{"smiles":"CCO","arrow":"","above":"","below":"","rotate":90,"flip":true,"png":"","width":1,"height":2}"#;
+        let structure: crate::render::RenderStructure = serde_json::from_str(json).unwrap();
+        assert_eq!((structure.conditions.rotate, structure.conditions.flip), (90, true));
+    }
+
+    /// 方向不同的同一个分子是不同的图片：没有对应方向的图片时按原文输出。
+    #[test]
+    fn molecule_images_match_their_orientation() {
+        use crate::render::markdown::StructureConditions;
+        let mut request = request("", &[("a", vec![1], "分子", "```smiles rotate=\"90\"\nCCO\n```\n\n```smiles\nCCO\n```")]);
+        let mut image = crate::render::tests::test_structure("CCO");
+        image.conditions = StructureConditions { rotate: 90, ..Default::default() };
+        request.structures = vec![image];
+        let dir = project();
+        let (paged, report) = layout(&build(&request), dir.path(), system_fonts(), &PdfLayout { toc: false, ..PdfLayout::default() }).unwrap();
+        assert_eq!(images(&paged).len(), 1);
+        assert_eq!(report.invalid_structures, vec!["CCO"]);
     }
 
     fn three_chapters(title: &str) -> Document {

@@ -39,3 +39,13 @@ CCO.CC(=O)O>OS(=O)(=O)O>CCOC(C)=O.O
 ```smiles arrow="->" other="x" ABOVE=" 光照 "
 CC.ClCl>>CCCl.Cl
 ```
+
+方向：
+
+```smiles rotate="90" FLIP="true"
+CCCCO
+```
+
+```smiles rotate=" -30 " flip="no"
+CCO
+```

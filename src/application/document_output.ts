@@ -32,12 +32,14 @@ export interface RenderRequest {
   readonly structures: readonly RenderStructure[]
 }
 
-/** 前端画好的结构式图片：PNG（base64）与显示尺寸（磅），对应的 SMILES 与反应式的箭头、条件。 */
+/** 前端画好的结构式图片：PNG（base64）与显示尺寸（磅），对应的 SMILES 与代码块信息中的属性（箭头、条件、方向）。 */
 export interface RenderStructure {
   readonly smiles: string
   readonly arrow: string
   readonly above: string
   readonly below: string
+  readonly rotate: number
+  readonly flip: boolean
   readonly png: string
   readonly width: number
   readonly height: number

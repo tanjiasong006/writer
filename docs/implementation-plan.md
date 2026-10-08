@@ -1048,6 +1048,14 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   库中的无机小分子写成化学式；`StructurePopover.vue` 的“反应式”（名称或 SMILES 以 + 分隔、匹配列表、箭头、条件）；
   导出图片按 SMILES 与条件对应（`RenderStructure` 带条件，Rust `StructureKey`）。验证：画法、浮层、编辑器插入、Markdown 读写与转义、
   合并 Markdown 的往返、PDF 按条件对应图片；Storybook 中目视检查了正文与浮层，浏览器画出的反应式 PNG 经 PDF 导出检查了页面效果。
+- 输入与方向改进（2026-10-08，规则见 decisions 第 22 节）：`structure_library.ts` 的 `smilesText`（全角与输入法符号）、
+  `usedMolecules`（本文档中用过的分子；`ChapterEditor` 的 `otherStructures` 由 `Workspace` 按阅读顺序提供，本章取编辑器中的文档）；
+  `structure_view.ts` 的 `smilesProblem`（括号配对自己找位置，其他用 smiles-drawer 报告的位置）与方向（`orient` 在 smiles-drawer 的
+  `rotateDrawing` 之后转原子坐标，翻转时互换楔形键）；`StructurePopover.vue` 的“本文档中”列表、出错说明、“编辑 SMILES”按钮与 Tab、方向按钮，固定高度的列表与预览、浮层式的反应式匹配。
+  格式：`rotate` / `flip`（schema、`parseStructureInfo` / 写出、`structureKey`；Rust `StructureConditions`、共享 fixture `structures`）。
+  验证：组件与编辑器集成测试、Markdown 读写、画法（旋转后宽高互换、翻转后符号仍正、楔形键互换、反应式不旋转）、Rust 按方向对应图片；
+  Storybook（Chrome）中目视检查了浮层（用过的分子、Tab、旋转与翻转、出错标注）与正文中的旋转、翻转。未检查深色外观、
+  Tauri WebView 中的显示与导出 PNG。
 
 #### P2-10 表注（完成，2026-10-05）
 

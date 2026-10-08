@@ -4,7 +4,7 @@
  */
 
 export interface Molecule {
-  /** 中文名称；第一个是显示的名称，其余是别名。 */
+  /** 中文名称；第一个是显示的名称，其余是别名。不在库中的分子（文档中用过的）为空。 */
   readonly names: readonly string[]
   readonly english: string
   readonly smiles: string
@@ -160,8 +160,8 @@ export function splitTerms(text: string): string[] {
   let depth = 0
   let current = ''
   for (const char of text) {
-    if (char === '[') depth++
-    else if (char === ']') depth = Math.max(0, depth - 1)
+    if ('[［【'.includes(char)) depth++
+    else if (']］】'.includes(char)) depth = Math.max(0, depth - 1)
     if ((char === '+' || char === '＋') && depth === 0) {
       terms.push(current)
       current = ''
@@ -171,9 +171,44 @@ export function splitTerms(text: string): string[] {
   return terms.map((term) => term.trim()).filter((term) => term !== '')
 }
 
+/**
+ * 文档中用过的分子（按出现顺序，不重复）：结构式本身，反应式中是各个反应物与产物；不含试剂与库中写成化学式的无机小分子。
+ * 库中有的是库中的分子，其他没有名称（names 为空）。
+ */
+export function usedMolecules(structures: readonly string[]): readonly Molecule[] {
+  const seen = new Set<string>()
+  const result: Molecule[] = []
+  for (const structure of structures) {
+    const parts = structure.split('>')
+    const molecules = parts.length === 3 ? [parts[0], parts[2]].flatMap((side) => side.split('.')) : [structure]
+    for (const text of molecules) {
+      const smiles = text.trim()
+      if (smiles === '' || seen.has(smiles)) continue
+      seen.add(smiles)
+      const molecule = moleculeBySmiles(smiles)
+      if (!molecule?.formula) result.push(molecule ?? { names: [], english: '', smiles })
+    }
+  }
+  return result
+}
+
+/** 中文输入法打出的符号：句号、方括号与全角空格。 */
+const IME_SYMBOLS: Readonly<Record<string, string>> = { '。': '.', '【': '[', '】': ']', '　': ' ' }
+
+/**
+ * 输入的 SMILES：全角字符（（）＝＃［］＠ 等）换成半角，中文输入法的符号换成对应的 SMILES 符号。
+ * 只用于当作 SMILES 的文字；按名称查找仍用原文（名称中有全角括号）。
+ */
+export function smilesText(text: string): string {
+  return text
+    .replace(/[！-～]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+    .replace(/[。【】　]/g, (char) => IME_SYMBOLS[char])
+    .trim()
+}
+
 /** 一项的 SMILES：库中的名称换成它的 SMILES，其他当作 SMILES。 */
 export function termSmiles(term: string): string {
-  return moleculeByName(term)?.smiles ?? term.trim()
+  return moleculeByName(term)?.smiles ?? smilesText(term)
 }
 
 /** 一侧的写法 → SMILES（各分子以 . 相连）。 */

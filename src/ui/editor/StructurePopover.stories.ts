@@ -24,11 +24,42 @@ export const Search: Story = {
   },
 }
 
+/** 插入新结构式：没有输入时列出本文档中用过的分子（库外的显示 SMILES），不默认选中。 */
+export const UsedInDocument: Story = {
+  args: { used: ['CC(C)CC1=CC=C(C=C1)C(C)C(=O)O', 'CCO.CC(=O)O>>CCOC(C)=O.O', 'C1CCNCC1'] },
+}
+
+/** 选中一个匹配：行末提示 Tab 把它的 SMILES 填入输入框修改。 */
+export const SearchSelected: Story = {
+  play: ({ canvasElement }) => {
+    const input = canvasElement.ownerDocument.querySelector<HTMLInputElement>('.structure-popover__search')
+    if (!input) return
+    input.value = '苯酚'
+    input.dispatchEvent(new Event('input'))
+  },
+}
+
 /** 编辑已有结构式：输入框中是 SMILES，库中有的显示名称。 */
 export const Editing: Story = { args: { smiles: 'CC(=O)OC1=CC=CC=C1C(=O)O' } }
 
-/** 无法识别的 SMILES：预览以红色原文显示。 */
+/** 无法识别的 SMILES：预览中标出出错的字符并说明原因。 */
 export const Invalid: Story = { args: { smiles: 'C1CC(' } }
+
+/** 不能出现的字符。 */
+export const InvalidCharacter: Story = { args: { smiles: 'CC(=O)Oq' } }
+
+/** 分子库中没有的名称：提示可以直接输入 SMILES。 */
+export const UnknownName: Story = {
+  play: ({ canvasElement }) => {
+    const input = canvasElement.ownerDocument.querySelector<HTMLInputElement>('.structure-popover__search')
+    if (!input) return
+    input.value = '布洛芬片'
+    input.dispatchEvent(new Event('input'))
+  },
+}
+
+/** 旋转、翻转过的分子：预览右上角是方向按钮。 */
+export const Oriented: Story = { args: { smiles: 'OCC1=CC=CC=C1', rotate: 90, flip: true } }
 
 /** 反应式：反应物与产物写名称或 SMILES，箭头与上下的条件。 */
 export const Reaction: Story = {

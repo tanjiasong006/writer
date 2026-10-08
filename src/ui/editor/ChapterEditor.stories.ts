@@ -416,7 +416,7 @@ export const Chemistry: Story = {
   },
 }
 
-/** 化学结构式（docs/decisions.md 第 22 节）：语言为 smiles 的代码块画成骨架式；无法识别的以红色原文显示。 */
+/** 化学结构式（docs/decisions.md 第 22 节）：语言为 smiles 的代码块画成骨架式（可旋转、翻转）；无法识别的以红色原文显示。 */
 export const Structures: Story = {
   args: {
     chapterId: 'structures',
@@ -434,6 +434,9 @@ export const Structures: Story = {
       '阿司匹林与咖啡因：\n\n' +
       '```smiles\nCC(=O)OC1=CC=CC=C1C(=O)O\n```\n\n' +
       '```smiles\nCN1C=NC2=C1C(=O)N(C)C(=O)N2C\n```\n\n' +
+      '旋转 90° 与左右翻转的阿司匹林：\n\n' +
+      '```smiles rotate="90"\nCC(=O)OC1=CC=CC=C1C(=O)O\n```\n\n' +
+      '```smiles flip="true"\nCC(=O)OC1=CC=CC=C1C(=O)O\n```\n\n' +
       '写错的结构式：\n\n```smiles\nC1CC(\n```\n',
   },
 }

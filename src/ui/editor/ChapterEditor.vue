@@ -99,6 +99,8 @@ const props = defineProps<{
   focusMode?: boolean
   /** 本章图表编号的起点（所在一级章节与之前的图、表数量，element_numbering.ts）；只影响显示。 */
   elementStart?: ElementStart
+  /** 其他章节中的结构式（SMILES，按阅读顺序）：编辑结构式时列出用过的分子；打开浮层时才取。 */
+  otherStructures?: () => readonly string[]
 }>()
 
 const emit = defineEmits<{
@@ -922,13 +924,24 @@ const structureEditor = shallowRef<{
   readonly pos: number | null
   readonly value: StructureValue
   readonly anchor: { readonly x: number; readonly y: number }
+  /** 本文档中的结构式：本章在前（按正文顺序），然后是其他章节。 */
+  readonly used: readonly string[]
 } | null>(null)
+
+/** 本文档中的结构式（SMILES）：本章正文中的在前。 */
+function documentStructures(): readonly string[] {
+  const own: string[] = []
+  view?.state.doc.descendants((node) => {
+    if (node.type === nodes.structure) own.push(node.attrs.smiles as string)
+  })
+  return [...own, ...(props.otherStructures?.() ?? [])]
+}
 
 function startNewStructure(): void {
   if (!view || !insertStructure({ smiles: 'C' })(view.state)) return
   const caret = view.coordsAtPos(view.state.selection.to)
-  const value = { smiles: '', arrow: '', above: '', below: '' }
-  structureEditor.value = { chapterId: currentId, pos: null, value, anchor: { x: caret.left, y: caret.bottom } }
+  const value = { smiles: '', arrow: '', above: '', below: '', rotate: 0, flip: false }
+  structureEditor.value = { chapterId: currentId, pos: null, value, anchor: { x: caret.left, y: caret.bottom }, used: documentStructures() }
 }
 
 function editStructure(pos: number): void {
@@ -937,8 +950,14 @@ function editStructure(pos: number): void {
   if (node?.type !== nodes.structure) return
   const dom = view.nodeDOM(pos)
   const rect = dom instanceof Element ? dom.getBoundingClientRect() : view.coordsAtPos(pos)
-  const { smiles, arrow, above, below } = node.attrs as StructureValue
-  structureEditor.value = { chapterId: currentId, pos, value: { smiles, arrow, above, below }, anchor: { x: rect.left, y: rect.bottom } }
+  const { smiles, arrow, above, below, rotate, flip } = node.attrs as StructureValue
+  structureEditor.value = {
+    chapterId: currentId,
+    pos,
+    value: { smiles, arrow, above, below, rotate, flip },
+    anchor: { x: rect.left, y: rect.bottom },
+    used: documentStructures(),
+  }
 }
 
 function commitStructure(value: StructureValue): void {
@@ -1262,6 +1281,9 @@ defineExpose({
       :arrow="structureEditor.value.arrow"
       :above="structureEditor.value.above"
       :below="structureEditor.value.below"
+      :rotate="structureEditor.value.rotate"
+      :flip="structureEditor.value.flip"
+      :used="structureEditor.used"
       @commit="commitStructure"
       @cancel="cancelStructure"
     />

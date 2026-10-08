@@ -316,7 +316,7 @@ mod tests {
         };
         let text = export(&build(&request), dir.path(), "assets").text;
         assert!(text.contains("```smiles\nCCO\n```"), "{text}");
-        let conditions = StructureConditions { arrow: "<=>".into(), above: "浓 \\ & `x`".into(), below: "△".into() };
+        let conditions = StructureConditions { arrow: "<=>".into(), above: "浓 \\ & `x`".into(), below: "△".into(), ..Default::default() };
         let reparsed: Vec<Block> = parse(&text).into_iter().filter(|block| matches!(block, Block::Structure { .. })).collect();
         assert_eq!(
             reparsed,

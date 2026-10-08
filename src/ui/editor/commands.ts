@@ -466,12 +466,14 @@ export function setMath(pos: number, tex: string): Command {
   }
 }
 
-/** 结构式的内容：SMILES 与反应式的箭头、条件。 */
+/** 结构式的内容：SMILES、反应式的箭头与条件、分子的方向。 */
 export interface StructureAttrs {
   readonly smiles: string
   readonly arrow?: string
   readonly above?: string
   readonly below?: string
+  readonly rotate?: number
+  readonly flip?: boolean
 }
 
 /** 化学结构式（docs/decisions.md 第 22 节）：与公式块相同的插入规则，光标放在其后的段落中。 */
@@ -484,12 +486,19 @@ export function insertStructure(attrs: StructureAttrs): Command {
   })
 }
 
-/** 修改 pos 处结构式的 SMILES 与条件（没有给出的条件清空）。 */
+/** 修改 pos 处结构式的 SMILES、条件与方向（没有给出的清空）。 */
 export function setStructure(pos: number, attrs: StructureAttrs): Command {
   return (state, dispatch) => {
     const node = state.doc.nodeAt(pos)
     if (node?.type !== nodes.structure) return false
-    const next = { smiles: attrs.smiles, arrow: attrs.arrow ?? '', above: attrs.above ?? '', below: attrs.below ?? '' }
+    const next = {
+      smiles: attrs.smiles,
+      arrow: attrs.arrow ?? '',
+      above: attrs.above ?? '',
+      below: attrs.below ?? '',
+      rotate: attrs.rotate ?? 0,
+      flip: attrs.flip ?? false,
+    }
     if (Object.entries(next).every(([key, value]) => node.attrs[key] === value)) return true
     if (dispatch) dispatch(state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, ...next }))
     return true

@@ -117,18 +117,23 @@ pub fn cell_place(spans: &[CellSpan], row: usize, col: usize) -> CellPlace {
     CellPlace::Single
 }
 
-/// 反应式的箭头与条件（docs/decisions.md 第 22 节）：arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。
+/// 结构式代码块信息中的属性（docs/decisions.md 第 22 节）：反应式的箭头与条件，分子的方向。
+/// arrow 为空是 →，`<=>` 是 ⇌，`=` 是＝。rotate 是顺时针旋转的度数（0–359），flip 是左右翻转（先翻转再旋转）；
+/// 方向由前端画进图片，这里只用于对应图片与写回信息。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 #[serde(default)]
 pub struct StructureConditions {
     pub arrow: String,
     pub above: String,
     pub below: String,
+    pub rotate: i32,
+    pub flip: bool,
 }
 
 impl StructureConditions {
-    /// 代码块信息中第一个词之后的属性 `key="value"`（值中不含双引号）：认识 arrow、above、below（不区分大小写），
-    /// 其他忽略；条件去掉首尾空白。与编辑器的 parseStructureInfo 相同。
+    /// 代码块信息中第一个词之后的属性 `key="value"`（值中不含双引号）：认识 arrow、above、below、rotate、flip
+    /// （不区分大小写），其他忽略；条件去掉首尾空白；rotate 是整数（可有首尾空白，其他写法是 0），flip 是 true
+    /// （不区分大小写）时翻转。与编辑器的 parseStructureInfo 相同。
     pub fn parse(info: &str) -> Self {
         let info = info.trim();
         let rest = &info[info.find(char::is_whitespace).unwrap_or(info.len())..];
@@ -156,6 +161,12 @@ impl StructureConditions {
                 "arrow" => conditions.arrow = normalize_arrow(&value),
                 "above" => conditions.above = value.trim().to_owned(),
                 "below" => conditions.below = value.trim().to_owned(),
+                "rotate" => {
+                    let value = value.trim();
+                    // 与编辑器相同：可选的负号与数字（parse 还接受 +）。
+                    conditions.rotate = if value.starts_with('+') { 0 } else { value.parse::<i64>().map_or(0, normalize_rotate) };
+                }
+                "flip" => conditions.flip = value.trim().eq_ignore_ascii_case("true"),
                 _ => {}
             }
             i = close + 1;
@@ -179,8 +190,20 @@ impl StructureConditions {
         if !self.below.trim().is_empty() {
             info.push_str(&format!(" below=\"{}\"", value(&self.below)));
         }
+        let rotate = normalize_rotate(self.rotate.into());
+        if rotate != 0 {
+            info.push_str(&format!(" rotate=\"{rotate}\""));
+        }
+        if self.flip {
+            info.push_str(" flip=\"true\"");
+        }
         info
     }
+}
+
+/// 旋转的度数换算到 0–359。
+fn normalize_rotate(degrees: i64) -> i32 {
+    degrees.rem_euclid(360) as i32
 }
 
 /// 箭头：`<=>` 与 `=` 保留，其他（含 `->`）都是 → 并写作空。
