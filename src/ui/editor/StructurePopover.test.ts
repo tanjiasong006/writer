@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import StructurePopover from './StructurePopover.vue'
 import { loadExtendedMolecules } from './structure_library.ts'
@@ -145,18 +145,37 @@ test('分子可以旋转、翻转（翻转的是看到的样子）；反应式�
   expect((await open('CCO>>C=C.O')).find('.structure-popover__orient').exists()).toBe(false)
 })
 
-test('版面不随输入跳动：插入时一开始就有列表的位置，编辑时第一次有匹配后出现，之后没有匹配也不收起', async () => {
-  const inserting = await open('')
-  expect(inserting.find('.structure-popover__results').exists()).toBe(true)
-  expect(inserting.find('.structure-popover__empty').exists()).toBe(true)
+describe('位置：始终在窗口内', () => {
+  /** 浮层的高度 height、窗口高度 window 时打开，返回浮层的上、下边。 */
+  async function placed(anchorY: number, height: number, windowHeight: number) {
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(windowHeight)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(height)
+    const wrapper = mount(StructurePopover, { attachTo: document.body, props: { anchor: { x: 100, y: anchorY }, smiles: 'CCO' } })
+    mounted.push(wrapper)
+    await flushPromises()
+    const style = (wrapper.find('.structure-popover').element as HTMLElement).style
+    vi.restoreAllMocks()
+    const top = style.top !== '' ? parseFloat(style.top) : windowHeight - parseFloat(style.bottom) - height
+    return { top, bottom: top + height }
+  }
 
+  test('下方放得下时在下方，否则在上方', async () => {
+    expect((await placed(100, 400, 800)).top).toBe(106)
+    expect((await placed(700, 400, 800)).bottom).toBeLessThanOrEqual(700 - 28)
+  })
+
+  test('上下都放不下时不超出窗口（盖住结构式）', async () => {
+    const { top, bottom } = await placed(400, 475, 700)
+    expect(top).toBeGreaterThanOrEqual(8)
+    expect(bottom).toBeLessThanOrEqual(692)
+  })
+})
+
+test('分子的列表位置一直在：编辑已有结构式时也有，输入时浮层高度不变', async () => {
   const editing = await open('CCO')
-  expect(editing.find('.structure-popover__results').exists()).toBe(false)
+  expect(editing.find('.structure-popover__results').exists()).toBe(true)
   await input(editing).setValue('苯')
-  expect(editing.find('.structure-popover__results').exists()).toBe(true)
-  await input(editing).setValue('CCO')
-  expect(editing.find('.structure-popover__list').exists()).toBe(false)
-  expect(editing.find('.structure-popover__results').exists()).toBe(true)
+  expect(editing.find('.structure-popover__list').exists()).toBe(true)
 })
 
 test('点击一个分子直接完成', async () => {

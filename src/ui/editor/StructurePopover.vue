@@ -22,8 +22,8 @@ import { normalizeArrow, normalizeRotate, type StructureConditions } from './mar
  *   扩展库中的分子在列表中标“扩展”。输入的文字是有效的 SMILES 时默认使用它（↑ 回到它），
  *   否则默认第一个匹配；↑ / ↓ 选择，点击一个分子直接完成。没有输入时列出本文档中用过的分子（不默认选中）。
  *   选中的一行末尾的“编辑 SMILES”（或 Tab）把它的 SMILES 填入输入框，在它的基础上修改。
- * - 版面不随输入跳动：列表出现后高度固定（插入新结构式时一开始就有），预览高度固定、过大的结构式缩小显示；
- *   反应式中的匹配浮在下方的内容之上。
+ * - 版面不随输入跳动：分子的列表位置一直在、高度固定（没有匹配时是一句提示），预览高度固定、过大的结构式缩小显示；
+ *   反应式中的匹配浮在下方的内容之上。浮层始终在窗口内：下方放不下时在上方，上下都放不下时盖住结构式。
  * - 反应式：反应物与产物写分子的名称或 SMILES，以“+”分隔；正在输入的名称下方列出匹配（一侧为空或刚输入“+”时列出
  *   本文档中用过的分子），↑ / ↓ 选择、Enter 填入。
  *   箭头（→ ⇌ ＝）与箭头上下的条件。SMILES 中原有的试剂保留（显示在箭头上方）。
@@ -97,14 +97,6 @@ const active = ref(-1)
 /** 默认选中的：输入有效的 SMILES 或没有输入时是输入的文字本身，否则是第一个匹配。 */
 const first = computed(() => (typedValid.value || listingUsed.value || matches.value.length === 0 ? -1 : 0))
 watch(query, () => (active.value = first.value), { immediate: true })
-/** 列表的位置：插入新结构式时一开始就有，编辑时在第一次有匹配时出现；出现后不再收起（高度固定）。 */
-const listShown = ref(listingUsed.value || matches.value.length > 0)
-watch(matches, async (list) => {
-  if (listShown.value || list.length === 0) return
-  listShown.value = true
-  await nextTick()
-  place()
-})
 
 // 反应式
 const reactants = ref(isReaction ? sideText(initialParts[0]) : '')
@@ -192,8 +184,11 @@ function place(): void {
   if (!element) return
   const { x, y } = props.anchor
   const left = Math.max(EDGE, Math.min(x - 24, window.innerWidth - element.offsetWidth - EDGE))
-  if (y + GAP + element.offsetHeight <= window.innerHeight - EDGE) position.value = { left, top: y + GAP }
-  else position.value = { left, bottom: Math.max(EDGE, window.innerHeight - (y - LINE - GAP)) }
+  const height = element.offsetHeight
+  if (y + GAP + height <= window.innerHeight - EDGE) position.value = { left, top: y + GAP }
+  else if (y - LINE - GAP - height >= EDGE) position.value = { left, bottom: window.innerHeight - (y - LINE - GAP) }
+  // 上下都放不下：盖住结构式，但整个浮层在窗口内（比窗口还高时贴着上沿）。
+  else position.value = { left, top: Math.max(EDGE, window.innerHeight - EDGE - height) }
 }
 
 /**
@@ -411,9 +406,9 @@ onMounted(async () => {
         autocomplete="off"
         @keydown="onKeydown"
       />
-      <div v-if="listShown" class="structure-popover__results">
+      <div class="structure-popover__results">
         <div v-if="listingUsed && matches.length > 0" class="structure-popover__list-label">本文档中</div>
-        <div v-if="matches.length === 0 && listingUsed" class="structure-popover__empty">输入中文或英文名称查找常见分子，也可以直接输入 SMILES</div>
+        <div v-if="matches.length === 0" class="structure-popover__empty">输入中文或英文名称查找常见分子，也可以直接输入 SMILES</div>
         <div
           v-if="matches.length > 0"
           :id="`${id}-list`"
