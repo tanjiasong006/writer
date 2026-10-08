@@ -1094,6 +1094,14 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   浮层与编辑器测试先加载扩展库。Story `StructurePopover/ExtendedSearch`、`PinyinInitials`，Storybook（Chrome）中目视检查了列表、
   “扩展”标记与带楔形键的大分子预览。未检查深色外观与 Tauri WebView 中的加载时间。
 
+#### P2-14 核心分子库扩充（完成，2026-10-08）
+
+- 规则见 decisions 第 22 节“分子库”。在 `structure_library.ts` 的各分类中加入 289 个高中与大学有机化学常见物质（共约 380 个）：
+  候选清单的英文名称在 PubChem 查 SMILES，RDKit 转凯库勒式、去立体构型，与扩展库同名分子、现有核心库对照；
+  有标记（顺反构型、盐、链状糖、与 PubChem 或扩展库写法不一）的 16 个经产品负责人确认不收。
+  `scripts/molecules/build.py`：与核心库骨架相同但标了立体构型的扩展库分子保留；重新生成扩展库（11,893 个）。
+- 验证：核心库全部可画出且不重复（原有测试）；测试中“库外的分子”改用确实不在库中的 SMILES。
+
 ### 发布准备（非功能）
 
 1. 手动验收清单在正式包中全部走一遍（需要真实桌面环境与 Word / WPS，known-risks #5）。

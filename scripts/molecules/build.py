@@ -6,7 +6,8 @@
 - 只保留单个分子（不含盐、配合物、水合物）、2～80 个重原子、只有常见非金属元素、没有同位素与自由基、中文名称中有汉字的化合物。
 - SMILES 转成凯库勒式（与核心库相同），保留立体构型；中文名称转成简体（含台湾用词）。
 - 结构相同的条目合并；只差立体构型时，未标立体构型的条目并入唯一一个标了的条目。
-- 核心库（structure_library.ts 中的 MOLECULES）优先：与核心库中的分子骨架相同的条目去掉，名称与核心库相同的去掉该名称。
+- 核心库（structure_library.ts 中的 MOLECULES）优先：与核心库中的分子骨架相同、未标立体构型的条目去掉（标了的保留，如 D-丙氨酸），
+  名称与核心库相同的去掉该名称。
 - 按 Wikidata 站点链接数（知名程度）排序。每个名称附拼音首字母（汉字取首字母，字母与数字保留，其他忽略）；
   核心库的名称也在这里算好（core）。
 """
@@ -134,7 +135,7 @@ def main() -> None:
 
     molecules = []
     for smiles, entry in by_smiles.items():
-        if skeleton(smiles) in core_skeletons:
+        if skeleton(smiles) in core_skeletons and not has_stereo(smiles):
             rejected['核心库中已有'] += 1
             continue
         names = [name for name in dict.fromkeys(entry['names']) if name not in core_names]

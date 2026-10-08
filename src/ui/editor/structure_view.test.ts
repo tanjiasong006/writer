@@ -28,11 +28,11 @@ test('反应式：每个分子分别画出，以＋相连；箭头与上下的�
 })
 
 test('箭头：→ 是一条线加箭头，＝ 是两条平行线；不在库中的试剂写分子式', () => {
-  const arrow = drawStructure('C=C.BrBr>CCCl>BrCCBr', 'text')
+  const arrow = drawStructure('C=C.BrBr>CCCCCl>BrCCBr', 'text')
   if ('error' in arrow) throw new Error(arrow.error)
   expect(arrow.svg.querySelectorAll(':scope > line')).toHaveLength(1)
   expect(arrow.svg.querySelectorAll(':scope > path')).toHaveLength(1)
-  expect([...arrow.svg.querySelectorAll(':scope > text')].map((text) => text.textContent)).toContain('C₂H₅Cl')
+  expect([...arrow.svg.querySelectorAll(':scope > text')].map((text) => text.textContent)).toContain('C₄H₉Cl')
   const equals = drawStructure('C=C.BrBr>>BrCCBr', 'text', { ...NO_CONDITIONS, arrow: '=' })
   if ('error' in equals) throw new Error(equals.error)
   expect(equals.svg.querySelectorAll(':scope > line')).toHaveLength(2)

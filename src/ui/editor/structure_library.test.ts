@@ -33,8 +33,8 @@ test('输入的 SMILES：全角字符与中文输入法的符号换成半角；�
 })
 
 test('文档中用过的分子：结构式与反应式的反应物、产物，按出现顺序不重复；不含试剂与写成化学式的无机小分子', () => {
-  const molecules = usedMolecules(['C1CCNCC1', 'CCO.CC(=O)O>OS(=O)(=O)O>CCOC(C)=O.O', ' C1CCNCC1 ', 'CCO'])
-  expect(molecules.map((molecule) => molecule.names[0] ?? molecule.smiles)).toEqual(['C1CCNCC1', '乙醇', '乙酸', '乙酸乙酯'])
+  const molecules = usedMolecules(['ClCCCCCCCCCCN', 'CCO.CC(=O)O>OS(=O)(=O)O>CCOC(C)=O.O', ' ClCCCCCCCCCCN ', 'CCO'])
+  expect(molecules.map((molecule) => molecule.names[0] ?? molecule.smiles)).toEqual(['ClCCCCCCCCCCN', '乙醇', '乙酸', '乙酸乙酯'])
   expect(molecules[0].names).toEqual([])
 })
 
@@ -68,10 +68,10 @@ test('加载扩展库后：查找包含扩展库（排在核心库之后），�
   expect(searchMolecules('苯')[0].names[0]).toBe('苯')
   expect(searchMolecules('乙酸').slice(0, 2).every((molecule) => !molecule.extended)).toBe(true)
   expect(searchMolecules('yxa')[0].names[0]).toBe('乙酰胺')
-  expect(searchMolecules('blf')[0].names[0]).toBe('布洛芬')
+  expect(searchMolecules('xdnf')[0].names[0]).toBe('西地那非')
   expect(searchMolecules('246三硝基甲苯')[0].english).toBe('trinitrotoluene')
   expect(searchMolecules('ｃａｆｆｅｉｎｅ')[0].names[0]).toBe('咖啡因')
-  expect(moleculeByName('布洛芬')?.extended).toBe(true)
+  expect(moleculeByName('西地那非')?.extended).toBe(true)
   expect(moleculeBySmiles(erythromycin.smiles)).toBeNull()
   expect(moleculeBySmiles(erythromycin.smiles, true)).toBe(erythromycin)
   expect(usedMolecules([erythromycin.smiles])[0].names[0]).toBe('红霉素')
@@ -79,9 +79,9 @@ test('加载扩展库后：查找包含扩展库（排在核心库之后），�
 
 test('加载扩展库后：反应式一侧写名称，扩展库中同名的不同分子写 SMILES', async () => {
   await loadExtendedMolecules()
-  const ibuprofen = moleculeByName('布洛芬')!.smiles
-  expect(sideText(`${ibuprofen}.CCO`)).toBe('布洛芬 + 乙醇')
-  expect(sideSmiles('布洛芬 + 乙醇')).toBe(`${ibuprofen}.CCO`)
+  const sildenafil = moleculeByName('西地那非')!.smiles
+  expect(sideText(`${sildenafil}.CCO`)).toBe('西地那非 + 乙醇')
+  expect(sideSmiles('西地那非 + 乙醇')).toBe(`${sildenafil}.CCO`)
   const data = await extendedData()
   const counts = new Map<string, number>()
   for (const [names] of data.molecules) for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1)
