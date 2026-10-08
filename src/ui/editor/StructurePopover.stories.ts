@@ -94,12 +94,13 @@ export const Reaction: Story = {
   args: { smiles: 'CCO.CC(=O)O>>CCOC(C)=O.O', arrow: '<=>', above: '浓硫酸', below: '△' },
 }
 
-/** 反应式中输入名称：下方列出匹配。 */
+/** 反应式中输入名称：下方列出匹配，选中的一行末尾是“编辑 SMILES”。 */
 export const ReactionSuggestions: Story = {
   args: { smiles: 'CCO>>C=C.O', above: '浓硫酸' },
   play: ({ canvasElement }) => {
     const input = canvasElement.ownerDocument.querySelector<HTMLInputElement>('.structure-popover__input')
     if (!input) return
+    input.focus()
     input.value = '乙醇 + 乙'
     input.dispatchEvent(new Event('input'))
   },

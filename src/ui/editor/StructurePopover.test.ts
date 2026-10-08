@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import StructurePopover from './StructurePopover.vue'
-import { loadExtendedMolecules } from './structure_library.ts'
+import { loadExtendedMolecules, moleculeByName } from './structure_library.ts'
 
 /** 化学结构式浮层：按名称查找、直接输入 SMILES、预览（docs/decisions.md 第 22 节）。 */
 
@@ -239,6 +239,33 @@ describe('反应式', () => {
     expect((side(wrapper, 0).element as HTMLInputElement).value).toBe(`乙醇 + ${names[1]}`)
     expect(wrapper.find('.structure-popover__suggestions').exists()).toBe(false)
     expect(wrapper.emitted('commit')).toBeUndefined()
+  })
+
+  test('Tab 或“编辑 SMILES”把选中的匹配的 SMILES 填入，在它的基础上修改', async () => {
+    const wrapper = await open('CCO>>C=C.O')
+    await side(wrapper, 0).trigger('focus')
+    // 完整的名称不列出匹配（Enter 完成），输入名称的一部分。
+    await side(wrapper, 0).setValue('乙醇 + 苯甲')
+    const first = wrapper.find('.structure-popover__suggestions .structure-popover__name').text()
+    expect(wrapper.find('.structure-popover__suggestions .structure-popover__option--active .structure-popover__hint').exists()).toBe(true)
+    const event = new KeyboardEvent('keydown', { key: 'Tab', cancelable: true })
+    side(wrapper, 0).element.dispatchEvent(event)
+    await flushPromises()
+    expect(event.defaultPrevented).toBe(true)
+    expect((side(wrapper, 0).element as HTMLInputElement).value).toBe(`乙醇 + ${moleculeByName(first)?.smiles}`)
+    expect(wrapper.find('.structure-popover__suggestions').exists()).toBe(false)
+    expect(wrapper.emitted('commit')).toBeUndefined()
+
+    await side(wrapper, 1).trigger('focus')
+    await side(wrapper, 1).setValue('苯甲')
+    await wrapper.find('.structure-popover__suggestions .structure-popover__hint').trigger('click')
+    expect((side(wrapper, 1).element as HTMLInputElement).value).toBe(moleculeByName(first)?.smiles)
+    expect(wrapper.emitted('commit')).toBeUndefined()
+
+    // 没有列出匹配时 Tab 不做什么（移到下一个输入框）。
+    const plain = new KeyboardEvent('keydown', { key: 'Tab', cancelable: true })
+    side(wrapper, 1).element.dispatchEvent(plain)
+    expect(plain.defaultPrevented).toBe(false)
   })
 
   test('反应式中写错的 SMILES 说明原因', async () => {

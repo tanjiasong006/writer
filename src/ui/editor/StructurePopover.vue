@@ -26,7 +26,7 @@ import { normalizeArrow, normalizeOrientation, normalizeRotate, type StructureCo
  *   （没有匹配时是一句提示），过大的结构式在预览中缩小显示；
  *   反应式中的匹配浮在下方的内容之上。浮层始终在窗口内：下方放不下时在上方，上下都放不下时盖住结构式。
  * - 反应式：反应物与产物写分子的名称或 SMILES，以“+”分隔；正在输入的名称下方列出匹配（一侧为空或刚输入“+”时列出
- *   本文档中用过的分子），↑ / ↓ 选择、Enter 填入。
+ *   本文档中用过的分子），↑ / ↓ 选择、Enter 填入；与分子相同，选中的一行末尾的“编辑 SMILES”（或 Tab）填入它的 SMILES。
  *   箭头（→ ⇌ ＝）与箭头上下的条件。SMILES 中原有的试剂保留（显示在箭头上方）。
  * - 分子可以旋转（每次 30°）与左右翻转：预览右上角的按钮，翻转的是看到的样子。反应式中每个分子分别调整：在预览中点击一个分子
  *   选中它（再点一次或点空白处取消），按钮只作用于它；方向按 SMILES 跟着分子走，分子换了的回到默认。
@@ -392,11 +392,14 @@ function editSmiles(index: number): void {
   input.value?.focus({ preventScroll: true })
 }
 
-/** 把正在输入的一侧的最后一项换成匹配的分子（库中有的写名称）；一侧为空或刚输入“+”时添在最后。 */
-function fill(side: 'reactants' | 'products', molecule: Molecule): void {
+/**
+ * 把正在输入的一侧的最后一项换成匹配的分子（库中有的写名称，asSmiles 时写 SMILES，在它的基础上修改）；
+ * 一侧为空或刚输入“+”时添在最后。
+ */
+function fill(side: 'reactants' | 'products', molecule: Molecule, asSmiles = false): void {
   const field = sideRef(side)
   const terms = splitTerms(field.value)
-  const term = molecule.names[0] ?? molecule.smiles
+  const term = asSmiles ? molecule.smiles : (molecule.names[0] ?? molecule.smiles)
   if (terms.length === 0 || endsWithPlus(field.value)) terms.push(term)
   else terms[terms.length - 1] = term
   field.value = terms.join(' + ')
@@ -422,8 +425,10 @@ function onSideKeydown(event: KeyboardEvent, side: 'reactants' | 'products'): vo
   if (event.key === 'ArrowDown' && count > 0) suggestion.value = (suggestion.value + 1) % count
   else if (event.key === 'ArrowUp' && count > 0) suggestion.value = (suggestion.value - 1 + count) % count
   else if (event.key === 'Enter' && count > 0) fill(side, suggestions.value[suggestion.value])
+  else if (event.key === 'Tab' && !event.shiftKey && count > 0) fill(side, suggestions.value[suggestion.value], true)
   else onFieldKeydown(event)
   if (['ArrowDown', 'ArrowUp', 'Enter'].includes(event.key) && count > 0) event.preventDefault()
+  if (event.key === 'Tab' && !event.shiftKey && count > 0) event.preventDefault()
 }
 
 /** 反应式的其他输入框：Enter 完成，Esc 放弃。 */
@@ -609,6 +614,17 @@ onMounted(async () => {
                 <span v-else class="structure-popover__name structure-popover__name--smiles" :title="molecule.smiles">{{ molecule.smiles }}</span>
                 <span class="structure-popover__english">{{ molecule.english }}</span>
                 <span v-if="molecule.extended" class="structure-popover__source" title="扩展分子库（来自 Wikidata）">扩展</span>
+                <button
+                  v-if="index === suggestion"
+                  type="button"
+                  class="structure-popover__hint"
+                  tabindex="-1"
+                  title="把 SMILES 填入输入框修改（Tab）"
+                  @mousedown.prevent
+                  @click.stop="fill(side, molecule, true)"
+                >
+                  <span class="structure-popover__key">⇥</span>编辑 SMILES
+                </button>
               </div>
             </div>
           </div>
