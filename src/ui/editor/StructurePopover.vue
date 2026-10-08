@@ -22,7 +22,8 @@ import { normalizeArrow, normalizeRotate, type StructureConditions } from './mar
  *   扩展库中的分子在列表中标“扩展”。输入的文字是有效的 SMILES 时默认使用它（↑ 回到它），
  *   否则默认第一个匹配；↑ / ↓ 选择，点击一个分子直接完成。没有输入时列出本文档中用过的分子（不默认选中）。
  *   选中的一行末尾的“编辑 SMILES”（或 Tab）把它的 SMILES 填入输入框，在它的基础上修改。
- * - 版面不随输入跳动：分子的列表位置一直在、高度固定（没有匹配时是一句提示），预览高度固定、过大的结构式缩小显示；
+ * - 版面不随输入与切换跳动：两种的内容区高度相同（预览占去余下的高度），分子的列表位置一直在、高度固定
+ *   （没有匹配时是一句提示），过大的结构式在预览中缩小显示；
  *   反应式中的匹配浮在下方的内容之上。浮层始终在窗口内：下方放不下时在上方，上下都放不下时盖住结构式。
  * - 反应式：反应物与产物写分子的名称或 SMILES，以“+”分隔；正在输入的名称下方列出匹配（一侧为空或刚输入“+”时列出
  *   本文档中用过的分子），↑ / ↓ 选择、Enter 填入。
@@ -389,181 +390,183 @@ onMounted(async () => {
       </button>
     </div>
 
-    <template v-if="mode === 'molecule'">
-      <input
-        ref="input"
-        v-model="query"
-        class="structure-popover__search"
-        type="text"
-        placeholder="名称或 SMILES，如 苯、乙醇、CCO"
-        role="combobox"
-        aria-label="名称或 SMILES"
-        aria-autocomplete="list"
-        :aria-expanded="matches.length > 0"
-        :aria-controls="`${id}-list`"
-        :aria-activedescendant="active >= 0 ? optionId(active) : undefined"
-        spellcheck="false"
-        autocomplete="off"
-        @keydown="onKeydown"
-      />
-      <div class="structure-popover__results">
-        <div v-if="listingUsed && matches.length > 0" class="structure-popover__list-label">本文档中</div>
-        <div v-if="matches.length === 0" class="structure-popover__empty">输入中文或英文名称查找常见分子，也可以直接输入 SMILES</div>
-        <div
-          v-if="matches.length > 0"
-          :id="`${id}-list`"
-          class="structure-popover__list"
-          role="listbox"
-          :aria-label="listingUsed ? '本文档中用过的分子' : '常见分子'"
-        >
+    <div class="structure-popover__body">
+      <template v-if="mode === 'molecule'">
+        <input
+          ref="input"
+          v-model="query"
+          class="structure-popover__search"
+          type="text"
+          placeholder="名称或 SMILES，如 苯、乙醇、CCO"
+          role="combobox"
+          aria-label="名称或 SMILES"
+          aria-autocomplete="list"
+          :aria-expanded="matches.length > 0"
+          :aria-controls="`${id}-list`"
+          :aria-activedescendant="active >= 0 ? optionId(active) : undefined"
+          spellcheck="false"
+          autocomplete="off"
+          @keydown="onKeydown"
+        />
+        <div class="structure-popover__results">
+          <div v-if="listingUsed && matches.length > 0" class="structure-popover__list-label">本文档中</div>
+          <div v-if="matches.length === 0" class="structure-popover__empty">输入中文或英文名称查找常见分子，也可以直接输入 SMILES</div>
           <div
-            v-for="(molecule, index) in matches"
-            :id="optionId(index)"
-            :key="molecule.smiles"
-            class="structure-popover__option"
-            :class="{ 'structure-popover__option--active': index === active }"
-            role="option"
-            :aria-selected="index === active"
-            @mousemove="active = index"
-            @mousedown.prevent
-            @click="pick(index)"
-          >
-            <span v-if="molecule.names.length > 0" class="structure-popover__name">{{ molecule.names[0] }}</span>
-            <span v-else class="structure-popover__name structure-popover__name--smiles" :title="molecule.smiles">{{ molecule.smiles }}</span>
-            <span class="structure-popover__english">{{ molecule.english }}</span>
-            <span v-if="molecule.extended" class="structure-popover__source" title="扩展分子库（来自 Wikidata）">扩展</span>
-            <button
-              v-if="index === active"
-              type="button"
-              class="structure-popover__hint"
-              tabindex="-1"
-              title="把 SMILES 填入输入框修改（Tab）"
-              @mousedown.prevent
-              @click.stop="editSmiles(index)"
-            >
-              <span class="structure-popover__key">⇥</span>编辑 SMILES
-            </button>
-          </div>
-        </div>
-      </div>
-    </template>
-
-    <div v-else class="structure-popover__fields">
-      <template v-for="side in ['reactants', 'products'] as const" :key="side">
-        <label class="structure-popover__field-label" :class="{ 'is-products': side === 'products' }" :for="`${id}-${side}`">
-          {{ side === 'reactants' ? '反应物' : '产物' }}
-        </label>
-        <div class="structure-popover__field" :class="{ 'is-products': side === 'products' }">
-          <input
-            :id="`${id}-${side}`"
-            :ref="side === 'reactants' ? (element) => (reactantsInput = element as HTMLInputElement | null) : undefined"
-            v-model="sideRef(side).value"
-            class="structure-popover__input"
-            type="text"
-            :placeholder="side === 'reactants' ? '如 乙醇 + 乙酸' : '如 乙酸乙酯 + 水'"
-            role="combobox"
-            aria-autocomplete="list"
-            :aria-expanded="focusedSide === side && suggestions.length > 0"
-            spellcheck="false"
-            autocomplete="off"
-            @focus="focusedSide = side"
-            @blur="focusedSide = null"
-            @keydown="onSideKeydown($event, side)"
-          />
-          <div
-            v-if="focusedSide === side && suggestions.length > 0"
-            class="structure-popover__suggestions"
+            v-if="matches.length > 0"
+            :id="`${id}-list`"
+            class="structure-popover__list"
             role="listbox"
-            :aria-label="splitTerms(sideRef(side).value).length === 0 || endsWithPlus(sideRef(side).value) ? '本文档中用过的分子' : '常见分子'"
+            :aria-label="listingUsed ? '本文档中用过的分子' : '常见分子'"
           >
             <div
-              v-for="(molecule, index) in suggestions"
+              v-for="(molecule, index) in matches"
+              :id="optionId(index)"
               :key="molecule.smiles"
               class="structure-popover__option"
-              :class="{ 'structure-popover__option--active': index === suggestion }"
+              :class="{ 'structure-popover__option--active': index === active }"
               role="option"
-              :aria-selected="index === suggestion"
-              @mousemove="suggestion = index"
+              :aria-selected="index === active"
+              @mousemove="active = index"
               @mousedown.prevent
-              @click="fill(side, molecule)"
+              @click="pick(index)"
             >
               <span v-if="molecule.names.length > 0" class="structure-popover__name">{{ molecule.names[0] }}</span>
               <span v-else class="structure-popover__name structure-popover__name--smiles" :title="molecule.smiles">{{ molecule.smiles }}</span>
               <span class="structure-popover__english">{{ molecule.english }}</span>
               <span v-if="molecule.extended" class="structure-popover__source" title="扩展分子库（来自 Wikidata）">扩展</span>
+              <button
+                v-if="index === active"
+                type="button"
+                class="structure-popover__hint"
+                tabindex="-1"
+                title="把 SMILES 填入输入框修改（Tab）"
+                @mousedown.prevent
+                @click.stop="editSmiles(index)"
+              >
+                <span class="structure-popover__key">⇥</span>编辑 SMILES
+              </button>
             </div>
           </div>
         </div>
       </template>
 
-      <span class="structure-popover__field-label structure-popover__arrow-label">条件</span>
-      <div class="structure-popover__arrow-row">
-        <div class="structure-popover__arrows" role="radiogroup" aria-label="箭头">
+      <div v-else class="structure-popover__fields">
+        <template v-for="side in ['reactants', 'products'] as const" :key="side">
+          <label class="structure-popover__field-label" :class="{ 'is-products': side === 'products' }" :for="`${id}-${side}`">
+            {{ side === 'reactants' ? '反应物' : '产物' }}
+          </label>
+          <div class="structure-popover__field" :class="{ 'is-products': side === 'products' }">
+            <input
+              :id="`${id}-${side}`"
+              :ref="side === 'reactants' ? (element) => (reactantsInput = element as HTMLInputElement | null) : undefined"
+              v-model="sideRef(side).value"
+              class="structure-popover__input"
+              type="text"
+              :placeholder="side === 'reactants' ? '如 乙醇 + 乙酸' : '如 乙酸乙酯 + 水'"
+              role="combobox"
+              aria-autocomplete="list"
+              :aria-expanded="focusedSide === side && suggestions.length > 0"
+              spellcheck="false"
+              autocomplete="off"
+              @focus="focusedSide = side"
+              @blur="focusedSide = null"
+              @keydown="onSideKeydown($event, side)"
+            />
+            <div
+              v-if="focusedSide === side && suggestions.length > 0"
+              class="structure-popover__suggestions"
+              role="listbox"
+              :aria-label="splitTerms(sideRef(side).value).length === 0 || endsWithPlus(sideRef(side).value) ? '本文档中用过的分子' : '常见分子'"
+            >
+              <div
+                v-for="(molecule, index) in suggestions"
+                :key="molecule.smiles"
+                class="structure-popover__option"
+                :class="{ 'structure-popover__option--active': index === suggestion }"
+                role="option"
+                :aria-selected="index === suggestion"
+                @mousemove="suggestion = index"
+                @mousedown.prevent
+                @click="fill(side, molecule)"
+              >
+                <span v-if="molecule.names.length > 0" class="structure-popover__name">{{ molecule.names[0] }}</span>
+                <span v-else class="structure-popover__name structure-popover__name--smiles" :title="molecule.smiles">{{ molecule.smiles }}</span>
+                <span class="structure-popover__english">{{ molecule.english }}</span>
+                <span v-if="molecule.extended" class="structure-popover__source" title="扩展分子库（来自 Wikidata）">扩展</span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <span class="structure-popover__field-label structure-popover__arrow-label">条件</span>
+        <div class="structure-popover__arrow-row">
+          <div class="structure-popover__arrows" role="radiogroup" aria-label="箭头">
+            <button
+              v-for="item in ARROWS"
+              :key="item.value"
+              type="button"
+              role="radio"
+              class="structure-popover__arrow"
+              :aria-checked="arrow === item.value"
+              :aria-label="item.label"
+              :title="item.label"
+              tabindex="-1"
+              @mousedown.prevent
+              @click="arrow = item.value"
+            >
+              {{ item.glyph }}
+            </button>
+          </div>
+          <label class="structure-popover__condition">
+            <span class="structure-popover__condition-label">上</span>
+            <input
+              v-model="above"
+              class="structure-popover__input"
+              type="text"
+              placeholder="如 浓硫酸"
+              aria-label="上方条件"
+              spellcheck="false"
+              autocomplete="off"
+              @keydown="onFieldKeydown"
+            />
+          </label>
+          <label class="structure-popover__condition">
+            <span class="structure-popover__condition-label">下</span>
+            <input
+              v-model="below"
+              class="structure-popover__input"
+              type="text"
+              placeholder="如 △"
+              aria-label="下方条件"
+              spellcheck="false"
+              autocomplete="off"
+              @keydown="onFieldKeydown"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div class="structure-popover__stage">
+        <div ref="preview" class="structure-popover__preview" aria-live="polite"></div>
+        <div v-if="orientable" class="structure-popover__orient" role="group" aria-label="方向">
           <button
-            v-for="item in ARROWS"
-            :key="item.value"
+            v-for="item in [
+              { label: '向左旋转 30°', glyph: '↺', run: () => turn(-ROTATE_STEP) },
+              { label: '向右旋转 30°', glyph: '↻', run: () => turn(ROTATE_STEP) },
+              { label: '左右翻转', glyph: '⇆', run: mirror },
+            ]"
+            :key="item.label"
             type="button"
-            role="radio"
-            class="structure-popover__arrow"
-            :aria-checked="arrow === item.value"
+            class="structure-popover__orient-button"
             :aria-label="item.label"
             :title="item.label"
             tabindex="-1"
             @mousedown.prevent
-            @click="arrow = item.value"
+            @click="item.run"
           >
             {{ item.glyph }}
           </button>
         </div>
-        <label class="structure-popover__condition">
-          <span class="structure-popover__condition-label">上</span>
-          <input
-            v-model="above"
-            class="structure-popover__input"
-            type="text"
-            placeholder="如 浓硫酸"
-            aria-label="上方条件"
-            spellcheck="false"
-            autocomplete="off"
-            @keydown="onFieldKeydown"
-          />
-        </label>
-        <label class="structure-popover__condition">
-          <span class="structure-popover__condition-label">下</span>
-          <input
-            v-model="below"
-            class="structure-popover__input"
-            type="text"
-            placeholder="如 △"
-            aria-label="下方条件"
-            spellcheck="false"
-            autocomplete="off"
-            @keydown="onFieldKeydown"
-          />
-        </label>
-      </div>
-    </div>
-
-    <div class="structure-popover__stage">
-      <div ref="preview" class="structure-popover__preview" aria-live="polite"></div>
-      <div v-if="orientable" class="structure-popover__orient" role="group" aria-label="方向">
-        <button
-          v-for="item in [
-            { label: '向左旋转 30°', glyph: '↺', run: () => turn(-ROTATE_STEP) },
-            { label: '向右旋转 30°', glyph: '↻', run: () => turn(ROTATE_STEP) },
-            { label: '左右翻转', glyph: '⇆', run: mirror },
-          ]"
-          :key="item.label"
-          type="button"
-          class="structure-popover__orient-button"
-          :aria-label="item.label"
-          :title="item.label"
-          tabindex="-1"
-          @mousedown.prevent
-          @click="item.run"
-        >
-          {{ item.glyph }}
-        </button>
       </div>
     </div>
     <div class="structure-popover__footer">
@@ -872,9 +875,20 @@ onMounted(async () => {
   color: var(--color-accent-text);
 }
 
-/* 预览：与公式浮层的预览相同的底色，结构式随正文颜色；高度固定，过大的结构式按比例缩小。 */
+/* 预览：与公式浮层的预览相同的底色，结构式随正文颜色；占去内容区余下的高度，过大的结构式按比例缩小。 */
+/* 分子与反应式的内容区高度相同：分子的输入框、列表与 180px 的预览；反应式的字段较矮，预览更高。 */
+.structure-popover__body {
+  display: flex;
+  flex-direction: column;
+  height: 402px;
+}
+
 .structure-popover__stage {
   position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   margin-top: var(--space-3);
 }
 
@@ -882,8 +896,9 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 1;
   box-sizing: border-box;
-  height: 180px;
+  min-height: 0;
   padding: var(--space-4);
   overflow: hidden;
   border-radius: var(--radius-m);
