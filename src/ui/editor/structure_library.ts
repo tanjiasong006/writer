@@ -1,6 +1,12 @@
 /**
- * 常见分子库（docs/decisions.md 第 22 节）：插入化学结构式时按名称查找。SMILES 使用凯库勒式（单双键交替）的写法，
- * 苯环画成单双键交替的六边形，与中学教材相同；不标注立体构型。
+ * 分子库（docs/decisions.md 第 22 节）：插入化学结构式时按名称查找。分两层：
+ *
+ * - 核心库（MOLECULES）：人工整理的常见分子。SMILES 使用凯库勒式（单双键交替）的写法，苯环画成单双键交替的六边形，
+ *   与中学教材相同；不标注立体构型。
+ * - 扩展库（molecules_extended.json，由 scripts/molecules 从 Wikidata 生成）：约一万两千个有中文名称的化合物，
+ *   凯库勒式，保留立体构型。第一次打开结构式浮层时加载（loadExtendedMolecules），查找时排在核心库之后。
+ *
+ * 画结构式只用核心库（写成化学式的无机小分子、反应式中试剂的名称），画出的结果不随扩展库是否已加载而变化。
  */
 
 export interface Molecule {
@@ -10,6 +16,8 @@ export interface Molecule {
   readonly smiles: string
   /** 无机小分子写成化学式（如 H2O），不画骨架；数字显示为下标。 */
   readonly formula?: string
+  /** 扩展库中的分子。 */
+  readonly extended?: boolean
 }
 
 export const MOLECULES: readonly Molecule[] = [
@@ -116,20 +124,64 @@ export const MOLECULES: readonly Molecule[] = [
   { names: ['咖啡因'], english: 'caffeine', smiles: 'CN1C=NC2=C1C(=O)N(C)C(=O)N2C' },
 ]
 
+/** 扩展库的文件：每个分子是 [中文名称, 英文名称, SMILES, 各名称的拼音首字母]；core 是核心库各名称的拼音首字母。 */
+interface ExtendedData {
+  readonly core: Readonly<Record<string, string>>
+  readonly molecules: readonly (readonly [readonly string[], string, string, readonly string[]])[]
+}
+
+/** 查找用的写法：全角换成半角，不区分大小写，忽略空白与名称中的连接符号（“2,4,6-三硝基甲苯”与“246三硝基甲苯”相同）。 */
+function searchKey(text: string): string {
+  return text.normalize('NFKC').toLowerCase().replace(/[\s\-‐‑–—,，、·'′]/g, '')
+}
+
+interface Entry {
+  readonly molecule: Molecule
+  /** 中文名称与英文名称的查找写法。 */
+  readonly names: readonly string[]
+  readonly english: string
+  /** 中文名称的拼音首字母。 */
+  readonly initials: readonly string[]
+}
+
+function entry(molecule: Molecule, initials: readonly string[]): Entry {
+  return { molecule, names: molecule.names.map(searchKey), english: searchKey(molecule.english), initials }
+}
+
+let entries: readonly Entry[] = MOLECULES.map((molecule) => entry(molecule, []))
+let extended: readonly Molecule[] = []
+let loading: Promise<void> | null = null
+
+/** 加载扩展库（只加载一次）；之后查找包含扩展库，核心库也可以按拼音首字母查找。 */
+export function loadExtendedMolecules(): Promise<void> {
+  // 作为文字导入再解析：不让 TypeScript 推断整个文件的类型；文件由脚本生成，结构由测试检查。
+  loading ??= import('./molecules_extended.json?raw').then(({ default: text }) => {
+    const data = JSON.parse(text) as ExtendedData
+    extended = data.molecules.map(([names, english, smiles]) => ({ names, english, smiles, extended: true }))
+    entries = [
+      ...MOLECULES.map((molecule) => entry(molecule, molecule.names.map((name) => data.core[name] ?? ''))),
+      ...extended.map((molecule, index) => entry(molecule, data.molecules[index][3])),
+    ]
+  })
+  return loading
+}
+
 /** 列出的结果数上限。 */
 const MAX_RESULTS = 8
 
-/** 按名称查找：中文名称包含查询的文字，或英文名称以它开头（不区分大小写）；名称以它开头的排在前面。 */
+/**
+ * 按名称查找：中文名称包含查询的文字，英文名称或中文名称的拼音首字母以它开头；完全相同的排在最前，其次是开头相同的。
+ * 同样匹配时核心库在前，扩展库按知名程度。
+ */
 export function searchMolecules(query: string): readonly Molecule[] {
-  const text = query.trim().toLowerCase()
+  const text = searchKey(query)
   if (text === '') return []
   const scored: Array<{ molecule: Molecule; score: number; index: number }> = []
-  MOLECULES.forEach((molecule, index) => {
-    const names = molecule.names.map((name) => name.toLowerCase())
+  entries.forEach(({ molecule, names, english, initials }, index) => {
     let score = -1
-    if (names.some((name) => name === text) || molecule.english === text) score = 0
-    else if (names.some((name) => name.startsWith(text)) || molecule.english.startsWith(text)) score = 1
-    else if (names.some((name) => name.includes(text))) score = 2
+    if (names.includes(text) || english === text) score = 0
+    else if (names.some((name) => name.startsWith(text)) || english.startsWith(text) || initials.includes(text)) score = 1
+    else if (names.some((name) => name.includes(text)) || initials.some((item) => item.startsWith(text))) score = 2
     if (score >= 0) scored.push({ molecule, score, index })
   })
   return scored
@@ -138,17 +190,22 @@ export function searchMolecules(query: string): readonly Molecule[] {
     .map(({ molecule }) => molecule)
 }
 
-/** SMILES 恰好是库中某个分子时返回它（编辑已有的结构式时显示名称）。 */
-export function moleculeBySmiles(smiles: string): Molecule | null {
+/**
+ * SMILES 恰好是库中某个分子时返回它（编辑已有的结构式时显示名称）。默认只查核心库（画结构式时用）；
+ * withExtended 时也查已加载的扩展库（浮层中显示名称时用）。
+ */
+export function moleculeBySmiles(smiles: string, withExtended = false): Molecule | null {
   const text = smiles.trim()
-  return MOLECULES.find((molecule) => molecule.smiles === text) ?? null
+  const found = (molecule: Molecule) => molecule.smiles === text
+  return MOLECULES.find(found) ?? (withExtended ? extended.find(found) : undefined) ?? null
 }
 
-/** 名称（中文名称、别名或英文名称，不区分大小写）恰好是库中某个分子时返回它。 */
+/** 名称（中文名称、别名或英文名称，不区分大小写）恰好是库中（含已加载的扩展库）某个分子时返回它，核心库优先。 */
 export function moleculeByName(name: string): Molecule | null {
   const text = name.trim().toLowerCase()
   if (text === '') return null
-  return MOLECULES.find((molecule) => molecule.english === text || molecule.names.some((item) => item.toLowerCase() === text)) ?? null
+  const found = (molecule: Molecule) => molecule.english.toLowerCase() === text || molecule.names.some((item) => item.toLowerCase() === text)
+  return MOLECULES.find(found) ?? extended.find(found) ?? null
 }
 
 /**
@@ -185,7 +242,7 @@ export function usedMolecules(structures: readonly string[]): readonly Molecule[
       const smiles = text.trim()
       if (smiles === '' || seen.has(smiles)) continue
       seen.add(smiles)
-      const molecule = moleculeBySmiles(smiles)
+      const molecule = moleculeBySmiles(smiles, true)
       if (!molecule?.formula) result.push(molecule ?? { names: [], english: '', smiles })
     }
   }
@@ -216,12 +273,15 @@ export function sideSmiles(text: string): string {
   return splitTerms(text).map(termSmiles).join('.')
 }
 
-/** 一侧的 SMILES → 浮层中的写法：库中有的分子写名称。 */
+/** 一侧的 SMILES → 浮层中的写法：库中有的分子写名称（名称换回的是同一个分子时；扩展库中有同名的不同分子）。 */
 export function sideText(smiles: string): string {
   return smiles
     .split('.')
     .map((molecule) => molecule.trim())
     .filter((molecule) => molecule !== '')
-    .map((molecule) => moleculeBySmiles(molecule)?.names[0] ?? molecule)
+    .map((molecule) => {
+      const name = moleculeBySmiles(molecule, true)?.names[0]
+      return name !== undefined && moleculeByName(name)?.smiles === molecule ? name : molecule
+    })
     .join(' + ')
 }

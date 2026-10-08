@@ -1084,6 +1084,16 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 - 验证：日志行格式（字符串、JSON、Error / DOMException 与调用栈、无法序列化的值）、欢迎页与工作区的菜单测试；
   开发版启动后日志文件中有启动信息。未在 Windows 正式包中检查。
 
+#### P2-13 扩展分子库（完成，2026-10-08）
+
+- 规则见 decisions 第 22 节“分子库”。`scripts/molecules`：`fetch.sh`（QLever 的 Wikidata 查询，结果不提交）、`build.py`
+  （RDKit 清洗与凯库勒式、OpenCC 简体、pypinyin 首字母）→ `src/ui/editor/molecules_extended.json`（以文字导入再解析，单独的 chunk）。
+  `structure_library.ts`：`loadExtendedMolecules`、查找写法与拼音首字母、`moleculeBySmiles(smiles, withExtended)`、`sideText` 只写能换回同一分子的名称；
+  `StructurePopover.vue` 打开时加载，加载后重新查找，“扩展”标记。
+- 验证：扩展库全部 SMILES 可由 smiles-drawer 画出、不与核心库重复；查找排序、拼音首字母、全角与连接符号、同名分子的反应式写法；
+  浮层与编辑器测试先加载扩展库。Story `StructurePopover/ExtendedSearch`、`PinyinInitials`，Storybook（Chrome）中目视检查了列表、
+  “扩展”标记与带楔形键的大分子预览。未检查深色外观与 Tauri WebView 中的加载时间。
+
 ### 发布准备（非功能）
 
 1. 手动验收清单在正式包中全部走一遍（需要真实桌面环境与 Word / WPS，known-risks #5）。

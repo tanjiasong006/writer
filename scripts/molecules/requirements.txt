@@ -1,0 +1,3 @@
+rdkit
+opencc-python-reimplemented
+pypinyin

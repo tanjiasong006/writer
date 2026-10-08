@@ -6,6 +6,7 @@ import type { EditorView } from 'prosemirror-view'
 import ChapterEditor from './ChapterEditor.vue'
 import { renderChapterBody } from '../reader/chapter_body.ts'
 import { NO_CHAPTER_REFS } from './chapter_ref_view.ts'
+import { loadExtendedMolecules } from './structure_library.ts'
 
 /** 编辑器中的化学结构式：显示、插入、编辑、删除、撤销（docs/decisions.md 第 22 节）。 */
 
@@ -110,10 +111,11 @@ test('插入反应式：写名称、选择箭头、填写条件，写出为带�
 })
 
 test('插入时列出本文档中用过的分子：本章的在前，然后是其他章节的', async () => {
-  const { wrapper, view } = mountEditor('```smiles\nCC(C)CC1=CC=CC=C1\n```\n\n```smiles\nCCO>>C=C.O\n```\n', () => ['CC(C)CC1=CC=CC=C1', 'C1CCNCC1'])
+  await loadExtendedMolecules()
+  const { wrapper, view } = mountEditor('```smiles\nClCCCCCCCCCCN\n```\n\n```smiles\nCCO>>C=C.O\n```\n', () => ['ClCCCCCCCCCCN', 'BrCCCCCCCCCCO'])
   view.dispatch(view.state.tr.setSelection(Selection.atEnd(view.state.doc)))
   ;(wrapper.vm as unknown as { runCommand(c: string): void }).runCommand('structure')
   await flushPromises()
   const names = [...document.querySelectorAll('.structure-popover__option .structure-popover__name')].map((name) => name.textContent)
-  expect(names).toEqual(['CC(C)CC1=CC=CC=C1', '乙醇', '乙烯', 'C1CCNCC1'])
+  expect(names).toEqual(['ClCCCCCCCCCCN', '乙醇', '乙烯', 'BrCCCCCCCCCCO'])
 })

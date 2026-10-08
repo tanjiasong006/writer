@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import StructurePopover from './StructurePopover.vue'
+import { loadExtendedMolecules } from './structure_library.ts'
 
 /** 化学结构式浮层：按名称查找、直接输入 SMILES、预览（docs/decisions.md 第 22 节）。 */
 
@@ -13,6 +14,8 @@ async function open(
   smiles: string,
   conditions: { arrow?: string; above?: string; below?: string; rotate?: number; flip?: boolean; used?: readonly string[] } = {},
 ) {
+  // 扩展库先加载好，查找结果不随加载的快慢变化。
+  await loadExtendedMolecules()
   const wrapper = mount(StructurePopover, { attachTo: document.body, props: { anchor: { x: 100, y: 100 }, smiles, ...conditions } })
   mounted.push(wrapper)
   await flushPromises()
@@ -57,15 +60,15 @@ test('输入法打出的全角符号当作半角', async () => {
 })
 
 test('没有输入时列出本文档中用过的分子，不默认选中；↓ 选择，库外的分子显示 SMILES', async () => {
-  const wrapper = await open('', { used: ['C1CCNCC1', 'CCO'] })
+  const wrapper = await open('', { used: ['ClCCCCCCCCCCN', 'CCO'] })
   expect(wrapper.find('.structure-popover__list-label').text()).toBe('本文档中')
-  expect(options(wrapper)).toEqual(['C1CCNCC1', '乙醇'])
+  expect(options(wrapper)).toEqual(['ClCCCCCCCCCCN', '乙醇'])
   expect(wrapper.find('.structure-popover__option--active').exists()).toBe(false)
   await key(wrapper, { key: 'ArrowDown' })
-  expect(active(wrapper).text()).toBe('C1CCNCC1')
+  expect(active(wrapper).text()).toBe('ClCCCCCCCCCCN')
   expect(wrapper.find('.structure-popover__preview svg').exists()).toBe(true)
   await key(wrapper, { key: 'Enter' })
-  expect(wrapper.emitted('commit')).toEqual([[value('C1CCNCC1')]])
+  expect(wrapper.emitted('commit')).toEqual([[value('ClCCCCCCCCCCN')]])
 
   // 输入后改为在库中查找；没有用过的分子时不列出。
   await input(wrapper).setValue('乙')
@@ -86,8 +89,8 @@ test('无法画出时说明原因：SMILES 中标出出错的字符；不在库�
   expect(preview().text()).toContain('“(”没有对应的“)”')
   await input(wrapper).setValue('布洛芬片')
   expect(preview().text()).toBe('分子库中没有“布洛芬片”，也可以直接输入 SMILES')
-  await input(wrapper).setValue('xylitol')
-  expect(preview().text()).toBe('分子库中没有“xylitol”，也可以直接输入 SMILES')
+  await input(wrapper).setValue('notamolecule')
+  expect(preview().text()).toBe('分子库中没有“notamolecule”，也可以直接输入 SMILES')
   await input(wrapper).setValue('CCO')
   expect(preview().classes()).not.toContain('is-invalid')
   expect(preview().find('svg').exists()).toBe(true)
@@ -228,13 +231,13 @@ describe('反应式', () => {
   })
 
   test('一侧为空或刚输入“+”时列出本文档中用过的分子，Enter 添在最后', async () => {
-    const wrapper = await open('CCO>>C=C.O', { used: ['C1CCNCC1'] })
+    const wrapper = await open('CCO>>C=C.O', { used: ['ClCCCCCCCCCCN'] })
     await side(wrapper, 0).trigger('focus')
     expect(wrapper.find('.structure-popover__suggestions').exists()).toBe(false)
     await side(wrapper, 0).setValue('乙醇 + ')
-    expect(wrapper.findAll('.structure-popover__suggestions .structure-popover__name').map((name) => name.text())).toEqual(['C1CCNCC1'])
+    expect(wrapper.findAll('.structure-popover__suggestions .structure-popover__name').map((name) => name.text())).toEqual(['ClCCCCCCCCCCN'])
     await side(wrapper, 0).trigger('keydown', { key: 'Enter' })
-    expect((side(wrapper, 0).element as HTMLInputElement).value).toBe('乙醇 + C1CCNCC1')
+    expect((side(wrapper, 0).element as HTMLInputElement).value).toBe('乙醇 + ClCCCCCCCCCCN')
     expect(wrapper.emitted('commit')).toBeUndefined()
   })
 

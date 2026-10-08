@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/vue3-vite'
 import StructurePopover from './StructurePopover.vue'
+import { loadExtendedMolecules } from './structure_library.ts'
 
 const meta = {
   title: 'UI/Editor/StructurePopover',
@@ -24,9 +25,31 @@ export const Search: Story = {
   },
 }
 
+/** 扩展库中的分子：排在核心库之后，名称后标“扩展”；带立体构型的大分子在预览中缩小显示。 */
+export const ExtendedSearch: Story = {
+  play: async ({ canvasElement }) => {
+    await loadExtendedMolecules()
+    const input = canvasElement.ownerDocument.querySelector<HTMLInputElement>('.structure-popover__search')
+    if (!input) return
+    input.value = '霉素'
+    input.dispatchEvent(new Event('input'))
+  },
+}
+
+/** 按拼音首字母查找：“yxa”找到乙酰胺（核心库）以及扩展库中的同首字母分子。 */
+export const PinyinInitials: Story = {
+  play: async ({ canvasElement }) => {
+    await loadExtendedMolecules()
+    const input = canvasElement.ownerDocument.querySelector<HTMLInputElement>('.structure-popover__search')
+    if (!input) return
+    input.value = 'yxa'
+    input.dispatchEvent(new Event('input'))
+  },
+}
+
 /** 插入新结构式：没有输入时列出本文档中用过的分子（库外的显示 SMILES），不默认选中。 */
 export const UsedInDocument: Story = {
-  args: { used: ['CC(C)CC1=CC=C(C=C1)C(C)C(=O)O', 'CCO.CC(=O)O>>CCOC(C)=O.O', 'C1CCNCC1'] },
+  args: { used: ['CC(C)CC1=CC=C(C=C1)C(C)C(=O)O', 'CCO.CC(=O)O>>CCOC(C)=O.O', 'ClCCCCCCCCCCN'] },
 }
 
 /** 选中一个匹配：行末提示 Tab 把它的 SMILES 填入输入框修改。 */

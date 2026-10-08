@@ -1,13 +1,25 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId, watch } from 'vue'
-import { moleculeByName, moleculeBySmiles, searchMolecules, sideSmiles, sideText, smilesText, splitTerms, usedMolecules, type Molecule } from './structure_library.ts'
+import {
+  loadExtendedMolecules,
+  moleculeByName,
+  moleculeBySmiles,
+  searchMolecules,
+  sideSmiles,
+  sideText,
+  smilesText,
+  splitTerms,
+  usedMolecules,
+  type Molecule,
+} from './structure_library.ts'
 import { isValidSmiles, renderStructure, smilesProblem } from './structure_view.ts'
 import { normalizeArrow, normalizeRotate, type StructureConditions } from './markdown.ts'
 
 /**
  * 编辑化学结构式（docs/decisions.md 第 22 节）：在结构式（或插入处）下方弹出，分“分子”与“反应式”两种。
  *
- * - 分子：输入名称（中文或英文）查找常见分子，或直接输入 SMILES。输入的文字是有效的 SMILES 时默认使用它（↑ 回到它），
+ * - 分子：输入名称（中文、拼音首字母或英文）在分子库中查找，或直接输入 SMILES。扩展库在打开时加载，加载后重新查找；
+ *   扩展库中的分子在列表中标“扩展”。输入的文字是有效的 SMILES 时默认使用它（↑ 回到它），
  *   否则默认第一个匹配；↑ / ↓ 选择，点击一个分子直接完成。没有输入时列出本文档中用过的分子（不默认选中）。
  *   选中的一行末尾的“编辑 SMILES”（或 Tab）把它的 SMILES 填入输入框，在它的基础上修改。
  * - 版面不随输入跳动：列表出现后高度固定（插入新结构式时一开始就有），预览高度固定、过大的结构式缩小显示；
@@ -64,13 +76,21 @@ const mode = ref<'molecule' | 'reaction'>(isReaction ? 'reaction' : 'molecule')
 
 /** 列出的用过的分子数上限（与库中查找的结果数相同）。 */
 const MAX_USED = 8
-const used = usedMolecules(props.used ?? [])
+/** 扩展库加载完成时加一：分子库不是响应式的，查找结果依赖它以便加载后重新查找。 */
+const libraryVersion = ref(0)
+const used = computed(() => {
+  void libraryVersion.value
+  return usedMolecules(props.used ?? [])
+})
 
 // 分子
 const query = ref(isReaction ? '' : initial.smiles)
 /** 没有输入：列出的是本文档中用过的分子。 */
 const listingUsed = computed(() => query.value.trim() === '')
-const matches = computed<readonly Molecule[]>(() => (listingUsed.value ? used.slice(0, MAX_USED) : searchMolecules(query.value)))
+const matches = computed<readonly Molecule[]>(() => {
+  void libraryVersion.value
+  return listingUsed.value ? used.value.slice(0, MAX_USED) : searchMolecules(query.value)
+})
 const typedValid = computed(() => isValidSmiles(smilesText(query.value)))
 /** 选中的匹配；-1 是输入的文字本身（作为 SMILES）。 */
 const active = ref(-1)
@@ -116,10 +136,11 @@ const endsWithPlus = (text: string) => /[+＋]\s*$/.test(text)
 const focusedSide = ref<'reactants' | 'products' | null>(null)
 const sideRef = (side: 'reactants' | 'products') => (side === 'reactants' ? reactants : products)
 const suggestions = computed<readonly Molecule[]>(() => {
+  void libraryVersion.value
   if (focusedSide.value === null) return []
   const text = sideRef(focusedSide.value).value
   const term = endsWithPlus(text) ? '' : (splitTerms(text).at(-1) ?? '')
-  if (term === '') return used.slice(0, MAX_SUGGESTIONS)
+  if (term === '') return used.value.slice(0, MAX_SUGGESTIONS)
   if (moleculeByName(term) || isValidSmiles(smilesText(term))) return []
   return searchMolecules(term).slice(0, MAX_SUGGESTIONS)
 })
@@ -127,18 +148,20 @@ const suggestion = ref(0)
 watch(suggestions, () => (suggestion.value = 0))
 
 /** 反应式中不认识的项（既不是库中的名称，也不是有效的 SMILES）。 */
-const unknownTerms = computed(() =>
-  mode.value === 'reaction'
+const unknownTerms = computed(() => {
+  void libraryVersion.value
+  return mode.value === 'reaction'
     ? [...splitTerms(reactants.value), ...splitTerms(products.value)].filter((term) => !moleculeByName(term) && !isValidSmiles(smilesText(term)))
-    : [],
-)
+    : []
+})
 
 /** 完成时得到的结构式。 */
 const target = computed<StructureValue & { readonly name: string | null }>(() => {
+  void libraryVersion.value
   if (mode.value === 'molecule') {
     const molecule = active.value >= 0 ? matches.value[active.value] : null
     const smiles = molecule ? molecule.smiles : smilesText(query.value)
-    const name = (molecule ?? moleculeBySmiles(smiles))?.names[0] ?? null
+    const name = (molecule ?? moleculeBySmiles(smiles, true))?.names[0] ?? null
     return { smiles, arrow: '', above: '', below: '', rotate: rotate.value, flip: flip.value, name }
   }
   const left = sideSmiles(reactants.value)
@@ -320,7 +343,18 @@ async function setMode(next: 'molecule' | 'reaction'): Promise<void> {
   await focusMode()
 }
 
+/** 扩展库加载后重新查找；反应式的两侧还没有修改时，扩展库中的分子改写名称。 */
+async function loadLibrary(): Promise<void> {
+  const shown = [reactants.value, products.value]
+  await loadExtendedMolecules()
+  libraryVersion.value++
+  if (!isReaction) return
+  if (reactants.value === shown[0]) reactants.value = sideText(initialParts[0])
+  if (products.value === shown[1]) products.value = sideText(initialParts[2])
+}
+
 onMounted(async () => {
+  void loadLibrary()
   showPreview()
   place()
   await focusMode()
@@ -402,6 +436,7 @@ onMounted(async () => {
             <span v-if="molecule.names.length > 0" class="structure-popover__name">{{ molecule.names[0] }}</span>
             <span v-else class="structure-popover__name structure-popover__name--smiles" :title="molecule.smiles">{{ molecule.smiles }}</span>
             <span class="structure-popover__english">{{ molecule.english }}</span>
+            <span v-if="molecule.extended" class="structure-popover__source" title="扩展分子库（来自 Wikidata）">扩展</span>
             <button
               v-if="index === active"
               type="button"
@@ -460,6 +495,7 @@ onMounted(async () => {
               <span v-if="molecule.names.length > 0" class="structure-popover__name">{{ molecule.names[0] }}</span>
               <span v-else class="structure-popover__name structure-popover__name--smiles" :title="molecule.smiles">{{ molecule.smiles }}</span>
               <span class="structure-popover__english">{{ molecule.english }}</span>
+              <span v-if="molecule.extended" class="structure-popover__source" title="扩展分子库（来自 Wikidata）">扩展</span>
             </div>
           </div>
         </div>
@@ -715,6 +751,13 @@ onMounted(async () => {
   opacity: 1;
 }
 
+.structure-popover__source {
+  flex: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.structure-popover__option--active .structure-popover__source,
 .structure-popover__option--active .structure-popover__english {
   color: inherit;
   opacity: 0.75;
