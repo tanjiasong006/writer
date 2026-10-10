@@ -1,0 +1,82 @@
+# 发布构建：推送 v* 标签后在 macOS（通用包）与 Windows 上构建，生成带签名的更新包与 latest.json，
+# 上传到同名的 GitHub Release（草稿）。检查安装包无误后在 GitHub 上手动发布，已安装的版本才会检查到更新。
+# 流程与需要的 Secrets / Variables 见 docs/decisions.md 第 10 节。
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: windows-latest
+            args: ''
+            rust-targets: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 标签与版本号一致
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for version in \
+            "$(node -p "require('./package.json').version")" \
+            "$(node -p "require('./src-tauri/tauri.conf.json').version")" \
+            "$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"; do
+            if [ "$version" != "$tag" ]; then
+              echo "::error::标签 $GITHUB_REF_NAME 与版本号 $version 不一致（package.json、tauri.conf.json、Cargo.toml）"
+              exit 1
+            fi
+          done
+
+      - name: 更新公钥已配置
+        shell: bash
+        env:
+          PUBKEY: ${{ vars.WRITER_UPDATE_PUBKEY }}
+          PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$PUBKEY" ] || [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::缺少 Variable WRITER_UPDATE_PUBKEY 或 Secret TAURI_SIGNING_PRIVATE_KEY"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          WRITER_UPDATE_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+          WRITER_UPDATE_PUBKEY: ${{ vars.WRITER_UPDATE_PUBKEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Writer ${{ github.ref_name }}
+          releaseBody: 安装说明与更新内容见下方。
+          releaseDraft: true
+          includeUpdaterJson: true
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json

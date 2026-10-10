@@ -437,7 +437,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   重命名、Tab 顺序、最小窗口与大文档；真实 Tauri 窗口中检查了合一标题栏与窗口按钮的位置。
   真实 Writer Dev 窗口（测试项目）中逐项操作过系统菜单栏、系统右键菜单与快捷键（见手动验收清单第 11 项）：
   发现并修复了"右键章节时应用卡死"（弹出菜单与菜单栏更新同时占用 Tauri 菜单资源表）与"从菜单栏打开样式面板后焦点不回正文"。
-- 开发版与正式版隔离：开发构建是 Writer Dev（`com.writer.app.dev`），上次打开的项目与界面偏好保存在各自配置目录的
+- 开发版与正式版隔离：开发构建是 Writer Dev（`io.github.tanjiasong006.writer.dev`），上次打开的项目与界面偏好保存在各自配置目录的
   `app-state.json`（正式版第一次运行时迁移原 localStorage 中的记录）；项目锁仍按项目路径生效。见 AGENTS.md"开发版与用户数据"。
 - 已知的小问题：选中图片时浮在图片上方的布局按钮会盖住上一段的末行文字；系统自动加入的菜单项（Close All、AutoFill、
   Start Dictation、Emoji & Symbols）在未打包的开发版中显示为英文，正式包需要在 Info.plist 中声明中文本地化后再确认。
@@ -1111,7 +1111,9 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 1. 手动验收清单在正式包中全部走一遍（需要真实桌面环境与 Word / WPS，known-risks #5）。
 2. Mac App Store：App Sandbox 改造——上次打开的项目改用 security-scoped bookmark 记录，逐一验证新建、打开、
    导入图片、导出、项目锁、硬链接换名、读取用户字体；entitlements 与签名配置。
-3. 正式图标、正式名称、正式 identifier（替换 `com.writer.app`）。
+3. 正式图标、正式名称。（identifier 已定为 `io.github.tanjiasong006.writer`，2026-10-10）
+7. 发布构建：GitHub Actions（`.github/workflows/release.yml`），推送 `v*` 标签后构建 macOS 通用包与 Windows 包并上传草稿 Release，
+   流程见 decisions 第 10 节。（流水线已加入，2026-10-10；尚未实际运行，第一次发布时验证构建、`latest.json` 与从旧版本自动更新。）
 4. 关于窗口、帮助 / 支持入口、隐私政策。
 5. 中国大陆区上架需要 APP 备案。
 6. 国际化：界面翻译；导出的"文档语言"设置（章节 / 页码 / 图表文字、段落样式、断词、字体、纸张）。

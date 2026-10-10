@@ -1,6 +1,6 @@
 //! 应用环境：开发版（Writer Dev）与正式版（Writer）是两个独立的应用。
 //!
-//! - 开发构建（debug）在运行时换成自己的 identifier 与名称（`com.writer.app.dev` / "Writer Dev"），
+//! - 开发构建（debug）在运行时换成自己的 identifier 与名称（`io.github.tanjiasong006.writer.dev` / "Writer Dev"），
 //!   Tauri 按 identifier 决定的应用数据、配置、缓存目录（以及 Windows 上 WebView2 的数据目录）因此与正式版分开。
 //! - 应用级状态（上次打开的项目、侧栏宽度等本机偏好）保存在 identifier 对应的配置目录中的 `app-state.json`，
 //!   不放在网页的 localStorage 里：两个环境各自只知道自己打开过的项目，开发版永远不会自动打开正式版上次的项目。
@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 pub const DEVELOPMENT: bool = cfg!(debug_assertions);
-pub const DEV_IDENTIFIER: &str = "com.writer.app.dev";
+pub const DEV_IDENTIFIER: &str = "io.github.tanjiasong006.writer.dev";
 pub const DEV_PRODUCT_NAME: &str = "Writer Dev";
 const STATE_FILE: &str = "app-state.json";
 const STATE_TMP: &str = "app-state.json.tmp";
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn state_round_trips_and_missing_state_is_none() {
         let dir = tempfile::tempdir().unwrap();
-        let nested = dir.path().join("com.writer.app.dev");
+        let nested = dir.path().join("io.github.tanjiasong006.writer.dev");
         assert_eq!(read_state(&nested), None);
         write_state(&nested, r#"{"lastProjectPath":"/tmp/测试"}"#).unwrap();
         assert_eq!(read_state(&nested).as_deref(), Some(r#"{"lastProjectPath":"/tmp/测试"}"#));

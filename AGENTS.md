@@ -85,7 +85,7 @@ Domain 不包含面向用户的自然语言，用户可见文本由 UI 层负责
 
 ### 开发版与用户数据
 
-开发构建（`npm run tauri dev`）是独立的应用 **Writer Dev**（identifier `com.writer.app.dev`），与正式版 Writer
+开发构建（`npm run tauri dev`）是独立的应用 **Writer Dev**（identifier `io.github.tanjiasong006.writer.dev`），与正式版 Writer
 不共享应用级状态（上次打开的项目、界面偏好等，见 `src-tauri/src/app_env.rs`）。项目文件夹里的独占锁按项目路径生效，
 两个环境打开同一个真实项目时仍会互相阻止。
 

@@ -328,11 +328,19 @@
   失败与已是最新都不打扰。安装后需要重新启动，重新启动前与关闭窗口相同，先保存并释放打开的项目。
 - 更新地址与公钥在**构建正式包时**由环境变量提供（`WRITER_UPDATE_ENDPOINT`、`WRITER_UPDATE_PUBKEY`，见 `src-tauri/src/updater.rs`），
   不写入仓库；没有提供的构建（开发版、自行编译）不检查更新，对话框说明“此版本不检查更新”。
-- 发布流程：
-  1. 只需一次：`npx tauri signer generate -w ~/.tauri/writer-updater.key` 生成密钥（私钥妥善保管，丢失后已安装的版本无法再更新）。
-  2. 构建：`WRITER_UPDATE_ENDPOINT=<latest.json 的地址> WRITER_UPDATE_PUBKEY="$(cat ~/.tauri/writer-updater.key.pub)"
-     TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/writer-updater.key)" npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":true}}'`。
-  3. 上传安装包、`.sig` 与 Tauri 格式的 `latest.json`（`version`、`notes`、`pub_date`、各平台的 `url` 与 `signature`）。
+- 发布流程（2026-10-10 起由 GitHub Actions 构建，`.github/workflows/release.yml`）：
+  - 分发：公开仓库 `tanjiasong006/writer` 的 GitHub Releases；更新地址为
+    `https://github.com/tanjiasong006/writer/releases/latest/download/latest.json`（只指向最新的**正式**发布，草稿不算）。
+  - 平台：macOS 通用包（Apple Silicon + Intel）与 Windows（NSIS / MSI）。macOS 暂不做 Apple 签名与公证，
+    只做 ad-hoc 签名（`src-tauri/tauri.release.conf.json`），用户第一次打开需要在“系统设置 → 隐私与安全性”中允许。
+  - 只需一次：`npx tauri signer generate -w ~/.tauri/writer-updater.key` 生成密钥（私钥妥善保管，丢失后已安装的版本无法再更新）；
+    在仓库 Settings → Secrets and variables → Actions 中添加 Secret `TAURI_SIGNING_PRIVATE_KEY`（私钥文件内容）、
+    `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（生成时设置的密码，没有则不加），以及 Variable `WRITER_UPDATE_PUBKEY`（`.pub` 文件内容）。
+  - 每次发布：把 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 的版本号改成同一个新版本并提交，
+    推送标签 `v<版本号>`（流水线检查标签与三处版本号一致）。流水线把安装包、`.sig` 与合并好的 `latest.json` 上传到草稿 Release；
+    下载安装包检查无误后，在 GitHub 上填写更新说明并发布，已安装的版本才会检查到更新。
+  - 本地构建正式包（排查问题时）：`WRITER_UPDATE_ENDPOINT=<latest.json 的地址> WRITER_UPDATE_PUBKEY="$(cat ~/.tauri/writer-updater.key.pub)"
+    TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/writer-updater.key)" npm run tauri build -- --config src-tauri/tauri.release.conf.json`。
 - Mac App Store 版本不得包含自更新（构建时不提供上述环境变量即可，入口显示“此版本不检查更新”；上架前再决定是否隐藏入口）。
 
 ## 11. 脚注（2026-10-03 实施，2026-10-04 产品负责人确认）
