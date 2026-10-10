@@ -340,7 +340,10 @@
     推送标签 `v<版本号>`（流水线检查标签与三处版本号一致）。流水线把安装包、`.sig` 与合并好的 `latest.json` 上传到草稿 Release；
     下载安装包检查无误后，在 GitHub 上填写更新说明并发布，已安装的版本才会检查到更新。
   - 本地构建正式包（排查问题时）：`WRITER_UPDATE_ENDPOINT=<latest.json 的地址> WRITER_UPDATE_PUBKEY="$(cat ~/.tauri/writer-updater.key.pub)"
-    TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/writer-updater.key)" npm run tauri build -- --config src-tauri/tauri.release.conf.json`。
+    TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/writer-updater.key)" npm run tauri build -- --config src-tauri/tauri.release.conf.json
+    --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$(cat ~/.tauri/writer-updater.key.pub)\"}}}"`。
+    Tauri CLI 签名时核对私钥与 `plugins > updater > pubkey` 是否成对，公钥为空或不匹配都会构建失败；
+    流水线在构建前把 Variable 中的公钥写入 `tauri.release.conf.json`（不提交）。
 - Mac App Store 版本不得包含自更新（构建时不提供上述环境变量即可，入口显示“此版本不检查更新”；上架前再决定是否隐藏入口）。
 
 ## 11. 脚注（2026-10-03 实施，2026-10-04 产品负责人确认）

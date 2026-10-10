@@ -51,6 +51,20 @@ jobs:
             exit 1
           fi
 
+      # Tauri CLI 签名更新包时核对私钥与 plugins > updater > pubkey 是否成对，公钥只在构建时写入。
+      - name: 写入更新公钥
+        shell: bash
+        env:
+          PUBKEY: ${{ vars.WRITER_UPDATE_PUBKEY }}
+        run: |
+          node -e '
+            const fs = require("fs")
+            const file = "src-tauri/tauri.release.conf.json"
+            const config = JSON.parse(fs.readFileSync(file, "utf8"))
+            config.plugins = { updater: { pubkey: process.env.PUBKEY.trim() } }
+            fs.writeFileSync(file, JSON.stringify(config, null, 2))
+          '
+
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
