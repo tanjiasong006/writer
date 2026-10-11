@@ -344,24 +344,6 @@ test('createProject：新建空文档；目标已存在时失败', async () => {
   })
 })
 
-test('createProject：按模板大纲预先建好章节，提示放在备注中，正文为空并已写入磁盘', async () => {
-  const storage = new MemoryProjectStorage()
-  const created = await createProject(storage, PATH, '论文', undefined, [
-    { title: '摘要', note: '写目的与结论' },
-    { title: '正文', children: [{ title: '方法' }] },
-  ])
-  if (!created.ok) throw new Error('create failed')
-  const { tree, contents } = created.session.document
-  expect(tree.map((node) => [node.title, node.note])).toEqual([
-    ['摘要', '写目的与结论'],
-    ['正文', undefined],
-  ])
-  expect(tree[1]!.children.map((node) => node.title)).toEqual(['方法'])
-  expect(new Set([tree[0]!.id, tree[1]!.id, tree[1]!.children[0]!.id]).size).toBe(3)
-  expect([...contents.values()]).toEqual(['', '', ''])
-  expect(storage.committed(PATH)!.tree).toEqual(tree)
-})
-
 test('releaseSession：保存成功直接释放，不询问', async () => {
   const { storage, session } = setup()
   session.setContent('a', '1')

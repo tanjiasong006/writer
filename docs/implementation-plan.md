@@ -964,7 +964,7 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 2. ~~章节状态或标签（草稿 / 待修改 / 完成）与章节备注。~~（完成，见下方“P2-2 章节状态与备注”）
 3. ~~写作目标（字数目标、进度）。~~（完成，见下方“P2-3 写作目标”）
 4. ~~更多导出格式：合并的 Markdown、HTML、EPUB。~~（完成，见下方“P2-4 其他导出格式”）
-5. ~~文档模板（论文、报告、书稿）。~~（完成，见下方“P2-5 文档模板”）
+5. ~~文档模板（论文、报告、书稿）。~~（完成，见下方“P2-5 文档模板”；2026-10-11 去掉）
 6. ~~富文本粘贴识别 Word / WPS 的列表段落（目前是带 · 的普通段落）。~~（完成，见下方“P2-6 粘贴 Word / WPS 列表”）
 7. ~~大量章节虚拟滚动（ui-spec P1；1050 章节实测暂不需要；拖入折叠节点自动展开、拖拽自动滚动已完成）。~~（完成，见下方“P2-7 章节树虚拟滚动”）
 8. ~~化学式与化学方程式。~~（完成，见下方“P2-8 化学式”）
@@ -1000,7 +1000,9 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
   Markdown 引用文字、图注编号、转义、脚注连续编号、参考文献、图片复制；base64；日期）、前端命令路由与工作区导出测试。
   未在电子书阅读器与其他 Markdown 工具中目视检查。
 
-#### P2-5 文档模板（完成，2026-10-04）
+#### P2-5 文档模板（完成，2026-10-04；2026-10-11 去掉）
+
+- 2026-10-11 产品负责人决定去掉：用处不大。删除 `document_templates.ts`、欢迎页模板按钮、菜单项与 `createProject` 的大纲参数。
 
 - 规则见 decisions 第 19 节。Application `createProject(…, outline)` 与 `outlineTree`（新 id、备注、空正文）；
   `ui/app_shell/document_templates.ts`（三个模板）；欢迎页模板按钮、菜单 `file:templates` / `file:template-*`。
@@ -1075,7 +1077,6 @@ WebKit 排版约 0.4 s，只在预览打开且文档变化时发生）、Word 0.
 
 - 规则见 decisions 第 19 节，取值见 pdf-layout 4.1 节。Domain `PDF_LAYOUT_PRESETS` / `matchPdfLayoutPreset`；
   `PdfLayoutDialog` 选项最上方的“版式”分段控件；`SegmentedControl` 支持没有选中项（第一项占 Tab 位置）。
-  模板对应的版式（论文 → 学术、书稿 → 书籍）尚未实施。
 - 验证：Domain（版式只含非默认的合法项、按完整配置匹配）、分段控件无选中项、排版设置（整体替换、选中状态随修改变化、提交内容）测试；
   Story `PdfLayoutDialog/AcademicPreset`、`SegmentedControl/NoSelection`（Storybook 中目视检查了选择版式、改动后取消选中与样张更新）。
 

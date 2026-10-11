@@ -8,7 +8,6 @@ import {
 } from './application/project_lifecycle.ts'
 import type { ProjectSession } from './application/project_session.ts'
 import type { StorageFailure } from './application/project_storage.ts'
-import { findTemplate, type TemplateId } from './ui/app_shell/document_templates.ts'
 import WelcomeView from './ui/app_shell/WelcomeView.vue'
 import Workspace from './ui/app_shell/Workspace.vue'
 import { messageForStorageFailure } from './ui/app_shell/storage_messages.ts'
@@ -97,7 +96,6 @@ function runWelcomeMenuItem(id: string): void {
   }
   if (busy.value) return
   if (command?.group === 'recent') void openRecent(command.index)
-  else if (command?.group === 'template') void newProject(command.template)
   else if (id === 'file:new') void newProject()
   else if (id === 'file:open') void openExisting()
 }
@@ -217,12 +215,10 @@ async function switchTo(load: () => Promise<OpenSessionResult>): Promise<void> {
   if ((await enter(() => openProject(storage, previous))) === null) notice.value = failure
 }
 
-/** 新建文档；template 是从模板新建时的模板（docs/decisions.md 第 19 节）。 */
-async function newProject(template?: TemplateId): Promise<void> {
+async function newProject(): Promise<void> {
   const path = await shell.pickNewProjectPath()
   if (path === null) return
-  const outline = template === undefined ? [] : (findTemplate(template)?.outline ?? [])
-  await switchTo(() => createProject(storage, path, titleFromPath(path), undefined, outline))
+  await switchTo(() => createProject(storage, path, titleFromPath(path)))
 }
 
 /** 打开最近的第 index 个项目（null 清除列表）；打不开的从列表中去掉。 */

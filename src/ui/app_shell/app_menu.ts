@@ -5,7 +5,6 @@ import { COMMAND_LABELS, LIST_COMMANDS, commandEntry } from '../editor/editor_me
 import { IS_MAC, SHORTCUTS, matchesShortcut } from '../common/shortcuts.ts'
 import { projectName } from '../../application/recent_projects.ts'
 import type { ChapterStatus } from '../../domain/chapter_tree/chapter_tree.ts'
-import { DOCUMENT_TEMPLATES, findTemplate, type TemplateId } from './document_templates.ts'
 
 /**
  * 应用菜单栏（文件、编辑、格式、插入、表格、章节、显示）。快捷键的定义在 common/shortcuts.ts；
@@ -83,9 +82,6 @@ export type MenuItemId =
   | 'file:recent-clear'
   | 'file:recent'
   | 'file:export-other'
-  /** 从模板新建文档（docs/decisions.md 第 19 节）；templates 是子菜单本身。 */
-  | `file:template-${TemplateId}`
-  | 'file:templates'
   /** 子菜单本身（不对应命令）。 */
   | 'appearance'
   | 'list'
@@ -105,8 +101,6 @@ export type MenuCommand =
   | { readonly group: 'app'; readonly action: AppAction }
   /** 打开最近的项目（index 为 null 表示清除列表）。 */
   | { readonly group: 'recent'; readonly index: number | null }
-  /** 从模板新建文档。 */
-  | { readonly group: 'template'; readonly template: TemplateId }
 
 function oneOf<T extends string>(values: readonly T[], value: string): value is T {
   return (values as readonly string[]).includes(value)
@@ -127,10 +121,6 @@ export function parseMenuItemId(id: string): MenuCommand | null {
       if (name === 'recent-clear') return { group: 'recent', index: null }
       const recent = /^recent-(\d+)$/.exec(name)
       if (recent) return { group: 'recent', index: Number(recent[1]) }
-      if (name.startsWith('template-')) {
-        const template = findTemplate(name.slice('template-'.length))
-        return template ? { group: 'template', template: template.id } : null
-      }
       return oneOf(FILE_ACTIONS, name) ? { group: 'file', action: name } : null
     }
     case 'edit':
@@ -218,13 +208,6 @@ function recentMenu(recent: readonly string[]): WorkspaceMenuEntry {
   }
 }
 
-/** 文件 → 从模板新建：论文、报告、书稿。 */
-const TEMPLATES_MENU: WorkspaceMenuEntry = {
-  id: 'file:templates',
-  label: '从模板新建',
-  submenu: DOCUMENT_TEMPLATES.map((template): WorkspaceMenuItem => ({ id: `file:template-${template.id}`, label: `${template.label}…` })),
-}
-
 /** 欢迎页（没有打开文档）时的菜单栏。 */
 export function welcomeMenus(appearance: Appearance, recent: readonly string[] = []): WorkspaceMenu[] {
   return [
@@ -232,7 +215,6 @@ export function welcomeMenus(appearance: Appearance, recent: readonly string[] =
       label: '文件',
       items: [
         { id: 'file:new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
-        TEMPLATES_MENU,
         { id: 'file:open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
         recentMenu(recent),
         { separator: true },
@@ -276,7 +258,6 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
       label: '文件',
       items: [
         { id: 'file:new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
-        TEMPLATES_MENU,
         { id: 'file:open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
         recentMenu(context.recent ?? []),
         { separator: true },

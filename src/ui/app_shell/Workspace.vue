@@ -47,7 +47,6 @@ import CitationPicker from '../editor/CitationPicker.vue'
 import ReferencesDialog from './ReferencesDialog.vue'
 import { citationAddress, formatReference, type ReferenceEntry } from '../../domain/bibliography/bibliography.ts'
 import { useElementIndex } from './use_elements.ts'
-import type { TemplateId } from './document_templates.ts'
 import type { CommandState, EditorCommand } from '../editor/commands.ts'
 import PopupMenu, { type MenuAnchor, type MenuEntry } from '../common/PopupMenu.vue'
 import Toast from '../common/Toast.vue'
@@ -83,7 +82,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'new-project': [template?: TemplateId]
+  'new-project': []
   'open-project': []
   'dismiss-notice': []
   'set-appearance': [appearance: Appearance]
@@ -829,9 +828,6 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       return
     case 'recent':
       emit('open-recent', command.index)
-      return
-    case 'template':
-      emit('new-project', command.template)
       return
     case 'chapter':
     case 'move-chapter': {

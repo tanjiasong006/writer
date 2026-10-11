@@ -43,24 +43,6 @@ test('新建文档：在所选位置创建空项目，标题取文件夹名，�
   expect(services.shell.lastProjectPath).toBe('/文稿/我的小说')
 })
 
-test('从模板新建：欢迎页与菜单栏都可以选择模板，章节预先建好，提示在备注中', async () => {
-  const services = createMemoryServices()
-  services.shell.enableAppMenu()
-  services.shell.newProjectPath = '/文稿/毕业论文'
-  const wrapper = await mountApp(services)
-
-  await wrapper.findAll('.welcome__template').find((b) => b.text() === '论文')!.trigger('click')
-  await flushPromises()
-  expect(rowTexts(wrapper).slice(0, 4)).toEqual(['1绪论', '1.1研究背景', '1.2研究内容', '1.3论文结构'])
-  expect(services.storage.committed('/文稿/毕业论文')!.tree[0]!.note).toContain('研究背景')
-
-  services.shell.newProjectPath = '/文稿/年度报告'
-  services.shell.chooseMenuItem('file:template-report')
-  await flushPromises()
-  expect(documentTitle(wrapper)).toBe('年度报告')
-  expect(rowTexts(wrapper)[0]).toBe('1概述')
-})
-
 test('取消新建对话框：什么也不发生', async () => {
   const wrapper = await mountApp()
   await wrapper.findAll('.welcome__button').find((b) => b.text().startsWith('新建文档'))!.trigger('click')
