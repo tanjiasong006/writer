@@ -105,3 +105,15 @@ export const EmptyDocument: Story = {
     }),
   ],
 }
+
+/** 有新版本：启动约 5 秒后顶栏末端出现“更新到 0.2.0”，点击打开更新说明；“下载并安装”后消失。 */
+export const UpdateAvailable: Story = {
+  decorators: [
+    withServices((services) => {
+      services.shell.windowStyle = 'unified'
+      services.storage.seed('/文稿/示例论文', sampleDocument())
+      services.shell.lastProjectPath = '/文稿/示例论文'
+      services.shell.updateResult = { kind: 'available', current: '0.1.1', version: '0.2.0', notes: '### 新功能\n\n- 查找与替换' }
+    }),
+  ],
+}

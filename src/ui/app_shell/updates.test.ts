@@ -77,7 +77,7 @@ test('安装失败时说明原因，版本不变', async () => {
   expect(services.shell.restarts).toBe(0)
 })
 
-test('启动后在后台检查一次：只有新版本才提示，“查看”打开说明', async () => {
+test('启动后在后台检查一次：打开文档时顶栏常驻“更新到”，点击重新检查并打开说明，安装后消失', async () => {
   vi.useFakeTimers()
   const services = seededServices()
   services.shell.lastProjectPath = PATH
@@ -86,12 +86,47 @@ test('启动后在后台检查一次：只有新版本才提示，“查看”�
   expect(services.shell.updateChecks).toBe(0)
   await vi.advanceTimersByTimeAsync(5000)
   expect(services.shell.updateChecks).toBe(1)
-  expect(wrapper.find('.workspace__update').text()).toContain('Writer 0.2.0 可以更新')
+  expect(wrapper.find('.workspace__update').text()).toBe('更新到 0.2.0')
+
+  await wrapper.find('.workspace__update').trigger('click')
+  await flushPromises()
+  expect(services.shell.updateChecks).toBe(2)
+  expect(dialogTitle()).toBe('Writer 0.2.0 可以更新')
+  await button(wrapper, '稍后').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.workspace__update').exists()).toBe(true)
+
+  // 安装失败后入口仍在，再次点击重新检查并可以再次安装。
+  services.shell.installFailure = 'network down'
+  await wrapper.find('.workspace__update').trigger('click')
+  await flushPromises()
+  await button(wrapper, '下载并安装').trigger('click')
+  await flushPromises()
+  expect(dialogTitle()).toBe('更新没有安装成功')
+  await button(wrapper, '好').trigger('click')
+  expect(wrapper.find('.workspace__update').exists()).toBe(true)
+
+  services.shell.installFailure = null
+  await wrapper.find('.workspace__update').trigger('click')
+  await flushPromises()
+  await button(wrapper, '下载并安装').trigger('click')
+  await flushPromises()
+  expect(dialogTitle()).toBe('更新已安装')
+  expect(wrapper.find('.workspace__update').exists()).toBe(false)
+})
+
+test('欢迎页上后台发现新版本时显示浮条，“查看”打开说明', async () => {
+  vi.useFakeTimers()
+  const services = createMemoryServices()
+  services.shell.updateResult = { kind: 'available', current: '0.1.0', version: '0.2.0', notes: null }
+  const wrapper = await mountApp(services)
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(wrapper.find('.app__update').text()).toContain('Writer 0.2.0 可以更新')
 
   await button(wrapper, '查看').trigger('click')
   await flushPromises()
   expect(dialogTitle()).toBe('Writer 0.2.0 可以更新')
-  expect(wrapper.find('.workspace__update').exists()).toBe(false)
+  expect(wrapper.find('.app__update').exists()).toBe(false)
 })
 
 test('后台检查失败或已是最新时不打扰', async () => {

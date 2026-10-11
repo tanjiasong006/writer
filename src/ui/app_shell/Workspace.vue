@@ -75,8 +75,8 @@ const props = defineProps<{
   session: ProjectSession
   /** 应用层的提示（如打开项目时的说明），与工作区自己的提示显示在同一处。 */
   notice?: string | null
-  /** 后台检查发现的新版本（提示中带“查看”）。 */
-  updateNotice?: string | null
+  /** 可以更新到的版本：顶栏中常驻“更新到 x.y.z”，点击查看更新说明。 */
+  updateVersion?: string | null
   /** 最近打开的项目（文件 → 打开最近）。 */
   recent?: readonly string[]
   appearance: Appearance
@@ -92,7 +92,6 @@ const emit = defineEmits<{
   /** 文件 → 打开最近（index 为 null 表示清除列表），由 App 处理。 */
   'open-recent': [index: number | null]
   'show-update': []
-  'dismiss-update': []
 }>()
 
 const { shell, output } = useServices()
@@ -1076,6 +1075,17 @@ async function createFirstChapter(): Promise<void> {
             <Icon name="export" />
           </button>
         </div>
+
+        <button
+          v-if="updateVersion"
+          type="button"
+          class="workspace__update"
+          tabindex="0"
+          :title="`${shell.appName} ${updateVersion} 可以更新，查看更新说明`"
+          @click="emit('show-update')"
+        >
+          更新到 {{ updateVersion }}
+        </button>
       </header>
 
       <FindBar
@@ -1150,12 +1160,6 @@ async function createFirstChapter(): Promise<void> {
 
       <div class="workspace__toasts">
         <Toast v-if="notice" class="app__notice" @dismiss="emit('dismiss-notice')">{{ notice }}</Toast>
-        <Toast v-if="updateNotice" class="workspace__update" @dismiss="emit('dismiss-update')">
-          {{ updateNotice }}
-          <template #actions>
-            <button type="button" @click="emit('show-update')">查看</button>
-          </template>
-        </Toast>
         <Toast
           v-if="status === 'failed' && lastError && !saveErrorDismissed"
           class="workspace__save-error"
@@ -1511,6 +1515,32 @@ async function createFirstChapter(): Promise<void> {
 .workspace__exit-focus:hover {
   background: var(--color-fill-pressed);
   color: var(--color-text);
+}
+
+/* 有新版本时常驻顶栏末端：强调色文字与浅底，比工具按钮醒目，但不抢正文。 */
+.workspace__update {
+  flex: none;
+  height: var(--control-h-s);
+  margin-left: var(--space-5);
+  padding: 0 var(--space-4);
+  border: none;
+  border-radius: var(--radius-m);
+  background: var(--color-accent-fill);
+  color: var(--color-accent-text);
+  font: inherit;
+  font-size: var(--text-s);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.workspace__update:hover {
+  background: var(--color-accent-fill-strong);
+}
+
+.workspace__update:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 1px;
 }
 
 .workspace__group {

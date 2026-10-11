@@ -266,14 +266,13 @@ function titleFromPath(path: string): string {
       :appearance="appearance.current.value"
       @dismiss-notice="notice = null"
       @set-appearance="appearance.set"
-      :update-notice="updates.notice.value"
+      :update-version="updates.availableVersion.value"
       :recent="recent"
       @open-recent="openRecent"
       @new-project="newProject"
       @open-project="openExisting"
       @check-update="updates.check"
-      @show-update="updates.showAvailable"
-      @dismiss-update="updates.dismissNotice"
+      @show-update="updates.check"
     />
     <template v-else-if="view.kind === 'welcome'">
       <WelcomeView
