@@ -25,7 +25,7 @@ jobs:
             rust-targets: ''
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 标签与版本号一致
         shell: bash
@@ -66,7 +66,7 @@ jobs:
             fs.writeFileSync(file, JSON.stringify(config, null, 2))
           '
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: npm
@@ -100,7 +100,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
