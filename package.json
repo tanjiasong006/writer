@@ -12,6 +12,7 @@
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
     "tauri": "tauri",
+    "release": "scripts/release.sh",
     "build:fast": "tauri build --bundles app -- --profile release-fast",
     "build:windows": "PATH=/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:$PATH tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc",
     "build:windows:fast": "PATH=/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:$PATH tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc -- --profile release-fast"
