@@ -83,6 +83,11 @@ Domain 不包含面向用户的自然语言，用户可见文本由 UI 层负责
 
 新增或修改可视 UI 组件时，应同步新增或更新对应的 Storybook Story，用于独立查看和人工调试关键状态。
 
+### 提交信息
+
+提交标题用中文，保留 Conventional Commits 类型前缀（如 `feat: 拖动章节时自动滚动`、`fix(export): 修复 Word 图片丢失`）。
+`feat`、`fix` 和没有前缀的提交标题会原样写进发布的更新说明（见 `docs/decisions.md` 第 10 节），按用户能看懂的措辞写。
+
 ### 开发版与用户数据
 
 开发构建（`npm run tauri dev`）是独立的应用 **Writer Dev**（identifier `io.github.tanjiasong006.writer.dev`），与正式版 Writer
