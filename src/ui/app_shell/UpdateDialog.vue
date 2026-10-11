@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import MarkdownIt from 'markdown-it'
 import type { UpdateState } from './use_updates.ts'
+
+/**
+ * 更新说明是发布页上的 Markdown（scripts/release-notes.sh 生成）。不渲染原始 HTML；
+ * 链接只显示文字——在应用窗口中点击链接会让整个窗口离开 Writer。
+ */
+const notesMarkdown = new MarkdownIt({ html: false, linkify: false })
+notesMarkdown.disable('image')
+notesMarkdown.renderer.rules.link_open = () => ''
+notesMarkdown.renderer.rules.link_close = () => ''
 
 /**
  * 检查更新的对话框：检查中、已是最新、未配置、失败、发现新版本（说明）、下载安装中、已安装（重新启动）。
@@ -63,6 +73,10 @@ const text = computed(() => {
   return ''
 })
 
+const notesHtml = computed(() =>
+  props.state.kind === 'available' && props.state.notes ? notesMarkdown.render(props.state.notes) : null,
+)
+
 /** 原始错误：只作为补充，以次要文字显示。 */
 const detail = computed(() =>
   props.state.kind === 'failed' || props.state.kind === 'install-failed' ? props.state.message : null,
@@ -120,7 +134,7 @@ onBeforeUnmount(() => {
       <h2 id="update-dialog-title" class="update-dialog__title">{{ title }}</h2>
       <p id="update-dialog-text" class="update-dialog__text">{{ text }}</p>
       <p v-if="detail" class="update-dialog__detail">{{ detail }}</p>
-      <div v-if="state.kind === 'available' && state.notes" class="update-dialog__notes" tabindex="0" aria-label="更新说明">{{ state.notes.trim() }}</div>
+      <div v-if="notesHtml" class="update-dialog__notes" tabindex="0" aria-label="更新说明" v-html="notesHtml"></div>
       <div class="update-dialog__actions">
         <template v-if="state.kind === 'available'">
           <button type="button" class="update-dialog__button" @click="emit('close')">稍后</button>
@@ -209,9 +223,37 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   border-radius: var(--radius-m);
   background: var(--color-fill-hover);
-  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* 说明中的标题（### 新功能）与正文同字号，靠字重区分；列表紧凑。 */
+.update-dialog__notes :deep(:is(h1, h2, h3, h4, h5, h6)) {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: inherit;
+  font-weight: var(--weight-semibold);
+}
+
+.update-dialog__notes :deep(:is(p, ul, ol)) {
+  margin: 0 0 var(--space-2);
+}
+
+.update-dialog__notes :deep(:is(ul, ol)) {
+  padding-left: var(--space-6);
+}
+
+.update-dialog__notes :deep(> :first-child) {
+  margin-top: 0;
+}
+
+.update-dialog__notes :deep(> :last-child) {
+  margin-bottom: 0;
+}
+
+.update-dialog__notes :deep(code) {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
 }
 
 .update-dialog__notes:focus-visible {

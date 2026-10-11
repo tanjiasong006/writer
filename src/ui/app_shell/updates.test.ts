@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { flushPromises } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
+import UpdateDialog from './UpdateDialog.vue'
 import { createMemoryServices } from '../../testing/memory_services.ts'
 import { PATH, seededServices, mountApp, unmountAll, button, typeAtEnd, editorView, appMenuItem } from '../../testing/app_harness.ts'
 
@@ -49,7 +50,7 @@ test('发现新版本：显示说明，下载并安装后重新启动；重新�
   services.shell.chooseMenuItem('app:check-update')
   await flushPromises()
   expect(dialogTitle()).toBe('Writer 0.2.0 可以更新')
-  expect(document.querySelector('.update-dialog__notes')?.textContent?.trim()).toBe('- 查找与替换')
+  expect(document.querySelector('.update-dialog__notes li')?.textContent).toBe('查找与替换')
 
   await button(wrapper, '下载并安装').trigger('click')
   await flushPromises()
@@ -138,4 +139,26 @@ test('后台检查失败或已是最新时不打扰', async () => {
   expect(services.shell.updateChecks).toBe(1)
   expect(wrapper.find('.app__update').exists()).toBe(false)
   expect(dialogTitle()).toBeNull()
+})
+
+test('更新说明按 Markdown 显示：标题、列表、粗体；链接只显示文字，不渲染 HTML', () => {
+  const notes = [
+    '### 新功能',
+    '',
+    '- **查找**与替换',
+    '- 见 [发布页](https://example.com/releases)',
+    '',
+    '<img src=x onerror=alert(1)>',
+  ].join('\n')
+  const wrapper = mount(UpdateDialog, {
+    props: { appName: 'Writer', state: { kind: 'available', current: '0.1.0', version: '0.2.0', notes } },
+  })
+  const box = wrapper.find('.update-dialog__notes')
+  expect(box.find('h3').text()).toBe('新功能')
+  expect(box.findAll('li').map((item) => item.text())).toEqual(['查找与替换', '见 发布页'])
+  expect(box.find('strong').text()).toBe('查找')
+  expect(box.find('a').exists()).toBe(false)
+  expect(box.find('img').exists()).toBe(false)
+  expect(box.text()).toContain('<img src=x onerror=alert(1)>')
+  wrapper.unmount()
 })
