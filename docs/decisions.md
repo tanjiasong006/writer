@@ -338,7 +338,10 @@
     `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`（生成时设置的密码，没有则不加），以及 Variable `WRITER_UPDATE_PUBKEY`（`.pub` 文件内容）。
   - 每次发布：把 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 的版本号改成同一个新版本并提交，
     推送标签 `v<版本号>`（流水线检查标签与三处版本号一致）。流水线把安装包、`.sig` 与合并好的 `latest.json` 上传到草稿 Release；
-    下载安装包检查无误后，在 GitHub 上填写更新说明并发布，已安装的版本才会检查到更新。
+    两个平台都构建成功后自动发布（2026-10-11 产品负责人确认，不再人工试装），已安装的版本随即检查到更新；任一平台失败则停在草稿。
+  - 更新说明由 `scripts/release-notes.sh` 按上一个版本标签以来的提交生成：`feat` → 新功能，`fix` → 修复，
+    没有类型前缀的提交 → 改进，`docs`、`build`、`refactor` 等不列出；末尾附安装说明。提交标题即用户看到的说明，写提交时注意措辞。
+    发布后仍可在 GitHub 上手动修改说明。
   - 本地构建正式包（排查问题时）：`WRITER_UPDATE_ENDPOINT=<latest.json 的地址> WRITER_UPDATE_PUBKEY="$(cat ~/.tauri/writer-updater.key.pub)"
     TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/writer-updater.key)" npm run tauri build -- --config src-tauri/tauri.release.conf.json
     --config "{\"plugins\":{\"updater\":{\"pubkey\":\"$(cat ~/.tauri/writer-updater.key.pub)\"}}}"`。

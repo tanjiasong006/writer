@@ -1,5 +1,6 @@
 # 发布构建：推送 v* 标签后在 macOS（通用包）与 Windows 上构建，生成带签名的更新包与 latest.json，
-# 上传到同名的 GitHub Release（草稿）。检查安装包无误后在 GitHub 上手动发布，已安装的版本才会检查到更新。
+# 先上传到同名的 GitHub Release 草稿；两个平台都构建成功后，按提交生成更新说明并正式发布，
+# 已安装的版本随即检查到更新。任一平台失败则停在草稿，不会发布不完整的版本。
 # 流程与需要的 Secrets / Variables 见 docs/decisions.md 第 10 节。
 name: Release
 
@@ -90,7 +91,22 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Writer ${{ github.ref_name }}
-          releaseBody: 安装说明与更新内容见下方。
+          releaseBody: 正在构建，完成后自动填写更新说明。
           releaseDraft: true
           includeUpdaterJson: true
           args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 生成更新说明并发布
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+          gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md --draft=false --latest
