@@ -21,7 +21,10 @@ export const Failed: Story = {
   args: { state: { kind: 'failed', message: 'error sending request for url (https://example.com/latest.json)' } },
 }
 
-/** 发现新版本，带较长的更新说明（在框内滚动）。说明是发布流水线生成的 Markdown，按标题、列表显示。 */
+/**
+ * 发现新版本，带较长的更新说明（在框内滚动）。说明是发布流水线生成的 Markdown，按标题、列表显示；
+ * 标记之后的安装方法与完整变更只在发布页上显示。
+ */
 export const Available: Story = {
   args: {
     state: {
@@ -38,6 +41,8 @@ export const Available: Story = {
         '### 修复',
         '',
         '- 导出 Word 时图片丢失',
+        '',
+        '<!-- writer:release-page-only -->',
         '',
         '### 安装',
         '',

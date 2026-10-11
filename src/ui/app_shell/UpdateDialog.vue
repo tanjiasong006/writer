@@ -6,7 +6,9 @@ import type { UpdateState } from './use_updates.ts'
 /**
  * 更新说明是发布页上的 Markdown（scripts/release-notes.sh 生成）。不渲染原始 HTML；
  * 链接只显示文字——在应用窗口中点击链接会让整个窗口离开 Writer。
+ * 标记之后是只给发布页读者的内容（安装方法、完整变更），对话框中不显示。
  */
+const RELEASE_PAGE_ONLY = '<!-- writer:release-page-only -->'
 const notesMarkdown = new MarkdownIt({ html: false, linkify: false })
 notesMarkdown.disable('image')
 notesMarkdown.renderer.rules.link_open = () => ''
@@ -73,9 +75,11 @@ const text = computed(() => {
   return ''
 })
 
-const notesHtml = computed(() =>
-  props.state.kind === 'available' && props.state.notes ? notesMarkdown.render(props.state.notes) : null,
-)
+const notesHtml = computed(() => {
+  if (props.state.kind !== 'available' || !props.state.notes) return null
+  const notes = props.state.notes.split(RELEASE_PAGE_ONLY)[0].trim()
+  return notes.length > 0 ? notesMarkdown.render(notes) : null
+})
 
 /** 原始错误：只作为补充，以次要文字显示。 */
 const detail = computed(() =>

@@ -162,3 +162,19 @@ test('更新说明按 Markdown 显示：标题、列表、粗体；链接只显�
   expect(box.text()).toContain('<img src=x onerror=alert(1)>')
   wrapper.unmount()
 })
+
+test('更新说明中只给发布页的部分（安装方法等）不显示；只有这部分时不显示说明框', () => {
+  const marker = '<!-- writer:release-page-only -->'
+  const state = (notes: string) => ({ kind: 'available' as const, current: '0.1.0', version: '0.2.0', notes })
+  const wrapper = mount(UpdateDialog, {
+    props: { appName: 'Writer', state: state(`### 新功能\n\n- 字数统计\n\n${marker}\n\n### 安装\n\n- 下载 .dmg`) },
+  })
+  const box = wrapper.find('.update-dialog__notes')
+  expect(box.findAll('h3').map((heading) => heading.text())).toEqual(['新功能'])
+  expect(box.findAll('li').map((item) => item.text())).toEqual(['字数统计'])
+  wrapper.unmount()
+
+  const onlyInstall = mount(UpdateDialog, { props: { appName: 'Writer', state: state(`${marker}\n\n### 安装\n\n- 下载 .dmg`) } })
+  expect(onlyInstall.find('.update-dialog__notes').exists()).toBe(false)
+  onlyInstall.unmount()
+})

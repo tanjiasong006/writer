@@ -35,7 +35,10 @@ section 新功能 ${features[@]+"${features[@]}"}
 section 改进 ${improvements[@]+"${improvements[@]}"}
 section 修复 ${fixes[@]+"${fixes[@]}"}
 
+# 以下只给发布页的读者：应用内的更新对话框只显示这个标记之前的内容（src/ui/app_shell/UpdateDialog.vue）。
 cat <<'EOF'
+<!-- writer:release-page-only -->
+
 ### 安装
 
 - **macOS**（Apple Silicon 与 Intel 通用）：下载 `.dmg`，把 Writer 拖进“应用程序”。第一次打开如果被拦下，
