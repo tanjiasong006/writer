@@ -2,6 +2,9 @@
 # 先上传到同名的 GitHub Release 草稿；两个平台都构建成功后，按提交生成更新说明并正式发布，
 # 已安装的版本随即检查到更新。任一平台失败则停在草稿，不会发布不完整的版本。
 # 流程与需要的 Secrets / Variables 见 docs/decisions.md 第 10 节。
+#
+# 草稿在构建前单独创建，只指定标签、不指定目标提交：如果由 tauri-action 在构建结束时创建，它会把标签所在的提交
+# 作为目标提交，而构建期间 main 一旦有新提交，GitHub 就要求 GITHUB_TOKEN 无法获得的 workflows 权限，创建失败。
 name: Release
 
 on:
@@ -12,7 +15,20 @@ permissions:
   contents: write
 
 jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 创建草稿 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 && exit 0 # 重跑时已经存在
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Writer $GITHUB_REF_NAME" --notes "正在构建，完成后自动填写更新说明。"
+
   build:
+    needs: draft
     strategy:
       fail-fast: false
       matrix:
