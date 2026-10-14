@@ -83,7 +83,7 @@ const notesHtml = computed(() => {
 
 /** 原始错误：只作为补充，以次要文字显示。 */
 const detail = computed(() =>
-  props.state.kind === 'failed' || props.state.kind === 'install-failed' ? props.state.message : null,
+  props.state.kind === 'failed' || props.state.kind === 'install-failed' ? props.state.message.split('\n') : null,
 )
 
 function onKeydown(event: KeyboardEvent): void {
@@ -137,7 +137,9 @@ onBeforeUnmount(() => {
     >
       <h2 id="update-dialog-title" class="update-dialog__title">{{ title }}</h2>
       <p id="update-dialog-text" class="update-dialog__text">{{ text }}</p>
-      <p v-if="detail" class="update-dialog__detail">{{ detail }}</p>
+      <div v-if="detail" class="update-dialog__detail">
+        <p v-for="(line, index) in detail" :key="index">{{ line }}</p>
+      </div>
       <div v-if="notesHtml" class="update-dialog__notes" tabindex="0" aria-label="更新说明" v-html="notesHtml"></div>
       <div class="update-dialog__actions">
         <template v-if="state.kind === 'available'">
@@ -211,12 +213,20 @@ onBeforeUnmount(() => {
   color: var(--color-text-secondary);
 }
 
+/* 依次尝试了几个地址（先经中转站）时，每个地址的失败原因各占一段。 */
 .update-dialog__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
   margin: calc(-1 * var(--space-4)) 0 var(--space-6);
   color: var(--color-text-tertiary);
   font-size: var(--text-s);
   line-height: var(--leading-tight);
   overflow-wrap: anywhere;
+}
+
+.update-dialog__detail p {
+  margin: 0;
 }
 
 /* 更新说明：较长时在框内滚动，不撑高对话框。 */

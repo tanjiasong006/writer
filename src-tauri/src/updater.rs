@@ -42,15 +42,28 @@ pub enum UpdateCheck {
 }
 
 /// 检查失败的原因（网络、服务器返回的内容等），只用于界面上说明。
+/// 依次尝试了几个地址时，每个地址的失败原因占一行。
 #[derive(Serialize, Debug)]
 pub struct UpdateError {
     message: String,
 }
 
-impl<E: std::fmt::Display> From<E> for UpdateError {
+impl<E: std::error::Error> From<E> for UpdateError {
     fn from(error: E) -> Self {
-        Self { message: error.to_string() }
+        Self { message: describe(&error) }
     }
+}
+
+/// 错误连同其全部原因：网络错误的外层只有“error sending request”，DNS、连接、TLS 等真正的原因在内层。
+fn describe(error: &dyn std::error::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(": ");
+        message.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    message
 }
 
 /// 构建时配置的更新地址与公钥；任一缺失（或为空）时为 None。
@@ -79,7 +92,7 @@ pub async fn update_check(app: AppHandle, pending: State<'_, PendingUpdate>) -> 
     };
     let current = app.package_info().version.to_string();
     let mut update = None;
-    let mut last_error = None;
+    let mut failures = Vec::new();
     for url in candidate_urls(endpoint, MIRROR) {
         let updater = app
             .updater_builder()
@@ -93,15 +106,14 @@ pub async fn update_check(app: AppHandle, pending: State<'_, PendingUpdate>) -> 
                 break;
             }
             Err(error) => {
-                log::warn!("update check via {url} failed: {error}");
-                last_error = Some(error);
+                let failure = describe(&error);
+                log::warn!("update check via {url} failed: {failure}");
+                failures.push(failure);
             }
         }
     }
-    let update = match (update, last_error) {
-        (Some(update), _) => update,
-        (None, Some(error)) => return Err(error.into()),
-        (None, None) => unreachable!("candidate_urls always returns at least one url"),
+    let Some(update) = update else {
+        return Err(UpdateError { message: failures.join("\n") });
     };
     let result = match &update {
         Some(update) => UpdateCheck::Available {
@@ -126,7 +138,7 @@ pub async fn update_install(pending: State<'_, PendingUpdate>) -> Result<(), Upd
         .ok_or_else(|| UpdateError { message: "no pending update".to_owned() })?;
     let urls = candidate_urls(update.download_url.as_str(), MIRROR);
     let direct = urls.len() - 1;
-    let mut last_error = None;
+    let mut failures = Vec::new();
     for (index, url) in urls.into_iter().enumerate() {
         let mut attempt = update.clone();
         attempt.download_url = url.parse()?;
@@ -137,12 +149,13 @@ pub async fn update_install(pending: State<'_, PendingUpdate>) -> Result<(), Upd
                 return Ok(());
             }
             Err(error) => {
-                log::warn!("update download via {url} failed: {error}");
-                last_error = Some(error);
+                let failure = describe(&error);
+                log::warn!("update download via {url} failed: {failure}");
+                failures.push(failure);
             }
         }
     }
-    Err(last_error.expect("candidate_urls always returns at least one url").into())
+    Err(UpdateError { message: failures.join("\n") })
 }
 
 /// 重新启动应用（安装更新之后）。前端在调用前已保存并释放项目。
@@ -166,6 +179,28 @@ mod tests {
             serde_json::to_value(UpdateCheck::NotConfigured).unwrap(),
             serde_json::json!({ "kind": "not-configured" })
         );
+    }
+
+    #[test]
+    fn describe_includes_every_cause() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "connection refused");
+        let outer = std::io::Error::other(Wrapped(io));
+        assert_eq!(describe(&outer), "error sending request: connection refused");
+    }
+
+    #[derive(Debug)]
+    struct Wrapped(std::io::Error);
+
+    impl std::fmt::Display for Wrapped {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("error sending request")
+        }
+    }
+
+    impl std::error::Error for Wrapped {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
     }
 
     #[test]

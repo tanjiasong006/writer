@@ -39,6 +39,17 @@ test('帮助 → 检查更新…：已是最新、未配置、失败时说明，
   expect(document.querySelector('.update-dialog__detail')?.textContent).toBe('network down')
 })
 
+test('检查失败时每个地址（中转站、GitHub）的原因各占一段', async () => {
+  const services = createMemoryServices()
+  services.shell.enableAppMenu()
+  services.shell.updateResult = { kind: 'failed', message: 'mirror: connection refused\ngithub: dns error' }
+  await mountApp(services)
+  services.shell.chooseMenuItem('app:check-update')
+  await flushPromises()
+  const lines = [...document.querySelectorAll('.update-dialog__detail p')].map(line => line.textContent)
+  expect(lines).toEqual(['mirror: connection refused', 'github: dns error'])
+})
+
 test('发现新版本：显示说明，下载并安装后重新启动；重新启动前先保存打开的文档', async () => {
   const services = seededServices()
   services.shell.enableAppMenu()

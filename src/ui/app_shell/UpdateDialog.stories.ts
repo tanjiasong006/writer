@@ -21,6 +21,19 @@ export const Failed: Story = {
   args: { state: { kind: 'failed', message: 'error sending request for url (https://example.com/latest.json)' } },
 }
 
+/** 中转站与 GitHub 都失败：每个地址的原因（含内层的 DNS、连接等原因）各占一行。 */
+export const FailedViaMirror: Story = {
+  args: {
+    state: {
+      kind: 'failed',
+      message: [
+        'error sending request for url (https://download.githubcdn.com/?url=https%3A%2F%2Fgithub%2Ecom%2Ftanjiasong006%2Fwriter%2Freleases%2Fdownload%2Fupdater%2Flatest%2Ejson): client error (Connect): tcp connect error: Connection refused (os error 61)',
+        'error sending request for url (https://github.com/tanjiasong006/writer/releases/download/updater/latest.json): client error (Connect): dns error: failed to lookup address information: nodename nor servname provided, or not known',
+      ].join('\n'),
+    },
+  },
+}
+
 /**
  * 发现新版本，带较长的更新说明（在框内滚动）。说明是发布流水线生成的 Markdown，按标题、列表显示；
  * 标记之后的安装方法与完整变更只在发布页上显示。
