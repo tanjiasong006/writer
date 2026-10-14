@@ -33,6 +33,8 @@ typst-svg = "0.15"
 comemo = "0.5"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 tauri-plugin-updater = "2"
+# 更新地址经中转站时编码原地址（updater::candidate_urls）。
+percent-encoding = "2"
 mitex = "0.2"
 # 调整 mitex 的命令规格（可伸长箭头的可选下方文字，见 export::math）。
 mitex-spec = "0.2"

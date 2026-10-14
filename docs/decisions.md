@@ -330,8 +330,19 @@
 - 更新地址与公钥在**构建正式包时**由环境变量提供（`WRITER_UPDATE_ENDPOINT`、`WRITER_UPDATE_PUBKEY`，见 `src-tauri/src/updater.rs`），
   不写入仓库；没有提供的构建（开发版、自行编译）不检查更新，对话框说明“此版本不检查更新”。
 - 发布流程（2026-10-10 起由 GitHub Actions 构建，`.github/workflows/release.yml`）：
-  - 分发：公开仓库 `tanjiasong006/writer` 的 GitHub Releases；更新地址为
-    `https://github.com/tanjiasong006/writer/releases/latest/download/latest.json`（只指向最新的**正式**发布，草稿不算）。
+  - 分发：公开仓库 `tanjiasong006/writer` 的 GitHub Releases。更新地址为固定标签 `updater` 的 Release 中的
+    `https://github.com/tanjiasong006/writer/releases/download/updater/latest.json`，每次正式发布后由流水线用新版本的
+    `latest.json` 覆盖（v0.1.4 及之前的版本读取 `releases/latest/download/latest.json`，仍然有效）。
+    `updater` 是预发布，不会成为 latest；只需创建一次：
+    `gh release create updater --prerelease --title "自动更新检查（请勿删除）" --notes "应用检查更新时读取这里的 latest.json，每次发布后自动覆盖。"`，
+    缺少时流水线在构建前失败。
+  - 下载中转（2026-10-14 产品负责人确认）：国内直接从 GitHub 下载常常失败，检查更新与下载安装包都先经下载中转站
+    （当前 `https://download.githubcdn.com/?url=<编码后的 GitHub 地址>`），失败（网络、超时、内容无效、签名不符）再直接访问 GitHub。
+    中转站只接受 `releases/download/<标签>/<文件>` 形式的地址，因此更新地址使用固定标签。中转站缓存文件约 1 小时，
+    新版本最多晚 1 小时被经中转检查到。安装包总要用内置公钥校验签名，中转站无法替换安装包。
+    中转地址模板在构建时由 `WRITER_UPDATE_MIRROR` 提供（`{url}` / `{encoded_url}` 为原地址 / 编码后的原地址，
+    见 `src-tauri/src/updater.rs`），写在 `.github/workflows/release.yml` 中；更换中转站时只改模板并发布新版本，
+    已安装的版本在旧中转站失效后自动回到 GitHub，更新后使用新的中转站。
   - 平台：macOS 通用包（Apple Silicon + Intel）与 Windows（NSIS / MSI）。macOS 暂不做 Apple 签名与公证，
     只做 ad-hoc 签名（`src-tauri/tauri.release.conf.json`），用户第一次打开需要在“系统设置 → 隐私与安全性”中允许。
   - 只需一次：`npx tauri signer generate -w ~/.tauri/writer-updater.key` 生成密钥（私钥妥善保管，丢失后已安装的版本无法再更新）；

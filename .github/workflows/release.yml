@@ -3,6 +3,9 @@
 # 已安装的版本随即检查到更新。任一平台失败则停在草稿，不会发布不完整的版本。
 # 流程与需要的 Secrets / Variables 见 docs/decisions.md 第 10 节。
 #
+# 应用检查更新时读取固定标签 updater 的 Release（预发布，不会成为 latest）中的 latest.json，每次发布后覆盖它：
+# 下载中转站只接受 releases/download/<标签>/<文件> 形式的地址，不接受 releases/latest/download。
+#
 # 草稿在构建前单独创建，只指定标签、不指定目标提交：如果由 tauri-action 在构建结束时创建，它会把标签所在的提交
 # 作为目标提交，而构建期间 main 一旦有新提交，GitHub 就要求 GITHUB_TOKEN 无法获得的 workflows 权限，创建失败。
 name: Release
@@ -23,6 +26,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
+          if ! gh release view updater > /dev/null 2>&1; then
+            echo "::error::缺少固定标签 updater 的 Release，创建方法见 docs/decisions.md 第 10 节"
+            exit 1
+          fi
           gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 && exit 0 # 重跑时已经存在
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
             --title "Writer $GITHUB_REF_NAME" --notes "正在构建，完成后自动填写更新说明。"
@@ -102,7 +109,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          WRITER_UPDATE_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+          WRITER_UPDATE_ENDPOINT: https://github.com/${{ github.repository }}/releases/download/updater/latest.json
+          # 下载中转站（更换时只改这里），{encoded_url} 为编码后的 GitHub 地址，见 src-tauri/src/updater.rs。
+          WRITER_UPDATE_MIRROR: https://download.githubcdn.com/?url={encoded_url}
           WRITER_UPDATE_PUBKEY: ${{ vars.WRITER_UPDATE_PUBKEY }}
         with:
           tagName: ${{ github.ref_name }}
@@ -126,3 +135,10 @@ jobs:
         run: |
           scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
           gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md --draft=false --latest
+
+      - name: 更新检查地址指向新版本
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --pattern latest.json
+          gh release upload updater latest.json --clobber

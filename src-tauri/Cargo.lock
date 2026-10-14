@@ -7385,6 +7385,7 @@ dependencies = [
  "mitex-spec",
  "mitex-spec-gen",
  "pdf-writer",
+ "percent-encoding",
  "png 0.18.1",
  "pulldown-cmark",
  "serde",

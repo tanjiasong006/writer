@@ -4,9 +4,16 @@
 //! 没有提供的构建（开发版、自行编译）不检查更新，前端据此说明“此版本未配置自动更新”。
 //! 发布流程见 docs/decisions.md 第 10 节。
 //!
+//! 国内直接访问 GitHub 常常失败，构建时可以用 `WRITER_UPDATE_MIRROR` 提供一个下载中转站的地址模板：
+//! `{url}` 替换为原地址，`{encoded_url}` 替换为编码后的原地址（作为查询参数时使用）。
+//! 检查（latest.json）与下载安装包都先经中转站，失败（网络、超时、内容无效、签名不符）再直接访问 GitHub。
+//! 安装包总要用内置公钥校验签名，中转站无法替换安装包；更换中转站只需改模板重新发布，
+//! 已安装的版本在旧中转站失效后回到 GitHub，更新后即使用新的中转站。
+//!
 //! 检查到的更新保存在应用状态中，安装时下载、校验签名并替换应用；重新启动由前端在保存文档后请求。
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -14,6 +21,12 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 const ENDPOINT: Option<&str> = option_env!("WRITER_UPDATE_ENDPOINT");
 const PUBKEY: Option<&str> = option_env!("WRITER_UPDATE_PUBKEY");
+const MIRROR: Option<&str> = option_env!("WRITER_UPDATE_MIRROR");
+
+/// 检查更新的每个地址最多等待的时间；超时后尝试下一个地址。
+const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
+/// 经中转站下载安装包最多等待的时间；超时后直接从 GitHub 下载。直接下载不限时。
+const MIRROR_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Default)]
 pub struct PendingUpdate(Mutex<Option<Update>>);
@@ -48,18 +61,48 @@ fn configuration() -> Option<(&'static str, &'static str)> {
     }
 }
 
+/// 依次尝试的地址：先经中转站（构建时配置了模板时），再是原地址。
+fn candidate_urls(url: &str, mirror: Option<&str>) -> Vec<String> {
+    let mut urls = Vec::new();
+    if let Some(template) = mirror.filter(|template| !template.is_empty()) {
+        let encoded = percent_encoding::utf8_percent_encode(url, percent_encoding::NON_ALPHANUMERIC).to_string();
+        urls.push(template.replace("{encoded_url}", &encoded).replace("{url}", url));
+    }
+    urls.push(url.to_owned());
+    urls
+}
+
 #[tauri::command]
 pub async fn update_check(app: AppHandle, pending: State<'_, PendingUpdate>) -> Result<UpdateCheck, UpdateError> {
     let Some((endpoint, pubkey)) = configuration() else {
         return Ok(UpdateCheck::NotConfigured);
     };
     let current = app.package_info().version.to_string();
-    let updater = app
-        .updater_builder()
-        .endpoints(vec![endpoint.parse()?])?
-        .pubkey(pubkey)
-        .build()?;
-    let update = updater.check().await?;
+    let mut update = None;
+    let mut last_error = None;
+    for url in candidate_urls(endpoint, MIRROR) {
+        let updater = app
+            .updater_builder()
+            .endpoints(vec![url.parse()?])?
+            .pubkey(pubkey)
+            .timeout(CHECK_TIMEOUT)
+            .build()?;
+        match updater.check().await {
+            Ok(found) => {
+                update = Some(found);
+                break;
+            }
+            Err(error) => {
+                log::warn!("update check via {url} failed: {error}");
+                last_error = Some(error);
+            }
+        }
+    }
+    let update = match (update, last_error) {
+        (Some(update), _) => update,
+        (None, Some(error)) => return Err(error.into()),
+        (None, None) => unreachable!("candidate_urls always returns at least one url"),
+    };
     let result = match &update {
         Some(update) => UpdateCheck::Available {
             current,
@@ -72,7 +115,7 @@ pub async fn update_check(app: AppHandle, pending: State<'_, PendingUpdate>) -> 
     Ok(result)
 }
 
-/// 下载并安装最近一次检查到的更新（校验签名）；完成后需要重新启动才生效。
+/// 下载并安装最近一次检查到的更新（先经中转站，校验签名）；完成后需要重新启动才生效。
 #[tauri::command]
 pub async fn update_install(pending: State<'_, PendingUpdate>) -> Result<(), UpdateError> {
     let update = pending
@@ -81,8 +124,25 @@ pub async fn update_install(pending: State<'_, PendingUpdate>) -> Result<(), Upd
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .take()
         .ok_or_else(|| UpdateError { message: "no pending update".to_owned() })?;
-    update.download_and_install(|_, _| {}, || {}).await?;
-    Ok(())
+    let urls = candidate_urls(update.download_url.as_str(), MIRROR);
+    let direct = urls.len() - 1;
+    let mut last_error = None;
+    for (index, url) in urls.into_iter().enumerate() {
+        let mut attempt = update.clone();
+        attempt.download_url = url.parse()?;
+        attempt.timeout = (index != direct).then_some(MIRROR_DOWNLOAD_TIMEOUT);
+        match attempt.download(|_, _| {}, || {}).await {
+            Ok(bytes) => {
+                update.install(bytes)?;
+                return Ok(());
+            }
+            Err(error) => {
+                log::warn!("update download via {url} failed: {error}");
+                last_error = Some(error);
+            }
+        }
+    }
+    Err(last_error.expect("candidate_urls always returns at least one url").into())
 }
 
 /// 重新启动应用（安装更新之后）。前端在调用前已保存并释放项目。
@@ -106,5 +166,29 @@ mod tests {
             serde_json::to_value(UpdateCheck::NotConfigured).unwrap(),
             serde_json::json!({ "kind": "not-configured" })
         );
+    }
+
+    #[test]
+    fn candidate_urls_try_mirror_before_original() {
+        let url = "https://github.com/o/r/releases/download/v1.0.0/Writer 1.0.0.msi";
+        assert_eq!(
+            candidate_urls(url, Some("https://mirror.example/?url={encoded_url}")),
+            vec![
+                "https://mirror.example/?url=https%3A%2F%2Fgithub%2Ecom%2Fo%2Fr%2Freleases%2Fdownload%2Fv1%2E0%2E0%2FWriter%201%2E0%2E0%2Emsi"
+                    .to_owned(),
+                url.to_owned(),
+            ]
+        );
+        assert_eq!(
+            candidate_urls(url, Some("https://mirror.example/{url}")),
+            vec![format!("https://mirror.example/{url}"), url.to_owned()]
+        );
+    }
+
+    #[test]
+    fn candidate_urls_without_mirror_is_original_only() {
+        let url = "https://github.com/o/r/releases/download/updater/latest.json";
+        assert_eq!(candidate_urls(url, None), vec![url.to_owned()]);
+        assert_eq!(candidate_urls(url, Some("")), vec![url.to_owned()]);
     }
 }
