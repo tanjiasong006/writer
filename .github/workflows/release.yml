@@ -129,16 +129,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      # latest.json 由 tauri-action 在构建时生成，其中的 notes 是草稿的占位说明；应用内的更新对话框显示的是它，
+      # 因此发布前把生成的更新说明写回 latest.json。
       - name: 生成更新说明并发布
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+          gh release download "$GITHUB_REF_NAME" --pattern latest.json
+          jq --rawfile notes release-notes.md '.notes = $notes' latest.json > latest.json.new
+          mv latest.json.new latest.json
+          gh release upload "$GITHUB_REF_NAME" latest.json --clobber
           gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md --draft=false --latest
 
       - name: 更新检查地址指向新版本
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download "$GITHUB_REF_NAME" --pattern latest.json
-          gh release upload updater latest.json --clobber
+        run: gh release upload updater latest.json --clobber
