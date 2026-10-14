@@ -26,8 +26,12 @@ const MIRROR: Option<&str> = option_env!("WRITER_UPDATE_MIRROR");
 
 /// 检查更新的每个地址最多等待的时间；超时后尝试下一个地址。
 const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
-/// 经中转站下载安装包最多等待的时间；超时后直接从 GitHub 下载。直接下载不限时。
+/// 经中转站下载安装包最多等待的时间；超时后直接从 GitHub 下载。直接下载不限总时长，只按 STALL_TIMEOUT 判断卡住。
 const MIRROR_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// 建立连接最多等待的时间。
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// 连接后这么久没有收到任何数据即视为卡住，放弃这个地址（经中转站时改为直接下载，直接下载时失败）。
+const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// 下载进度最多每隔这么久通知一次前端（每个数据块都通知会占满 IPC）。
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -114,6 +118,8 @@ pub async fn update_check(app: AppHandle, pending: State<'_, PendingUpdate>) -> 
             .endpoints(vec![url.parse()?])?
             .pubkey(pubkey)
             .timeout(CHECK_TIMEOUT)
+            // 检查到的 Update 沿用这些设置下载安装包。
+            .configure_client(|client| client.connect_timeout(CONNECT_TIMEOUT).read_timeout(STALL_TIMEOUT))
             .build()?;
         match updater.check().await {
             Ok(found) => {

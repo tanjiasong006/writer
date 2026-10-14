@@ -137,7 +137,7 @@ onBeforeUnmount(() => {
 onMounted(async () => {
   // 窗口标题是应用名（开发版为 "Writer Dev"，便于与正式版区分）；打开文档后由工作区改为文档名。
   shell.setWindowTitle(shell.appName)
-  stopCloseGuard = shell.onCloseRequested(leaveCurrent)
+  stopCloseGuard = shell.onCloseRequested(async () => !updates.holdWhileInstalling() && (await leaveCurrent()))
   const last = shell.startupProjectPath() ?? shell.getLastProjectPath()
   if (last === null) {
     view.value = { kind: 'welcome' }

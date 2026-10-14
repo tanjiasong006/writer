@@ -43,6 +43,7 @@ const BACKGROUND_DELAY_MS = 5000
  *   欢迎页上是带“查看”的浮条。
  * - 下载安装时对话框显示进度；关闭对话框（“在后台继续”、Esc）后继续下载安装，顶栏入口显示进度，
  *   点击重新打开对话框。完成后入口提示重新启动；失败时提示一次，查看后回到“更新到 x.y.z”。
+ * - 安装阶段（下载完成后替换应用的几秒）不能关闭窗口或退出：拦下并显示对话框。下载阶段可以退出，下载作废。
  * - 重新启动前先保存并释放当前项目（leave 返回 false 表示用户选择留下，不重新启动）。
  */
 export function useUpdates(shell: DesktopShell, leave: () => Promise<boolean>) {
@@ -153,6 +154,14 @@ export function useUpdates(shell: DesktopShell, leave: () => Promise<boolean>) {
     await shell.restartApp()
   }
 
+  /** 正在安装（替换应用）时返回 true 并显示对话框：此时退出可能留下不完整的应用。 */
+  function holdWhileInstalling(): boolean {
+    const current = task.value
+    if (current?.kind !== 'installing' || !current.installing) return false
+    dialog.value = current
+    return true
+  }
+
   /** 关闭对话框；下载安装中则在后台继续。查看过的安装失败不再在入口提示。 */
   function close(): void {
     if (dialog.value?.kind === 'install-failed' && dialog.value === task.value) task.value = null
@@ -191,6 +200,7 @@ export function useUpdates(shell: DesktopShell, leave: () => Promise<boolean>) {
     /** 下载安装在后台进行（或已结束、对话框没有显示它）时为 true：此时由入口显示状态。 */
     inBackground: computed(() => task.value !== null && dialog.value !== task.value),
     check,
+    holdWhileInstalling,
     scheduleBackgroundCheck,
     showAvailable,
     install,

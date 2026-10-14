@@ -189,6 +189,26 @@ test('下载更新时对话框显示进度；在后台继续后顶栏显示百�
   expect(button(wrapper, '重新启动').exists()).toBe(true)
 })
 
+test('安装阶段不能关闭窗口：拦下并显示对话框；下载阶段可以关闭', async () => {
+  const { services, wrapper, emit } = await startDownload()
+  await button(wrapper, '在后台继续').trigger('click')
+  await flushPromises()
+  await emit({ kind: 'installing' })
+  expect(await services.shell.requestClose()).toBe(false)
+  await flushPromises()
+  expect(dialogTitle()).toBe('正在安装 0.2.0…')
+
+  services.shell.finishInstall()
+  await flushPromises()
+  expect(await services.shell.requestClose()).toBe(true)
+})
+
+test('下载阶段关闭窗口照常进行', async () => {
+  const { services, wrapper } = await startDownload()
+  await button(wrapper, '在后台继续').trigger('click')
+  expect(await services.shell.requestClose()).toBe(true)
+})
+
 test('经中转站下载失败后改为直接下载：进度从头开始并说明', async () => {
   const { emit } = await startDownload()
   await emit({ kind: 'progress', downloaded: 3 * 1024 * 1024, total: 20 * 1024 * 1024 })

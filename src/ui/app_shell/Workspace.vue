@@ -1528,7 +1528,10 @@ async function createFirstChapter(): Promise<void> {
 }
 
 /* 有新版本时常驻顶栏末端：强调色文字与浅底，比工具按钮醒目，但不抢正文。 */
-/* 下载更新时，已下载的部分以较深的底色从左向右填充（--update-progress）；数字等宽，文字宽度不跳动。 */
+/*
+ * 下载更新时，已下载的部分在底色上再叠一层同色从左向右填充（--update-progress）；hover 只加深底色，
+ * 已下载的部分仍比其余部分深，进度不会消失。数字等宽，文字宽度不跳动。
+ */
 .workspace__update {
   flex: none;
   height: var(--control-h-s);
@@ -1538,7 +1541,7 @@ async function createFirstChapter(): Promise<void> {
   border-radius: var(--radius-m);
   background: linear-gradient(
       to right,
-      var(--color-accent-fill-strong) var(--update-progress, 0%),
+      var(--color-accent-fill) var(--update-progress, 0%),
       transparent var(--update-progress, 0%)
     )
     var(--color-accent-fill);
