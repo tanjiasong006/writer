@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { Appearance } from '../../application/desktop_shell.ts'
+import type { InstallStatus } from './use_updates.ts'
 import type { ProjectSession } from '../../application/project_session.ts'
 import type { ChapterId } from '../../domain/chapter_tree/chapter_tree.ts'
 import { findChapter } from '../../domain/chapter_tree/chapter_tree.ts'
@@ -76,6 +77,8 @@ const props = defineProps<{
   notice?: string | null
   /** 可以更新到的版本：顶栏中常驻“更新到 x.y.z”，点击查看更新说明。 */
   updateVersion?: string | null
+  /** 下载安装更新的状态：有时入口显示它（下载进度、重新启动），点击回到更新对话框。 */
+  updateStatus?: InstallStatus | null
   /** 最近打开的项目（文件 → 打开最近）。 */
   recent?: readonly string[]
   appearance: Appearance
@@ -1073,7 +1076,18 @@ async function createFirstChapter(): Promise<void> {
         </div>
 
         <button
-          v-if="updateVersion"
+          v-if="updateStatus"
+          type="button"
+          class="workspace__update"
+          :style="updateStatus.progress === null ? undefined : { '--update-progress': `${updateStatus.progress * 100}%` }"
+          tabindex="0"
+          title="查看更新进度"
+          @click="emit('show-update')"
+        >
+          {{ updateStatus.label }}
+        </button>
+        <button
+          v-else-if="updateVersion"
           type="button"
           class="workspace__update"
           tabindex="0"
@@ -1514,6 +1528,7 @@ async function createFirstChapter(): Promise<void> {
 }
 
 /* 有新版本时常驻顶栏末端：强调色文字与浅底，比工具按钮醒目，但不抢正文。 */
+/* 下载更新时，已下载的部分以较深的底色从左向右填充（--update-progress）；数字等宽，文字宽度不跳动。 */
 .workspace__update {
   flex: none;
   height: var(--control-h-s);
@@ -1521,17 +1536,23 @@ async function createFirstChapter(): Promise<void> {
   padding: 0 var(--space-4);
   border: none;
   border-radius: var(--radius-m);
-  background: var(--color-accent-fill);
+  background: linear-gradient(
+      to right,
+      var(--color-accent-fill-strong) var(--update-progress, 0%),
+      transparent var(--update-progress, 0%)
+    )
+    var(--color-accent-fill);
   color: var(--color-accent-text);
   font: inherit;
   font-size: var(--text-s);
   font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   transition: background-color var(--duration-fast) var(--ease-out);
 }
 
 .workspace__update:hover {
-  background: var(--color-accent-fill-strong);
+  background-color: var(--color-accent-fill-strong);
 }
 
 .workspace__update:focus-visible {

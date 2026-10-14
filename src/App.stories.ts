@@ -117,3 +117,28 @@ export const UpdateAvailable: Story = {
     }),
   ],
 }
+
+/**
+ * 下载更新：点击“更新到 0.2.0”→“下载并安装”，约 20 秒下载完成。“在后台继续”后顶栏入口显示进度，
+ * 点击回到对话框；完成后入口变为“重新启动以完成更新”。
+ */
+export const UpdateDownloading: Story = {
+  decorators: [
+    withServices((services) => {
+      services.shell.windowStyle = 'unified'
+      services.storage.seed('/文稿/示例论文', sampleDocument())
+      services.shell.lastProjectPath = '/文稿/示例论文'
+      services.shell.updateResult = { kind: 'available', current: '0.1.1', version: '0.2.0', notes: '### 新功能\n\n- 查找与替换' }
+      services.shell.installUpdate = async (onEvent) => {
+        const total = 28_835_840
+        onEvent({ kind: 'download', mirror: true })
+        for (let downloaded = 0; downloaded < total; downloaded += total / 100) {
+          onEvent({ kind: 'progress', downloaded, total })
+          await new Promise((resolve) => setTimeout(resolve, 200))
+        }
+        onEvent({ kind: 'installing' })
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+      }
+    }),
+  ],
+}

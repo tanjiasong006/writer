@@ -15,8 +15,8 @@ notesMarkdown.renderer.rules.link_open = () => ''
 notesMarkdown.renderer.rules.link_close = () => ''
 
 /**
- * 检查更新的对话框：检查中、已是最新、未配置、失败、发现新版本（说明）、下载安装中、已安装（重新启动）。
- * 模态，Esc 与“好 / 稍后”关闭（下载安装中不能关闭）；主要按钮获得焦点。只发出事件，不执行更新。
+ * 检查更新的对话框：检查中、已是最新、未配置、失败、发现新版本（说明）、下载安装中（进度）、已安装（重新启动）。
+ * 模态，Esc 与“好 / 稍后”关闭；下载安装中关闭即“在后台继续”。主要按钮获得焦点。只发出事件，不执行更新。
  */
 const props = defineProps<{
   state: UpdateState
@@ -44,7 +44,7 @@ const title = computed(() => {
     case 'available':
       return `${props.appName} ${props.state.version} 可以更新`
     case 'installing':
-      return `正在下载并安装 ${props.state.version}…`
+      return props.state.installing ? `正在安装 ${props.state.version}…` : `正在下载 ${props.state.version}…`
     case 'installed':
       return '更新已安装'
     case 'install-failed':
@@ -66,7 +66,9 @@ const text = computed(() => {
     case 'available':
       return `当前版本 ${props.state.current}。下载并安装后，重新启动即可使用新版本；打开的文档会先保存。`
     case 'installing':
-      return '请稍候，不要退出应用。'
+      if (props.state.installing) return '请稍候，不要退出应用。'
+      if (props.state.direct) return '经国内中转下载没有成功，正在直接从 GitHub 下载。'
+      return '可以在后台继续，完成后提示重新启动。'
     case 'installed':
       return `重新启动 ${props.appName} 后生效。打开的文档会先保存。`
     case 'install-failed':
@@ -80,6 +82,24 @@ const notesHtml = computed(() => {
   const notes = props.state.notes.split(RELEASE_PAGE_ONLY)[0].trim()
   return notes.length > 0 ? notesMarkdown.render(notes) : null
 })
+
+/** 下载进度：0–1；不知道总大小时为 null（只显示已下载的大小）。安装中显示为完成。 */
+const progress = computed(() => {
+  if (props.state.kind !== 'installing') return null
+  if (props.state.installing) return 1
+  const { downloaded, total } = props.state
+  return total !== null && total > 0 ? Math.min(downloaded / total, 1) : null
+})
+
+const progressText = computed(() => {
+  if (props.state.kind !== 'installing' || props.state.installing) return null
+  const { downloaded, total } = props.state
+  return total !== null && total > 0 ? `${megabytes(downloaded)} / ${megabytes(total)}` : `已下载 ${megabytes(downloaded)}`
+})
+
+function megabytes(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
 
 /** 原始错误：只作为补充，以次要文字显示。 */
 const detail = computed(() =>
@@ -137,6 +157,19 @@ onBeforeUnmount(() => {
     >
       <h2 id="update-dialog-title" class="update-dialog__title">{{ title }}</h2>
       <p id="update-dialog-text" class="update-dialog__text">{{ text }}</p>
+      <div v-if="state.kind === 'installing'" class="update-dialog__progress">
+        <div
+          class="update-dialog__bar"
+          role="progressbar"
+          aria-label="下载进度"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="progress === null ? undefined : Math.floor(progress * 100)"
+        >
+          <div v-if="progress !== null" class="update-dialog__bar-fill" :style="{ width: `${progress * 100}%` }"></div>
+        </div>
+        <p class="update-dialog__progress-text">{{ progressText ?? '\u00a0' }}</p>
+      </div>
       <div v-if="detail" class="update-dialog__detail">
         <p v-for="(line, index) in detail" :key="index">{{ line }}</p>
       </div>
@@ -157,8 +190,8 @@ onBeforeUnmount(() => {
         <button v-else-if="state.kind === 'checking'" type="button" class="update-dialog__button" @click="emit('close')">
           取消
         </button>
-        <button v-else-if="state.kind === 'installing'" type="button" class="update-dialog__button" disabled>
-          正在安装…
+        <button v-else-if="state.kind === 'installing'" type="button" class="update-dialog__button" @click="emit('close')">
+          在后台继续
         </button>
         <button v-else type="button" class="update-dialog__button update-dialog__button--primary" @click="emit('close')">
           好
@@ -211,6 +244,33 @@ onBeforeUnmount(() => {
 .update-dialog__text {
   margin: 0 0 var(--space-6);
   color: var(--color-text-secondary);
+}
+
+/* 下载进度：细条与已下载大小；进度文字占位固定，安装阶段不跳动。 */
+.update-dialog__progress {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-6);
+}
+
+.update-dialog__bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--color-fill-pressed);
+}
+
+.update-dialog__bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width var(--duration-fast) linear;
+}
+
+.update-dialog__progress-text {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-s);
+  line-height: var(--leading-tight);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 依次尝试了几个地址（先经中转站）时，每个地址的失败原因各占一段。 */

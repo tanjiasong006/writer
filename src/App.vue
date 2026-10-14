@@ -150,6 +150,21 @@ onBeforeUnmount(() => stopCloseGuard?.())
 
 /** 检查更新：重新启动前与关闭窗口相同，先保存并释放当前项目。 */
 const updates = useUpdates(shell, () => leaveCurrent())
+/**
+ * 欢迎页没有顶栏：在后台下载安装更新时以浮条显示状态（关闭后不再显示，直到状态改变，如下载完成）。
+ */
+const updateStatusDismissed = ref(false)
+watch(
+  // 下载中进度一直变化，只在进入下一阶段（安装、完成、失败）时重新显示。
+  () => {
+    const status = updates.status.value
+    return status && status.progress !== null ? 'downloading' : status?.label
+  },
+  () => (updateStatusDismissed.value = false),
+)
+const welcomeUpdateStatus = computed(() =>
+  updates.inBackground.value && !updateStatusDismissed.value ? updates.status.value : null,
+)
 onMounted(() => updates.scheduleBackgroundCheck())
 
 function confirmDiscard(failure: StorageFailure | null): Promise<boolean> {
@@ -263,6 +278,7 @@ function titleFromPath(path: string): string {
       @dismiss-notice="notice = null"
       @set-appearance="appearance.set"
       :update-version="updates.availableVersion.value"
+      :update-status="updates.status.value"
       :recent="recent"
       @open-recent="openRecent"
       @new-project="newProject"
@@ -279,10 +295,16 @@ function titleFromPath(path: string): string {
         @open-project="openExisting"
         @open-recent="openRecentPath"
       />
-      <div v-if="notice || updates.notice.value" class="app__toasts">
+      <div v-if="notice || updates.notice.value || welcomeUpdateStatus" class="app__toasts">
         <Toast v-if="notice" class="app__notice" @dismiss="notice = null">{{ notice }}</Toast>
         <Toast v-if="updates.notice.value" class="app__update" @dismiss="updates.dismissNotice">
           {{ updates.notice.value }}
+          <template #actions>
+            <button type="button" @click="updates.showAvailable">查看</button>
+          </template>
+        </Toast>
+        <Toast v-if="welcomeUpdateStatus" class="app__update" @dismiss="updateStatusDismissed = true">
+          {{ welcomeUpdateStatus.label }}
           <template #actions>
             <button type="button" @click="updates.showAvailable">查看</button>
           </template>

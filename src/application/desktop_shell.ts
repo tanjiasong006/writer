@@ -28,6 +28,15 @@ export type UpdateCheckResult =
   /** 网络或服务器问题；message 是原始错误，只在界面上作为补充说明。 */
   | { readonly kind: 'failed'; readonly message: string }
 
+/** 下载安装更新的进度。 */
+export type InstallEvent =
+  /** 开始从一个地址下载（进度从头开始）；mirror 表示经国内中转站，否则直接从 GitHub。 */
+  | { readonly kind: 'download'; readonly mirror: boolean }
+  /** 已下载的字节数；total 是总大小（服务器没有给出时为 null）。 */
+  | { readonly kind: 'progress'; readonly downloaded: number; readonly total: number | null }
+  /** 下载完成并通过签名校验，正在安装。 */
+  | { readonly kind: 'installing' }
+
 /** 应用外观：跟随系统，或固定为浅色 / 深色。 */
 export type Appearance = 'system' | 'light' | 'dark'
 
@@ -105,8 +114,8 @@ export interface DesktopShell {
   setFullscreen?(fullscreen: boolean): void
   /** 检查是否有新版本。不提供时（如 Storybook）界面不显示检查更新。 */
   checkForUpdate?(): Promise<UpdateCheckResult>
-  /** 下载并安装最近一次检查到的新版本；失败时抛出（原因作为补充说明）。 */
-  installUpdate?(): Promise<void>
+  /** 下载并安装最近一次检查到的新版本，经 onEvent 通知进度；失败时抛出（原因作为补充说明）。 */
+  installUpdate?(onEvent: (event: InstallEvent) => void): Promise<void>
   /** 重新启动应用（安装更新后）。调用前必须已保存并释放当前项目。 */
   restartApp?(): Promise<void>
   /** 在系统文件管理器中打开应用的日志文件夹（帮助 → 显示日志文件夹）。不提供时（如 Storybook）什么都不做。 */

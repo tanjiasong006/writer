@@ -124,7 +124,103 @@ test('启动后在后台检查一次：打开文档时顶栏常驻“更新到�
   await button(wrapper, '下载并安装').trigger('click')
   await flushPromises()
   expect(dialogTitle()).toBe('更新已安装')
-  expect(wrapper.find('.workspace__update').exists()).toBe(false)
+  await button(wrapper, '稍后').trigger('click')
+  expect(wrapper.find('.workspace__update').text()).toBe('重新启动以完成更新')
+})
+
+/** 打开文档并让后台检查发现 0.2.0，安装停在下载中（holdInstall），由测试发出进度。 */
+async function startDownload() {
+  vi.useFakeTimers()
+  const services = seededServices()
+  services.shell.lastProjectPath = PATH
+  services.shell.updateResult = { kind: 'available', current: '0.1.0', version: '0.2.0', notes: null }
+  services.shell.installEvents = [{ kind: 'download', mirror: true }]
+  services.shell.holdInstall = true
+  const wrapper = await mountApp(services)
+  await vi.advanceTimersByTimeAsync(5000)
+  await wrapper.find('.workspace__update').trigger('click')
+  await flushPromises()
+  await button(wrapper, '下载并安装').trigger('click')
+  await flushPromises()
+  const emit = async (event: Parameters<NonNullable<typeof services.shell.installListener>>[0]) => {
+    services.shell.installListener!(event)
+    await flushPromises()
+  }
+  return { services, wrapper, emit }
+}
+
+function progressText(): string | null {
+  return document.querySelector('.update-dialog__progress-text')?.textContent ?? null
+}
+
+test('下载更新时对话框显示进度；在后台继续后顶栏显示百分比，点击回到对话框，完成后提示重新启动', async () => {
+  const { services, wrapper, emit } = await startDownload()
+  expect(dialogTitle()).toBe('正在下载 0.2.0…')
+  await emit({ kind: 'progress', downloaded: 5 * 1024 * 1024, total: 20 * 1024 * 1024 })
+  expect(progressText()).toBe('5.0 MB / 20.0 MB')
+  expect(document.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('25')
+
+  await button(wrapper, '在后台继续').trigger('click')
+  await flushPromises()
+  expect(dialogTitle()).toBeNull()
+  expect(wrapper.find('.workspace__update').text()).toBe('下载更新 25%')
+  await emit({ kind: 'progress', downloaded: 10 * 1024 * 1024, total: 20 * 1024 * 1024 })
+  expect(wrapper.find('.workspace__update').text()).toBe('下载更新 50%')
+
+  // 点击入口回到这次下载（不重新检查），对话框继续更新进度。
+  const checks = services.shell.updateChecks
+  await wrapper.find('.workspace__update').trigger('click')
+  await flushPromises()
+  expect(services.shell.updateChecks).toBe(checks)
+  expect(progressText()).toBe('10.0 MB / 20.0 MB')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+  await flushPromises()
+  expect(dialogTitle()).toBeNull()
+
+  await emit({ kind: 'installing' })
+  expect(wrapper.find('.workspace__update').text()).toBe('正在安装更新…')
+  services.shell.finishInstall()
+  await flushPromises()
+  expect(dialogTitle()).toBeNull()
+  expect(wrapper.find('.workspace__update').text()).toBe('重新启动以完成更新')
+  await wrapper.find('.workspace__update').trigger('click')
+  await flushPromises()
+  expect(dialogTitle()).toBe('更新已安装')
+  expect(button(wrapper, '重新启动').exists()).toBe(true)
+})
+
+test('经中转站下载失败后改为直接下载：进度从头开始并说明', async () => {
+  const { emit } = await startDownload()
+  await emit({ kind: 'progress', downloaded: 3 * 1024 * 1024, total: 20 * 1024 * 1024 })
+  await emit({ kind: 'download', mirror: false })
+  expect(document.querySelector('.update-dialog__text')?.textContent).toContain('直接从 GitHub 下载')
+  expect(document.querySelector('.update-dialog__bar-fill')).toBeNull()
+  await emit({ kind: 'progress', downloaded: 1024 * 1024, total: 20 * 1024 * 1024 })
+  expect(progressText()).toBe('1.0 MB / 20.0 MB')
+})
+
+test('不知道总大小时只显示已下载的大小', async () => {
+  const { wrapper, emit } = await startDownload()
+  await emit({ kind: 'progress', downloaded: 3 * 1024 * 1024, total: null })
+  expect(progressText()).toBe('已下载 3.0 MB')
+  await button(wrapper, '在后台继续').trigger('click')
+  expect(wrapper.find('.workspace__update').text()).toBe('正在下载更新…')
+})
+
+test('后台安装失败时入口提示一次，查看后回到“更新到”', async () => {
+  const { services, wrapper } = await startDownload()
+  await button(wrapper, '在后台继续').trigger('click')
+  services.shell.installFailure = 'network down'
+  services.shell.finishInstall()
+  await flushPromises()
+  expect(dialogTitle()).toBeNull()
+  expect(wrapper.find('.workspace__update').text()).toBe('更新没有完成')
+  await wrapper.find('.workspace__update').trigger('click')
+  await flushPromises()
+  expect(dialogTitle()).toBe('更新没有安装成功')
+  await button(wrapper, '好').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.workspace__update').text()).toBe('更新到 0.2.0')
 })
 
 test('欢迎页上后台发现新版本时显示浮条，“查看”打开说明', async () => {
@@ -138,6 +234,29 @@ test('欢迎页上后台发现新版本时显示浮条，“查看”打开说�
   await button(wrapper, '查看').trigger('click')
   await flushPromises()
   expect(dialogTitle()).toBe('Writer 0.2.0 可以更新')
+  expect(wrapper.find('.app__update').exists()).toBe(false)
+})
+
+test('欢迎页上在后台下载更新时以浮条显示进度，“查看”回到对话框', async () => {
+  vi.useFakeTimers()
+  const services = createMemoryServices()
+  services.shell.updateResult = { kind: 'available', current: '0.1.0', version: '0.2.0', notes: null }
+  services.shell.installEvents = [{ kind: 'download', mirror: true }, { kind: 'progress', downloaded: 1, total: 4 }]
+  services.shell.holdInstall = true
+  const wrapper = await mountApp(services)
+  await vi.advanceTimersByTimeAsync(5000)
+  await button(wrapper, '查看').trigger('click')
+  await flushPromises()
+  await button(wrapper, '下载并安装').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.app__update').exists()).toBe(false)
+
+  await button(wrapper, '在后台继续').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('.app__update').text()).toContain('下载更新 25%')
+  await button(wrapper, '查看').trigger('click')
+  await flushPromises()
+  expect(dialogTitle()).toBe('正在下载 0.2.0…')
   expect(wrapper.find('.app__update').exists()).toBe(false)
 })
 

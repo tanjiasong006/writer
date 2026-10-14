@@ -1,4 +1,4 @@
-import type { AppMenu, AppServices, Appearance, DesktopShell, UpdateCheckResult } from '../application/desktop_shell.ts'
+import type { AppMenu, AppServices, Appearance, DesktopShell, InstallEvent, UpdateCheckResult } from '../application/desktop_shell.ts'
 import { MemoryProjectStorage } from './memory_project_storage.ts'
 import { MemoryDocumentOutput } from './memory_document_output.ts'
 
@@ -131,6 +131,17 @@ export class MemoryShell implements DesktopShell {
   /** 安装失败时的原因；null 表示安装成功。 */
   installFailure: string | null = null
   installs = 0
+  /** 安装时依次发出的进度。 */
+  installEvents: InstallEvent[] = [
+    { kind: 'download', mirror: true },
+    { kind: 'progress', downloaded: 1_000_000, total: 1_000_000 },
+    { kind: 'installing' },
+  ]
+  /** 设为 true 时安装停在进度事件之后，直到调用 finishInstall（测试下载过程中的界面）。 */
+  holdInstall = false
+  private releaseInstall: (() => void) | null = null
+  /** 最近一次安装的进度回调（测试中可以继续发出进度）。 */
+  installListener: ((event: InstallEvent) => void) | null = null
   restarts = 0
 
   async checkForUpdate() {
@@ -138,9 +149,18 @@ export class MemoryShell implements DesktopShell {
     return this.updateResult
   }
 
-  async installUpdate() {
+  async installUpdate(onEvent: (event: InstallEvent) => void) {
     this.installs += 1
+    this.installListener = onEvent
+    for (const event of this.installEvents) onEvent(event)
+    if (this.holdInstall) await new Promise<void>(resolve => (this.releaseInstall = resolve))
     if (this.installFailure !== null) throw new Error(this.installFailure)
+  }
+
+  /** 让停住的安装（holdInstall）结束：成功或按 installFailure 失败。 */
+  finishInstall() {
+    this.releaseInstall?.()
+    this.releaseInstall = null
   }
 
   async restartApp() {

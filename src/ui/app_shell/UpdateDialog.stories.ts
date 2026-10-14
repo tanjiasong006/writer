@@ -68,7 +68,33 @@ export const Available: Story = {
   },
 }
 
-export const Installing: Story = { args: { state: { kind: 'installing', version: '0.2.0' } } }
+/** 下载中：进度条与已下载大小，“在后台继续”关闭对话框。 */
+export const Installing: Story = {
+  args: {
+    state: { kind: 'installing', version: '0.2.0', downloaded: 12_400_000, total: 28_835_840, direct: false, installing: false },
+  },
+}
+
+/** 服务器没有给出总大小：不显示进度条，只显示已下载的大小。 */
+export const InstallingUnknownSize: Story = {
+  args: {
+    state: { kind: 'installing', version: '0.2.0', downloaded: 5_300_000, total: null, direct: false, installing: false },
+  },
+}
+
+/** 经中转站下载失败，改为直接从 GitHub 下载（进度从头开始）。 */
+export const InstallingDirect: Story = {
+  args: {
+    state: { kind: 'installing', version: '0.2.0', downloaded: 2_100_000, total: 28_835_840, direct: true, installing: false },
+  },
+}
+
+/** 下载完成，正在安装：进度条满，不显示大小。 */
+export const InstallingPhase: Story = {
+  args: {
+    state: { kind: 'installing', version: '0.2.0', downloaded: 28_835_840, total: 28_835_840, direct: false, installing: true },
+  },
+}
 
 export const Installed: Story = { args: { state: { kind: 'installed', version: '0.2.0' } } }
 

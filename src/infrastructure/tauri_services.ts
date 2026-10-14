@@ -1,8 +1,8 @@
 import { setTheme } from '@tauri-apps/api/app'
-import { convertFileSrc, invoke } from '@tauri-apps/api/core'
+import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ask, open, save } from '@tauri-apps/plugin-dialog'
-import type { AppServices, DesktopShell, UpdateCheckResult } from '../application/desktop_shell.ts'
+import type { AppServices, DesktopShell, InstallEvent, UpdateCheckResult } from '../application/desktop_shell.ts'
 import type { ExportFormat } from '../application/document_output.ts'
 import { createTauriProjectStorage } from './tauri_project_storage.ts'
 import { createTauriDocumentOutput } from './tauri_document_output.ts'
@@ -152,9 +152,11 @@ function createTauriShell(appState: Awaited<ReturnType<typeof loadAppState>>): D
       }
     },
 
-    async installUpdate() {
+    async installUpdate(onEvent) {
+      const channel = new Channel<InstallEvent>()
+      channel.onmessage = onEvent
       try {
-        await invoke('update_install')
+        await invoke('update_install', { onEvent: channel })
       } catch (error) {
         throw new Error(errorMessage(error))
       }

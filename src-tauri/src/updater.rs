@@ -13,9 +13,10 @@
 //! 检查到的更新保存在应用状态中，安装时下载、校验签名并替换应用；重新启动由前端在保存文档后请求。
 
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -27,6 +28,8 @@ const MIRROR: Option<&str> = option_env!("WRITER_UPDATE_MIRROR");
 const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 /// 经中转站下载安装包最多等待的时间；超时后直接从 GitHub 下载。直接下载不限时。
 const MIRROR_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// 下载进度最多每隔这么久通知一次前端（每个数据块都通知会占满 IPC）。
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Default)]
 pub struct PendingUpdate(Mutex<Option<Update>>);
@@ -39,6 +42,18 @@ pub enum UpdateCheck {
     NotConfigured,
     UpToDate { current: String },
     Available { current: String, version: String, notes: Option<String> },
+}
+
+/// 下载安装过程中发给前端的进度。
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum InstallEvent {
+    /// 开始从一个地址下载（从头开始）；mirror 表示经中转站，否则直接从原地址。
+    Download { mirror: bool },
+    /// 已下载的字节数；total 是服务器给出的总大小（没有给出时为 None）。
+    Progress { downloaded: u64, total: Option<u64> },
+    /// 下载完成并通过签名校验，正在安装。
+    Installing,
 }
 
 /// 检查失败的原因（网络、服务器返回的内容等），只用于界面上说明。
@@ -127,9 +142,12 @@ pub async fn update_check(app: AppHandle, pending: State<'_, PendingUpdate>) -> 
     Ok(result)
 }
 
-/// 下载并安装最近一次检查到的更新（先经中转站，校验签名）；完成后需要重新启动才生效。
+/// 下载并安装最近一次检查到的更新（先经中转站，校验签名），经 on_event 通知进度；完成后需要重新启动才生效。
 #[tauri::command]
-pub async fn update_install(pending: State<'_, PendingUpdate>) -> Result<(), UpdateError> {
+pub async fn update_install(
+    pending: State<'_, PendingUpdate>,
+    on_event: Channel<InstallEvent>,
+) -> Result<(), UpdateError> {
     let update = pending
         .0
         .lock()
@@ -143,8 +161,21 @@ pub async fn update_install(pending: State<'_, PendingUpdate>) -> Result<(), Upd
         let mut attempt = update.clone();
         attempt.download_url = url.parse()?;
         attempt.timeout = (index != direct).then_some(MIRROR_DOWNLOAD_TIMEOUT);
-        match attempt.download(|_, _| {}, || {}).await {
+        // 通知失败只说明前端已经不在（窗口关闭），不影响下载安装。
+        let _ = on_event.send(InstallEvent::Download { mirror: index != direct });
+        let mut downloaded = 0u64;
+        let mut last_sent: Option<Instant> = None;
+        let on_chunk = |chunk: usize, total: Option<u64>| {
+            downloaded += chunk as u64;
+            if last_sent.is_some_and(|sent| sent.elapsed() < PROGRESS_INTERVAL) && Some(downloaded) != total {
+                return;
+            }
+            last_sent = Some(Instant::now());
+            let _ = on_event.send(InstallEvent::Progress { downloaded, total });
+        };
+        match attempt.download(on_chunk, || {}).await {
             Ok(bytes) => {
+                let _ = on_event.send(InstallEvent::Installing);
                 update.install(bytes)?;
                 return Ok(());
             }
@@ -179,6 +210,19 @@ mod tests {
             serde_json::to_value(UpdateCheck::NotConfigured).unwrap(),
             serde_json::json!({ "kind": "not-configured" })
         );
+    }
+
+    #[test]
+    fn install_events_serialize_with_kind() {
+        assert_eq!(
+            serde_json::to_value(InstallEvent::Download { mirror: true }).unwrap(),
+            serde_json::json!({ "kind": "download", "mirror": true })
+        );
+        assert_eq!(
+            serde_json::to_value(InstallEvent::Progress { downloaded: 10, total: None }).unwrap(),
+            serde_json::json!({ "kind": "progress", "downloaded": 10, "total": null })
+        );
+        assert_eq!(serde_json::to_value(InstallEvent::Installing).unwrap(), serde_json::json!({ "kind": "installing" }));
     }
 
     #[test]
