@@ -10,6 +10,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/** 包含 Word 导入入口的欢迎页。 */
 export const Default: Story = { args: {} }
 export const Busy: Story = { args: { busy: true } }
 export const OpenFailed: Story = {

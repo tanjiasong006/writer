@@ -86,6 +86,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'new-project': []
+  'import-word': []
   'open-project': []
   'dismiss-notice': []
   'set-appearance': [appearance: Appearance]
@@ -756,6 +757,9 @@ async function runMenuCommand(command: MenuCommand): Promise<void> {
       switch (command.action) {
         case 'new':
           emit('new-project')
+          return
+        case 'import-word':
+          emit('import-word')
           return
         case 'open':
           emit('open-project')

@@ -22,6 +22,15 @@ pub fn acquire(root: &Path) -> Result<ProjectLock> {
     if !paths.manifest.exists() && !paths.journal.exists() {
         return Err(StorageError::NotAProject);
     }
+    acquire_in(&paths)
+}
+
+/// Only for an exclusively created new project directory, before its manifest is published.
+pub(crate) fn acquire_new(root: &Path) -> Result<ProjectLock> {
+    acquire_in(&Paths::new(root))
+}
+
+fn acquire_in(paths: &Paths) -> Result<ProjectLock> {
     std::fs::create_dir_all(&paths.internal).map_err(io_error("create-dir", &paths.internal))?;
     let path = paths.internal.join("lock");
     let file = OpenOptions::new()
@@ -54,6 +63,16 @@ mod tests {
         assert!(matches!(acquire(&root), Err(StorageError::ProjectLocked)));
         drop(first);
         assert!(acquire(&root).is_ok());
+    }
+
+    #[test]
+    fn new_project_is_locked_before_manifest_is_published() {
+        let dir = TempDir::new().unwrap();
+        let lock = acquire_new(dir.path()).unwrap();
+        std::fs::write(dir.path().join("writer.json"), "{}").unwrap();
+        assert!(matches!(acquire(dir.path()), Err(StorageError::ProjectLocked)));
+        drop(lock);
+        assert!(acquire(dir.path()).is_ok());
     }
 
     #[test]

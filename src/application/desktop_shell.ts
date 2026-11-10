@@ -1,4 +1,5 @@
 import type { ProjectStorage } from './project_storage.ts'
+import type { DocumentImporter } from './document_import.ts'
 import type { DocumentOutput, ExportFormat } from './document_output.ts'
 
 /**
@@ -123,6 +124,7 @@ export interface DesktopShell {
 }
 
 export interface AppServices {
+  readonly importer: DocumentImporter
   readonly storage: ProjectStorage
   readonly shell: DesktopShell
   readonly output: DocumentOutput

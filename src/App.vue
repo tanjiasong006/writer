@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   createProject,
   openProject,
@@ -8,6 +8,11 @@ import {
 } from './application/project_lifecycle.ts'
 import type { ProjectSession } from './application/project_session.ts'
 import type { StorageFailure } from './application/project_storage.ts'
+import { WORD_IMPORT } from './ui/app_shell/word_import_port.ts'
+import WordImportDialog from './ui/app_shell/WordImportDialog.vue'
+import WarningDialog from './ui/app_shell/WarningDialog.vue'
+import { describeImportWarnings } from './ui/app_shell/word_import_warnings.ts'
+import type { ImportWarningDetail } from './application/document_import.ts'
 import WelcomeView from './ui/app_shell/WelcomeView.vue'
 import Workspace from './ui/app_shell/Workspace.vue'
 import { messageForStorageFailure } from './ui/app_shell/storage_messages.ts'
@@ -32,6 +37,14 @@ import './ui/base.css'
  * 保存失败时由用户决定是否丢弃，绝不静默丢失修改。
  */
 const { storage, shell } = useServices()
+const wordImport = inject(WORD_IMPORT, null)
+const importOpen = ref(false)
+const importFile = ref('')
+const importName = ref('')
+const importDirectory = ref('')
+const importError = ref('')
+const importBusy = ref(false)
+const importWarnings = ref<readonly string[]>([])
 const appearance = useAppearance(shell)
 
 type View =
@@ -94,10 +107,11 @@ function runWelcomeMenuItem(id: string): void {
     if (command.action === 'show-logs') void shell.revealLogFolder?.()
     else void updates.check()
   }
-  if (busy.value) return
+  if (busy.value || importOpen.value) return
   if (command?.group === 'recent') void openRecent(command.index)
   else if (id === 'file:new') void newProject()
   else if (id === 'file:open') void openExisting()
+  else if (id === 'file:import-word') showWordImport()
 }
 
 watch(
@@ -137,7 +151,7 @@ onBeforeUnmount(() => {
 onMounted(async () => {
   // 窗口标题是应用名（开发版为 "Writer Dev"，便于与正式版区分）；打开文档后由工作区改为文档名。
   shell.setWindowTitle(shell.appName)
-  stopCloseGuard = shell.onCloseRequested(async () => !updates.holdWhileInstalling() && (await leaveCurrent()))
+  stopCloseGuard = shell.onCloseRequested(async () => !updates.holdWhileInstalling() && !importBusy.value && (await leaveCurrent()))
   const last = shell.startupProjectPath() ?? shell.getLastProjectPath()
   if (last === null) {
     view.value = { kind: 'welcome' }
@@ -149,7 +163,7 @@ onMounted(async () => {
 onBeforeUnmount(() => stopCloseGuard?.())
 
 /** 检查更新：重新启动前与关闭窗口相同，先保存并释放当前项目。 */
-const updates = useUpdates(shell, () => leaveCurrent())
+const updates = useUpdates(shell, () => importBusy.value ? Promise.resolve(false) : leaveCurrent())
 /**
  * 欢迎页没有顶栏：在后台下载安装更新时以浮条显示状态（关闭后不再显示，直到状态改变，如下载完成）。
  */
@@ -230,7 +244,81 @@ async function switchTo(load: () => Promise<OpenSessionResult>): Promise<void> {
   if ((await enter(() => openProject(storage, previous))) === null) notice.value = failure
 }
 
+function showWordImport(): void {
+  if (importOpen.value || busy.value) return
+  importFile.value = ''
+  importName.value = ''
+  importDirectory.value = ''
+  importError.value = wordImport ? '' : '此版本暂不支持 Word 导入。'
+  importOpen.value = true
+}
+
+async function chooseImportFile(): Promise<void> {
+  if (!wordImport || importBusy.value) return
+  importBusy.value = true
+  try {
+    const path = await wordImport.pickFile()
+    if (path !== null) {
+      importFile.value = path
+      importName.value = titleFromPath(path).replace(/\.docx$/i, '')
+    }
+  } catch { importError.value = '选择 Word 文件失败，请重试。' }
+  finally { importBusy.value = false }
+}
+
+async function chooseImportDirectory(): Promise<void> {
+  if (!wordImport || importBusy.value) return
+  importBusy.value = true
+  try {
+    const path = await wordImport.pickDirectory()
+    if (path !== null) importDirectory.value = path
+  } catch { importError.value = '选择目标目录失败，请重试。' }
+  finally { importBusy.value = false }
+}
+
+async function submitWordImport(request: { filePath: string; projectName: string; targetDirectory: string }): Promise<void> {
+  if (!wordImport || importBusy.value || leaving) return
+  importBusy.value = true
+  importError.value = ''
+  const previous = view.value.kind === 'open' ? view.value.session.path : null
+  let importStarted = false
+  try {
+    if (!(await leaveCurrent())) return
+    let warnings: readonly string[] = []
+    let warningDetails: readonly ImportWarningDetail[] = []
+    const failure = await enter(async () => {
+      importStarted = true
+      const result = await wordImport.importProject(request)
+      // 旧版测试替身可能没有 warnings；实际导入端口始终提供它。
+      if (result.ok) { warnings = result.warnings ?? []; warningDetails = result.warningDetails ?? [] }
+      return result
+    })
+    if (failure !== null) {
+      importError.value = await importFailureWithRecovery(`${failure} 目标目录中可能残留不完整的项目，请检查后再重试。`, previous)
+      return
+    }
+    importOpen.value = false
+    importWarnings.value = describeImportWarnings(warnings, warningDetails)
+  } catch {
+    const failure = importStarted
+      ? '导入没有完成。目标目录中可能残留不完整的项目，请检查后再重试。'
+      : '导入没有完成，请重试。'
+    importError.value = await importFailureWithRecovery(failure, previous)
+  } finally { importBusy.value = false }
+}
+
+async function importFailureWithRecovery(failure: string, previous: string | null): Promise<string> {
+  if (previous === null || view.value.kind === 'open') return failure
+  try {
+    const recoveryFailure = await enter(() => openProject(storage, previous))
+    return recoveryFailure === null ? failure : `${failure} 原项目未能重新打开（${previous}）：${recoveryFailure}`
+  } catch {
+    return `${failure} 原项目未能重新打开（${previous}），请手动打开。`
+  }
+}
+
 async function newProject(): Promise<void> {
+  if (importOpen.value) return
   const path = await shell.pickNewProjectPath()
   if (path === null) return
   await switchTo(() => createProject(storage, path, titleFromPath(path)))
@@ -238,6 +326,7 @@ async function newProject(): Promise<void> {
 
 /** 打开最近的第 index 个项目（null 清除列表）；打不开的从列表中去掉。 */
 async function openRecent(index: number | null): Promise<void> {
+  if (importOpen.value) return
   if (index === null) {
     recent.value = clearRecentProjects(shell)
     return
@@ -247,6 +336,7 @@ async function openRecent(index: number | null): Promise<void> {
 }
 
 async function openRecentPath(path: string): Promise<void> {
+  if (importOpen.value) return
   const current = view.value
   if (current.kind === 'open' && current.session.path === path) return
   await switchTo(() => openProject(storage, path))
@@ -255,6 +345,7 @@ async function openRecentPath(path: string): Promise<void> {
 }
 
 async function openExisting(): Promise<void> {
+  if (importOpen.value) return
   const path = await shell.pickProjectPath()
   if (path === null) return
   await switchTo(() => openProject(storage, path))
@@ -281,6 +372,7 @@ function titleFromPath(path: string): string {
       :update-status="updates.status.value"
       :recent="recent"
       @open-recent="openRecent"
+      @import-word="showWordImport"
       @new-project="newProject"
       @open-project="openExisting"
       @check-update="updates.check"
@@ -292,6 +384,7 @@ function titleFromPath(path: string): string {
         :busy="busy"
         :recent="recent"
         @new-project="newProject"
+        @import-word="showWordImport"
         @open-project="openExisting"
         @open-recent="openRecentPath"
       />
@@ -311,6 +404,26 @@ function titleFromPath(path: string): string {
         </Toast>
       </div>
     </template>
+    <WordImportDialog
+      v-if="importOpen"
+      :file-path="importFile"
+      v-model:project-name="importName"
+      :target-directory="importDirectory"
+      :busy="importBusy"
+      :error="importError"
+      @choose-file="chooseImportFile"
+      @choose-directory="chooseImportDirectory"
+      @submit="submitWordImport"
+      @cancel="importOpen = false"
+    />
+    <WarningDialog
+      v-if="importWarnings.length > 0"
+      title="Word 导入已完成，存在以下警告"
+      description="请对照原文检查以下内容。"
+      :warnings="importWarnings"
+      button-label="知道了"
+      @close="importWarnings = []"
+    />
     <UpdateDialog
       v-if="updates.dialog.value"
       :state="updates.dialog.value"

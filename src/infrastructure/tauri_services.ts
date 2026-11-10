@@ -5,6 +5,7 @@ import { ask, open, save } from '@tauri-apps/plugin-dialog'
 import type { AppServices, DesktopShell, InstallEvent, UpdateCheckResult } from '../application/desktop_shell.ts'
 import type { ExportFormat } from '../application/document_output.ts'
 import { createTauriProjectStorage } from './tauri_project_storage.ts'
+import { createTauriDocumentImporter } from './tauri_document_import.ts'
 import { createTauriDocumentOutput } from './tauri_document_output.ts'
 import { createTauriMenus } from './tauri_menu.ts'
 import { loadAppState } from './tauri_app_state.ts'
@@ -13,6 +14,7 @@ import { loadAppState } from './tauri_app_state.ts'
 export async function createTauriServices(): Promise<AppServices> {
   return {
     storage: createTauriProjectStorage(),
+    importer: createTauriDocumentImporter(),
     shell: createTauriShell(await loadAppState()),
     output: createTauriDocumentOutput(),
   }

@@ -50,6 +50,20 @@ describe('Markdown → 文档', () => {
     )
   })
 
+  test('导入 DOCX 列表的粗体中文标签与后续文字保持边界', () => {
+    // 与 Rust 合成 DOCX 列表项生成的 Markdown 完全相同。
+    const source = '- **&#21152;&#26009;&#39034;&#24207;&#65306;**&#20808;&#21152;&#20837;&#27700;\n'
+    const parsed = parseMarkdown(source)
+    expect(parsed.toJSON()).toEqual(
+      doc.create(null, [
+        bullet_list.create({ tight: true }, [
+          list_item.create(null, p.create(null, [text('加料顺序：', 'strong'), text('先加入水')])),
+        ]),
+      ]).toJSON(),
+    )
+    expect(parsed.textContent).toBe('加料顺序：先加入水')
+  })
+
   test('空行分隔段落；多个空行与单个空行相同', () => {
     expect(parseMarkdown('一\n\n\n\n二').toJSON()).toEqual(
       doc.create(null, [p.create(null, text('一')), p.create(null, text('二'))]).toJSON(),
@@ -395,6 +409,13 @@ describe('文档 → Markdown', () => {
     )
     // 标记内的首尾空格移到标记外（CommonMark 不允许 ** 内侧紧挨空白）。
     expect(write(doc.create(null, p.create(null, [text('a'), text(' b ', 'strong'), text('c')])))).toBe('a **b** c\n')
+  })
+
+  test('Word 导入的字符引用保留中文标点及粗体', () => {
+    const source = '&#21069;**&#8220;&#20869;&#23481;&#8221;**&#21518;'
+    expect(parseMarkdown(source).toJSON()).toEqual(
+      doc.create(null, p.create(null, [text('前'), text('“内容”', 'strong'), text('后')])).toJSON(),
+    )
   })
 
   test('标记边界紧挨中文标点时，把标点移到标记外，保证格式不会变成字面的星号', () => {

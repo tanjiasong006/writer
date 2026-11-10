@@ -49,6 +49,29 @@ pub async fn project_create(
     .await
 }
 
+/// 从 Word 创建并打开新项目。目标目录必须尚不存在。
+#[tauri::command]
+pub async fn project_import_docx(
+    app: tauri::AppHandle,
+    source: PathBuf,
+    path: PathBuf,
+    title: String,
+) -> Result<crate::import_project::ImportResult, crate::import_project::ImportError> {
+    run_storage_import(move || {
+        let (result, lock) = crate::import_project::import(&source, &path, &title)?;
+        allow_project_files(&app, &path);
+        hold_lock(path, Some(lock));
+        Ok(result)
+    }).await
+}
+
+async fn run_storage_import<T: Send + 'static>(job: impl FnOnce() -> Result<T, crate::import_project::ImportError> + Send + 'static) -> Result<T, crate::import_project::ImportError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = STORAGE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        job()
+    }).await.unwrap_or_else(|error| Err(StorageError::Io { operation: "task".into(), path: String::new(), kind: crate::io_kind::IoKind::Other, message: error.to_string() }.into()))
+}
+
 #[tauri::command]
 pub async fn project_open(
     app: tauri::AppHandle,

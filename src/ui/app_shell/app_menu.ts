@@ -46,7 +46,7 @@ export interface AppMenuContext {
   readonly appearance: Appearance
 }
 
-const FILE_ACTIONS = ['new', 'open', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'export-markdown', 'export-html', 'export-epub', 'pdf-layout', 'history'] as const
+const FILE_ACTIONS = ['new', 'open', 'import-word', 'save', 'rename', 'info', 'reveal', 'export-docx', 'export-pdf', 'export-markdown', 'export-html', 'export-epub', 'pdf-layout', 'history'] as const
 const EDIT_ACTIONS = ['undo', 'redo', 'context-menu', 'list-menu', 'find', 'find-replace'] as const
 const CHAPTER_ACTIONS = ['new', 'new-child', 'rename', 'delete', 'undo-delete', 'note', 'status-none', 'status-draft', 'status-revise', 'status-done'] as const
 const INSERT_ACTIONS = ['update-chapter-refs', 'references'] as const
@@ -216,6 +216,7 @@ export function welcomeMenus(appearance: Appearance, recent: readonly string[] =
       items: [
         { id: 'file:new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
         { id: 'file:open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
+        { id: 'file:import-word', label: '从 Word 导入…' },
         recentMenu(recent),
         { separator: true },
         { role: 'close-window' },
@@ -259,6 +260,7 @@ export function workspaceMenus(context: AppMenuContext): WorkspaceMenu[] {
       items: [
         { id: 'file:new', label: '新建文档…', shortcut: SHORTCUTS.newDocument },
         { id: 'file:open', label: '打开文档…', shortcut: SHORTCUTS.openDocument },
+        { id: 'file:import-word', label: '从 Word 导入…' },
         recentMenu(context.recent ?? []),
         { separator: true },
         { role: 'close-window' },

@@ -438,9 +438,9 @@
 
 .document-body th {
   border-bottom: 1px solid var(--color-doc-table-rule);
-  /* 表头用标题的无衬线字体：它有真正的粗体字形，宋体类中文在表头中合成的粗体几乎看不出来。 */
+  /* 表头不自动加粗；用户设置的粗体仍由行内格式表达。 */
   font-family: var(--doc-h3-font);
-  font-weight: var(--weight-semibold);
+  font-weight: normal;
   text-align: left;
 }
 

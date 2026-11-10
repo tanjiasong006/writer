@@ -24,6 +24,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 tauri-plugin-dialog = "2"
 pulldown-cmark = { version = "0.13", default-features = false }
 docx-rs = "0.4"
+roxmltree = "0.21"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 typst = "0.15"
 typst-pdf = "0.15"

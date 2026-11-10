@@ -14,6 +14,7 @@ defineProps<{
 
 const emit = defineEmits<{
   'new-project': []
+  'import-word': []
   'open-project': []
   'open-recent': [path: string]
 }>()
@@ -36,6 +37,9 @@ import { SHORTCUTS, formatShortcut } from '../common/shortcuts.ts'
         <button type="button" class="welcome__button" tabindex="0" :disabled="busy" @click="emit('open-project')">
           <span>打开文档</span>
           <kbd class="welcome__shortcut">{{ formatShortcut(SHORTCUTS.openDocument) }}</kbd>
+        </button>
+        <button type="button" class="welcome__button" tabindex="0" :disabled="busy" @click="emit('import-word')">
+          <span>从 Word 导入…</span>
         </button>
       </div>
       <p class="welcome__hint">每个文档保存为一个文件夹，打开时选择该文件夹即可。</p>

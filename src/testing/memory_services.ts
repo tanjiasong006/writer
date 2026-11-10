@@ -181,6 +181,7 @@ export function createMemoryServices(): AppServices & {
 } {
   return {
     storage: new MemoryProjectStorage(),
+    importer: { importDocx: async () => ({ ok: false, error: { code: 'unknown', message: 'DOCX import unavailable' } }) },
     shell: new MemoryShell(),
     output: new MemoryDocumentOutput(),
   }

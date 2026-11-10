@@ -7388,6 +7388,7 @@ dependencies = [
  "percent-encoding",
  "png 0.18.1",
  "pulldown-cmark",
+ "roxmltree 0.21.1",
  "serde",
  "serde_json",
  "tauri",

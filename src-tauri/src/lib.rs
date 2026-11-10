@@ -5,6 +5,8 @@ mod app_log;
 mod commands;
 mod export;
 mod io_kind;
+pub mod import_docx;
+mod import_project;
 mod render;
 mod storage;
 mod updater;
@@ -30,6 +32,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::project_create,
+            commands::project_import_docx,
             commands::project_open,
             commands::project_save,
             commands::project_close,
