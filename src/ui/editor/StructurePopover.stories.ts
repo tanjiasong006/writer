@@ -84,6 +84,10 @@ export const UnknownName: Story = {
 /** 旋转、翻转过的分子：预览右上角是方向按钮。 */
 export const Oriented: Story = { args: { smiles: 'OCC1=CC=CC=C1', rotate: [90], flip: [true] } }
 
+export const FusedRings: Story = { args: { smiles: 'CN1CCC23c4c5ccc(O)c4OC2C(O)C=CC3C1C5' } }
+
+export const StereoAnnotation: Story = { args: { smiles: 'C[C@H](O)CC', flip: [true] } }
+
 /** 反应式中分别调整每个分子的方向：点击预览中的分子选中它（这里乙酸已旋转、翻转）。 */
 export const ReactionOriented: Story = {
   args: { smiles: 'CCO.CC(=O)O>>CCOC(C)=O.O', arrow: '<=>', above: '浓硫酸', rotate: [0, 90], flip: [false, true] },

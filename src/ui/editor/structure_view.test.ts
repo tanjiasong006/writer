@@ -66,14 +66,16 @@ test('分子的方向：顺时针旋转；左右翻转时原子符号仍是正�
   expect(turned.width).toBeCloseTo(chain.height)
   expect(turned.height).toBeCloseTo(chain.width)
 
-  // 正丁醇：羟基在右端时写作“HO”向左对齐的末端，翻转后在左端写作“OH”。
-  const label = (smiles: string, flip: boolean) => draw(smiles, 0, flip).svg.querySelector('text.element')?.textContent
-  expect(label('CCCCO', false)).toBe('HO')
-  expect(label('CCCCO', true)).toBe('OH')
-
-  const wedges = (flip: boolean) => draw('C[C@H](O)CC', 0, flip).svg.querySelectorAll('polygon').length
-  expect(wedges(false)).toBe(1)
-  expect(wedges(true)).toBe(0)
+  const chiral = draw('C[C@H](O)CC', 0).svg
+  const flipped = draw('C[C@H](O)CC', 0, true).svg
+  // RDKit 用一组短线表示虚楔，实楔只有一个填充路径。立体标注与原子标签均直接绘为路径。
+  expect(chiral.querySelectorAll('path.bond-0')).toHaveLength(1)
+  expect(flipped.querySelectorAll('path.bond-0').length).toBeGreaterThan(1)
+  for (const svg of [chiral, flipped]) {
+    expect(svg.querySelector('path.CIP_Code')).not.toBeNull()
+    expect(svg.querySelector('path.atom-2')).not.toBeNull()
+    expect(svg.querySelector('rect')).toBeNull()
+  }
 
 })
 
@@ -94,4 +96,15 @@ test('反应式中每个分子分别有方向（先反应物、后产物）；�
   expect(structureMolecules('CCCCCC.CCCC>OS(=O)(=O)O>CCCCCCCCCC')).toEqual(['CCCCCC', 'CCCC', 'CCCCCCCCCC'])
   expect(structureMolecules(' [Na+].[Cl-] ')).toEqual(['[Na+].[Cl-]'])
   expect(structureMolecules('C>C')).toEqual([])
+})
+
+test('多环分子的单色预览使用独立画布，正文按键长排版', () => {
+  const smiles = 'CN1CCC23c4c5ccc(O)c4OC2C(O)C=CC3C1C5'
+  const preview = drawStructure(smiles, 'text', NO_CONDITIONS, true)
+  const document = drawStructure(smiles)
+  if ('error' in preview || 'error' in document) throw new Error('无法绘制测试分子')
+  expect([preview.width, preview.height]).toEqual([320, 235])
+  expect(document.width).not.toEqual(preview.width)
+  expect(preview.svg.outerHTML).toContain('currentColor')
+  expect(preview.svg.outerHTML).not.toMatch(/#[0-9a-f]{6}/i)
 })

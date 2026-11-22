@@ -1,11 +1,12 @@
 import SmilesDrawer from 'smiles-drawer'
+import { moleculeSvg, rdkit } from './structure_rdkit.ts'
 import type { Node } from 'prosemirror-model'
 import type { NodeView } from 'prosemirror-view'
 import { NO_CONDITIONS, normalizeArrow, normalizeRotate, structureKey, structureSources, type StructureConditions, type StructureSource } from './markdown.ts'
 import { moleculeBySmiles } from './structure_library.ts'
 
 /**
- * 化学结构式的显示（docs/decisions.md 第 22 节）：用 smiles-drawer 把 SMILES 画成骨架式，文档中保存的是 SMILES 原文。
+ * 化学结构式的显示（docs/decisions.md 第 22 节）：用 RDKit.js 把 SMILES 画成骨架式，文档中保存的是 SMILES 原文。
  * 反应式（`反应物>试剂>产物`）中每个分子分别画出，以“＋”相连，中间是箭头（→ ⇌ ＝），试剂与条件写在箭头上下。
  * 分子可以旋转、左右翻转（代码块信息中的 rotate、flip，每个分子一项；反应式中先反应物、后产物）。
  * 无法解析的 SMILES 以红色原文显示（与公式相同），悬停提示原因。编辑器、全文阅读与导出的图片共用同一套画法。
@@ -14,31 +15,8 @@ import { moleculeBySmiles } from './structure_library.ts'
 /** 显示尺寸：SVG 的一个单位对应的 CSS 像素（键长 30 个单位）。 */
 export const STRUCTURE_SCALE = 0.9
 
-const MONO = (color: string) =>
-  Object.fromEntries(['FOREGROUND', 'C', 'O', 'N', 'F', 'CL', 'BR', 'I', 'P', 'S', 'B', 'SI', 'H'].map((key) => [key, color]))
-
-/** 单色：编辑器中随文字颜色（深色外观中是浅色），导出的图片是黑色。 */
-const THEMES = {
-  text: { ...MONO('currentColor'), BACKGROUND: 'transparent' },
-  print: { ...MONO('#000000'), BACKGROUND: '#ffffff' },
-}
-
-type Theme = keyof typeof THEMES
-
+type Theme = 'text' | 'print'
 const FONT_FAMILY = 'Arial, Helvetica, sans-serif'
-
-const OPTIONS = {
-  // 大于 0 时 viewBox 紧贴内容（为 0 时补成正方形）；尺寸另行设置。
-  scale: 1,
-  // 不把末端基团缩写成文字（如乙酸会画成“COOHCH₃”）。
-  compactDrawing: false,
-  bondThickness: 1.2,
-  fontSizeLarge: 13,
-  fontSizeSmall: 7,
-  padding: 4,
-  fontFamily: FONT_FAMILY,
-  themes: THEMES,
-}
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
@@ -69,9 +47,14 @@ export function isValidSmiles(smiles: string): boolean {
   const text = smiles.trim()
   if (text === '') return false
   const reaction = reactionParts(text)
-  if (reaction === null) return 'tree' in parse(text)
-  if ('error' in reaction) return false
-  return [...reaction.reactants, ...reaction.reagents, ...reaction.products].every((molecule) => 'tree' in parse(molecule))
+  if (reaction && 'error' in reaction) return false
+  const molecules = reaction ? [...reaction.reactants, ...reaction.reagents, ...reaction.products] : [text]
+  return molecules.every((value) => {
+    const mol = rdkit?.get_mol(value)
+    if (!mol) return false
+    mol.delete()
+    return true
+  })
 }
 
 /** 一个分子的 SMILES 无法画出的原因：说明与出错的位置（字符下标，end 不含；整体出错时为 null）。 */
@@ -87,9 +70,11 @@ export interface SmilesProblem {
 export function smilesProblem(smiles: string): SmilesProblem | null {
   const unpaired = unpairedBracket(smiles)
   if (unpaired) return unpaired
+  if (!rdkit) return { message: '化学结构式绘图库加载失败', at: null }
+  if (!('error' in drawMolecule(smiles, 'text'))) return null
   let failure: unknown = null
   SmilesDrawer.parse(smiles, () => undefined, (error) => (failure = error ?? 'error'))
-  if (failure === null) return 'error' in drawMolecule(smiles, 'text') ? { message: '无法画出这个结构', at: null } : null
+  if (failure === null) return { message: '无法画出这个结构', at: null }
   const { found, location } = failure as { found?: string | null; location?: unknown }
   const offset = typeof location === 'number' ? location : (location as { start?: { offset?: number } } | undefined)?.start?.offset
   if (typeof offset !== 'number') return { message: '无法识别的写法', at: null }
@@ -156,55 +141,17 @@ export function structureMolecules(smiles: string): readonly string[] {
   return 'error' in reaction ? [] : [...reaction.reactants, ...reaction.products]
 }
 
-interface Point {
-  x: number
-  y: number
-}
-
-/** smiles-drawer 内部的布局（2.x）：画出之前的原子坐标、环的中心与楔形键。 */
-interface Layout {
-  rotateDrawing(): void
-  graph: { vertices: Array<{ position: Point }>; edges: Array<{ wedge: string }> }
-  rings: Array<{ center: Point }>
-}
-
-/**
- * 在 smiles-drawer 摆正分子（rotateDrawing，按 30° 取整使最长的方向水平）之后转到指定的方向：转的是原子坐标，
- * 原子符号仍是正的。翻转时楔形键的实、虚互换，画出的仍是同一个立体构型。
- */
-function orient(layout: Layout, orientation: Orientation): void {
-  const rotateDrawing = layout.rotateDrawing.bind(layout)
-  layout.rotateDrawing = () => {
-    rotateDrawing()
-    const angle = (normalizeRotate(orientation.rotate) * Math.PI) / 180
-    const [cos, sin] = [Math.cos(angle), Math.sin(angle)]
-    // SVG 的 y 轴向下：这个旋转矩阵是顺时针。
-    const turn = (point: Point) => {
-      const x = orientation.flip ? -point.x : point.x
-      const y = point.y
-      point.x = x * cos - y * sin
-      point.y = x * sin + y * cos
-    }
-    for (const vertex of layout.graph.vertices) turn(vertex.position)
-    for (const ring of layout.rings) turn(ring.center)
-    if (orientation.flip) {
-      for (const edge of layout.graph.edges) edge.wedge = edge.wedge === 'up' ? 'down' : edge.wedge === 'down' ? 'up' : edge.wedge
-    }
-  }
-}
-
 /** 画出一个分子（可以是 . 隔开的几个片段）；库中的无机小分子写成化学式。 */
-function drawMolecule(smiles: string, theme: Theme, orientation: Orientation = UPRIGHT): Drawn {
+function drawMolecule(smiles: string, theme: Theme, orientation: Orientation = UPRIGHT, preview = false): Drawn {
   const formula = moleculeBySmiles(smiles)?.formula
   if (formula) return drawFormula(subscriptDigits(formula), theme)
-  const parsed = parse(smiles)
-  if ('error' in parsed) return parsed
   try {
-    const svg = document.createElementNS(SVG_NS, 'svg')
-    svg.setAttribute('xmlns', SVG_NS)
-    const drawer = new SmilesDrawer.SvgDrawer(OPTIONS)
-    if (orientation.rotate !== 0 || orientation.flip) orient(drawer.preprocessor as Layout, orientation)
-    drawer.draw(parsed.tree, svg, theme)
+    const markup = moleculeSvg(smiles, normalizeRotate(orientation.rotate), orientation.flip, preview)
+    // RDKit 生成的原子标签也是 SVG 路径。正文所有路径沿用文字颜色，导出使用黑色。
+    const color = theme === 'text' ? 'currentColor' : '#000000'
+    const template = document.createElement('template')
+    template.innerHTML = markup.slice(markup.indexOf('<svg')).replace(/#[0-9a-f]{6}\b/gi, color)
+    const svg = template.content.firstElementChild as SVGSVGElement
     const [, , width, height] = (svg.getAttribute('viewBox') ?? '').split(' ').map(Number)
     if (!(width > 0 && height > 0)) return { error: 'empty' }
     svg.removeAttribute('style')
@@ -215,10 +162,10 @@ function drawMolecule(smiles: string, theme: Theme, orientation: Orientation = U
 }
 
 /** 画出 SMILES（分子或反应式）；无法解析或画出时返回错误说明。 */
-export function drawStructure(smiles: string, theme: Theme = 'text', conditions: StructureConditions = NO_CONDITIONS): Drawn {
+export function drawStructure(smiles: string, theme: Theme = 'text', conditions: StructureConditions = NO_CONDITIONS, preview = false): Drawn {
   const text = smiles.trim()
   const reaction = reactionParts(text)
-  if (reaction === null) return drawMolecule(text, theme, orientationAt(conditions, 0))
+  if (reaction === null) return drawMolecule(text, theme, orientationAt(conditions, 0), preview)
   if ('error' in reaction) return reaction
   return drawReaction(reaction, conditions, theme)
 }
@@ -243,12 +190,12 @@ function reagentLabel(smiles: string): string {
   if (molecule) return molecule.names[0]
   const parsed = parse(smiles)
   if ('error' in parsed) return smiles
-  return subscriptDigits(new SmilesDrawer.SvgDrawer(OPTIONS).preprocessor.getMolecularFormula(parsed.tree) as string)
+  return subscriptDigits(new SmilesDrawer.SvgDrawer({}).preprocessor.getMolecularFormula(parsed.tree) as string)
 }
 
-/** 写成文字的化学式，与原子符号同样大小（smiles-drawer 的字号以 pt 为单位）。 */
+/** 写成文字的化学式。 */
 function drawFormula(text: string, theme: Theme): StructureDrawing {
-  const size = (OPTIONS.fontSizeLarge * 4) / 3
+  const size = (13 * 4) / 3
   const width = textWidth(text, size) + 2 * PADDING
   const height = size * 1.4 + 2 * PADDING
   const svg = element('svg', { xmlns: SVG_NS, viewBox: `0 0 ${width} ${height}` }) as SVGSVGElement
@@ -340,7 +287,7 @@ function drawReaction(
 }
 
 /** 把结构式画进 dom（编辑器与全文阅读）。 */
-export function renderStructure(dom: HTMLElement, smiles: string, conditions: StructureConditions = NO_CONDITIONS): void {
+export function renderStructure(dom: HTMLElement, smiles: string, conditions: StructureConditions = NO_CONDITIONS, preview = false): void {
   dom.title = ''
   dom.classList.remove('is-invalid')
   dom.replaceChildren()
@@ -349,15 +296,16 @@ export function renderStructure(dom: HTMLElement, smiles: string, conditions: St
     dom.classList.add('is-invalid')
     return
   }
-  const drawing = drawStructure(smiles, 'text', conditions)
+  const drawing = drawStructure(smiles, 'text', conditions, preview)
   if ('error' in drawing) {
     dom.textContent = smiles
     dom.classList.add('is-invalid')
     dom.title = (smiles.includes('>') ? null : smilesProblem(smiles.trim())?.message) ?? drawing.error
     return
   }
-  drawing.svg.setAttribute('width', String(drawing.width * STRUCTURE_SCALE))
-  drawing.svg.setAttribute('height', String(drawing.height * STRUCTURE_SCALE))
+  const displayScale = preview && !smiles.includes('>') ? 1 : STRUCTURE_SCALE
+  drawing.svg.setAttribute('width', String(drawing.width * displayScale))
+  drawing.svg.setAttribute('height', String(drawing.height * displayScale))
   drawing.svg.setAttribute('role', 'img')
   drawing.svg.setAttribute('aria-label', smiles)
   dom.append(drawing.svg)
@@ -409,7 +357,7 @@ export interface StructureImage extends StructureSource {
 
 /**
  * 把结构式画成导出用的 PNG（docs/decisions.md 第 22 节：输出中是前端画好的图片）。
- * 在浏览器中把 SVG 栅格化：smiles-drawer 的 SVG 用 CSS 定位文字，导出端的 SVG 渲染不能正确显示。无法画出时为 null。
+ * 在浏览器中把 SVG 栅格化，供各导出格式共用。无法画出时为 null。
  */
 export async function structureImage(source: StructureSource): Promise<StructureImage | null> {
   const drawing = drawStructure(source.smiles, 'print', source)

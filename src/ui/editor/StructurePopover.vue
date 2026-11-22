@@ -60,7 +60,7 @@ const ARROWS = [
   { value: '=', label: '等号', glyph: '＝' },
 ] as const
 
-/** 旋转按钮每次转的度数（与 smiles-drawer 摆正分子时取整的角度相同）。 */
+/** 旋转按钮每次转的度数。 */
 const ROTATE_STEP = 30
 
 const initial: StructureValue = {
@@ -327,7 +327,7 @@ function showPreview(): void {
   }
   if (!isValidSmiles(smiles)) showProblem(element, smiles)
   else {
-    renderStructure(element, smiles, target.value)
+    renderStructure(element, smiles, target.value, true)
     if (mode.value === 'reaction') addTargets(element)
   }
 }
@@ -815,7 +815,7 @@ onMounted(async () => {
 .structure-popover__results {
   display: flex;
   flex-direction: column;
-  height: 188px;
+  height: 138px;
 }
 
 .structure-popover__list {
@@ -1017,7 +1017,7 @@ onMounted(async () => {
 }
 
 /* 预览：与公式浮层的预览相同的底色，结构式随正文颜色；占去内容区余下的高度，过大的结构式按比例缩小。 */
-/* 分子与反应式的内容区高度相同：分子的输入框、列表与 180px 的预览；反应式的字段较矮，预览更高。 */
+/* 分子与反应式的内容区高度相同：分子的输入框、列表与 约 230px 的预览；反应式的字段较矮，预览更高。 */
 .structure-popover__body {
   display: flex;
   flex-direction: column;
@@ -1040,10 +1040,10 @@ onMounted(async () => {
   flex: 1;
   box-sizing: border-box;
   min-height: 0;
-  padding: var(--space-4);
+  padding: var(--space-1);
   overflow: hidden;
   border-radius: var(--radius-m);
-  background: var(--color-fill-hover);
+  background: var(--color-bg-raised);
   color: var(--color-doc-text);
 }
 
