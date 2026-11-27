@@ -2,6 +2,7 @@ import initRDKit from '@rdkit/rdkit'
 import wasmUrl from '@rdkit/rdkit/RDKit_minimal.wasm?url'
 
 /** 浏览器从安装包中加载 WASM；Node 测试由 RDKit 从包目录读取。 */
+// RDKit 的 Embind 绑定在加载时用 Function 构造调用包装，正式构建的 CSP 必须允许 'unsafe-eval'（见 tauri.conf.json）。
 export const rdkit = await initRDKit(import.meta.env.MODE === 'test' || import.meta.env.SSR ? {} : { locateFile: () => wasmUrl })
   .catch((error: unknown) => {
     console.error('化学结构式绘图库加载失败', error)
